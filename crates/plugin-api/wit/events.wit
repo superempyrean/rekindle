@@ -1,0 +1,187 @@
+/// Client events. Plugins receive them through `event-handler.on-events`
+/// and choose which kinds with `host-events.subscribe`. Each kind needs the
+/// capability noted above its cases.
+///
+/// The host builds these records from the Flux actions the client's stores
+/// handle (MESSAGE_CREATE, CHANNEL_SELECT, PRESENCE_UPDATES, ...), after the
+/// stores have handled them. A query made while handling an event returns
+/// the updated state.
+///
+/// Fidelity rules (design doc §4.4):
+///   * `message-edited` fires only when content or the edit timestamp
+///     changed, not for embed unfurls, which arrive as partial updates.
+///   * Batched client actions (PRESENCE_UPDATES, VOICE_STATE_UPDATES,
+///     CHANNEL_UPDATES) arrive as one event per item, in one `on-events`
+///     batch.
+///   * Presence and typing are coalesced per user within a batch.
+///   * Local echoes of your own sends are not `message-created`; the
+///     server's copy is.
+///   * Events can't be cancelled or changed. To change an outgoing
+///     message, use `compose-handler`.
+interface events {
+    use types.{snowflake, user-ref, message-ref, member};
+    use records.{message, presence, voice-state, relationship-kind, channel, guild, role, read-state, my-voice};
+
+    enum event-kind {
+        // read-client
+        selection-changed, connection, window, read-state, guild, channel,
+        role, emoji, my-voice, my-presence, my-settings, composer, hook,
+        account,
+        // read-users
+        presence, typing, voice-state, speaking, member, relationship,
+        // read-messages
+        message, reaction, poll-vote, pins, raw,
+        // pointer
+        pointer,
+    }
+
+    record selection-change {
+        guild: option<snowflake>,
+        channel: option<snowflake>,
+        previous-channel: option<snowflake>,
+        /// Jumped to a specific message (link, search, reply).
+        message: option<snowflake>,
+    }
+
+    enum connection-state { connecting, connected, resumed, reconnecting, offline }
+
+    enum guild-left-reason { left, kicked-or-banned, deleted, unavailable }
+
+    record deleted-message {
+        channel: snowflake,
+        id: snowflake,
+        guild: option<snowflake>,
+        /// The client's copy, if it still had one when the delete arrived.
+        /// Local logging of your own received view is in scope; the
+        /// gateway itself carries no content.
+        cached: option<message>,
+    }
+
+    record reaction-change {
+        message: message-ref,
+        user: snowflake,
+        /// Unicode emoji or `name:id`.
+        emoji: string,
+        burst: bool,
+        added: bool,
+    }
+
+    record relationship-change {
+        user: snowflake,
+        old: option<relationship-kind>,
+        new: option<relationship-kind>,
+        /// You did it (RelationshipNotifier needs this to tell "they
+        /// unfriended you" from "you unfriended them" without a patch).
+        by-you: bool,
+    }
+
+    variant event {
+        // ---- read-client ----
+        /// You switched channel or guild (CHANNEL_SELECT).
+        selection-changed(selection-change),
+        connection(connection-state),
+        /// Window focus/visibility changed: (focused, visible).
+        window(tuple<bool, bool>),
+        /// A channel's unread/mention state changed (yours).
+        read-state(read-state),
+        guild-joined(guild),
+        guild-updated(guild),
+        guild-left(tuple<snowflake, guild-left-reason>),
+        channel-created(channel),
+        channel-updated(channel),
+        /// (channel, guild)
+        channel-deleted(tuple<snowflake, option<snowflake>>),
+        role-updated(role),
+        /// (guild, role)
+        role-deleted(tuple<snowflake, snowflake>),
+        /// A guild's emoji or stickers changed: (guild).
+        emoji-updated(snowflake),
+        /// You joined, moved or changed state in voice.
+        my-voice(my-voice),
+        my-voice-left,
+        /// Your status ("online", ...).
+        my-presence(string),
+        /// One of your settings changed (key from `my-setting-keys`).
+        my-settings(string),
+        /// You started replying to / editing a message in the composer
+        /// (CREATE_PENDING_REPLY / MESSAGE_START_EDIT).
+        reply-started(message-ref),
+        edit-started(message-ref),
+        /// A host-defined, versioned hook fired: (name, JSON payload).
+        hook(tuple<string, string>),
+        /// The user switched account (the new user id). By the time this
+        /// arrives the host has swapped this plugin's storage to the new
+        /// account's namespace and dropped its decorations, accessories and
+        /// ghost messages; settings stay shared. Drop any cached state.
+        account-switched(snowflake),
+
+        // ---- read-users ----
+        presence(presence),
+        /// Who's typing now in a channel (a snapshot, coalesced).
+        typing(tuple<snowflake, list<snowflake>>),
+        voice-state(voice-state),
+        /// (user, channel) left voice.
+        voice-left(tuple<snowflake, snowflake>),
+        /// Someone in your voice channel started/stopped speaking. Throttled.
+        speaking(tuple<snowflake, bool>),
+        member-joined(member),
+        member-updated(member),
+        /// (guild, user)
+        member-left(tuple<snowflake, snowflake>),
+        relationship(relationship-change),
+
+        // ---- read-messages ----
+        message-created(message),
+        /// (new message, the content before, if the client held it).
+        message-edited(tuple<message, option<string>>),
+        message-deleted(deleted-message),
+        /// (channel, ids)
+        messages-bulk-deleted(tuple<snowflake, list<snowflake>>),
+        reaction(reaction-change),
+        /// All reactions (or one emoji's) removed: (message, emoji).
+        reactions-cleared(tuple<message-ref, option<string>>),
+        /// (message, user, answer id, added)
+        poll-vote(tuple<message-ref, snowflake, u32, bool>),
+        /// A channel's pins changed: (channel).
+        pins(snowflake),
+        /// Any other gateway dispatch, raw: (name, JSON). UNSTABLE: raw
+        /// payloads become ABI the moment plugins depend on them, so
+        /// listed plugins may use this only for optional features
+        /// (design doc §4.4).
+        raw(tuple<string, string>),
+
+        // ---- pointer ----
+        /// Cursor moved, logical px from the client's top-left. Throttled.
+        pointer-moved(tuple<f32, f32>),
+
+        // ---- meta ----
+        /// Never sent: events aren't queued or dropped. Kept because removing
+        /// a case changes the ABI; it goes at the next contract change.
+        dropped(u32),
+    }
+}
+
+/// Choosing which kinds of event a plugin receives. This interface needs
+/// no capability. Subscribing to a kind fails if the plugin doesn't have
+/// the capability for it.
+interface host-events {
+    use events.{event-kind};
+
+    enum subscribe-error {
+        /// The kind needs a capability this plugin wasn't granted.
+        not-granted,
+        /// The kind isn't available on this client build.
+        unavailable,
+    }
+
+    /// Replace this plugin's subscriptions with `kinds`.
+    subscribe: func(kinds: list<event-kind>) -> list<tuple<event-kind, result<_, subscribe-error>>>;
+
+    /// Replace the kinds the plugin's `event-filter` sees with `kinds`. It
+    /// sees none until this is called. Needs `intercept` and each kind's
+    /// own capability. Only events from Discord can be intercepted (the
+    /// message, reaction, poll-vote, pins, typing, presence, voice-state,
+    /// member, relationship, guild, channel, role and emoji kinds); the
+    /// others come back `unavailable`.
+    intercept: func(kinds: list<event-kind>) -> list<tuple<event-kind, result<_, subscribe-error>>>;
+}

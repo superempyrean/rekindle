@@ -1,0 +1,20 @@
+[package]
+name = "rekindle-install"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Where rekindle is installed and which of its versions runs: state.json, the version folders, the launcher log, and the environment variables the launcher, the shim and the host pass each other. Shared by all three, so it stays small."
+
+[lib]
+name = "rekindle_install"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+semver = { workspace = true }
+
+[lints]
+workspace = true

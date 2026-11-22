@@ -1,0 +1,28 @@
+[package]
+name = "platform-indicators"
+version = "0.1.0"
+edition = "2024"
+description = "Desktop/mobile/web icons next to names, from presence (people state + keyed decorations)."
+license = "GPL-3.0-or-later"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[package.metadata.rekindle]
+id = "dev.rekindle.platform-indicators"
+name = "Platform Indicators"
+capabilities = ["read-client", "read-users", "ui"]
+
+[[package.metadata.rekindle.settings]]
+key = "where"
+type = "select"
+label = "Show platform icons"
+options = ["Next to names", "In the member list", "Both"]
+default = "Both"
+
+[dependencies]
+rekindle-sdk = { path = "../../../crates/sdk" }
+
+[lints]
+workspace = true

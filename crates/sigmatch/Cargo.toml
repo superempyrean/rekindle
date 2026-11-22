@@ -1,0 +1,36 @@
+[package]
+name = "rekindle-sigmatch"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Recover crates that leave no path strings by matching compiled function signatures against a release binary."
+
+[lib]
+name = "rekindle_sigmatch"
+path = "src/lib.rs"
+
+[[bin]]
+name = "rekindle-sigmatch"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+object = { workspace = true }
+ureq = { workspace = true }
+# Instruction decoding for `short` (operand-aware wildcarding, as ida-sigmaker).
+iced-x86 = { workspace = true }
+gimli = { workspace = true }
+
+[dev-dependencies]
+# `write` lets the tests synthesize a tiny relocatable object in memory, so the
+# relocation-masking logic is exercised without shelling out to a compiler.
+object = { workspace = true, features = ["write"] }
+
+[lints]
+workspace = true

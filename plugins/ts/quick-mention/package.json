@@ -1,0 +1,20 @@
+{
+  "name": "quick-mention",
+  "version": "0.1.0",
+  "description": "A button on each message, and a menu item, that mentions its author in your draft.",
+  "private": true,
+  "type": "module",
+  "rekindle": {
+    "id": "dev.rekindle.quick-mention",
+    "name": "Quick Mention",
+    "capabilities": ["ui", "act-local"]
+  },
+  "scripts": {
+    "build": "rekindle build",
+    "check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@bytecodealliance/jco": "1.41.0",
+    "typescript": "7.0.2"
+  }
+}

@@ -1,0 +1,42 @@
+[package]
+name = "rekindle-host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "rekindle as a host DLL inside the client: resolves the client's functions by anchor and runs the plugin runtime there, with no dependency on the client or its types."
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# The PE reader that maps an anchor's file offset to its address.
+rekindle-sigmatch = { workspace = true }
+# Hook points as anchors (redundant locators, resolved per build).
+rekindle-anchor = { workspace = true }
+# The detour on the client's turn decoder (`wire`).
+rekindle-hook = { workspace = true }
+# The wire codec and rekindle's transforms on it, run from that detour.
+rekindle-wire = { workspace = true }
+rekindle-wire-inject = { workspace = true }
+# rekindle's type-free UI contribution engine (fabrication + dispatch).
+rekindle-ui-hook = { workspace = true }
+# rekindle's UI as real GPUI elements, built by the client's own gpui.
+rekindle-native = { workspace = true }
+# rekindle's plugin runtime + theme/UI detours, so loaded wasm plugins drive the
+# surfaces from inside the client. Pulls the plugin host (wasmtime).
+rekindle-extension = { workspace = true }
+# The runtime's model types (UI events the self-test drives a plugin's panel with).
+rekindle-plugin-host = { workspace = true }
+# The install the shim loaded this version from, and updating it from the
+# release channel while the client runs.
+rekindle-install = { workspace = true }
+rekindle-release = { workspace = true }
+anyhow = { workspace = true }
+serde_json = { workspace = true }
+serde = { workspace = true }
+sha2 = { workspace = true }
+
+[lints]
+workspace = true

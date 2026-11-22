@@ -1,0 +1,17 @@
+[package]
+name = "rekindle-wire-inject"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "rekindle's transforms on a split GPUI client's wire: mount subtrees of its own, write cells by PropId, drop or rewrite the guest's nodes and intercept presses, as configured by a Work value."
+publish = false
+
+[dependencies]
+rekindle-wire = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

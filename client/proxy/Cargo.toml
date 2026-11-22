@@ -1,0 +1,30 @@
+[package]
+name = "rekindle-proxy"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "A side-load shim: a proxy dwmapi.dll that forwards every export to the real system dwmapi and, on load, starts the rekindle host. Placed beside the client exe, the client's own loader maps it on every launch path. References nothing of the client."
+publish.workspace = true
+
+# The cdylib's output name is the DLL the client imports. Named `dwmapi` so the
+# build produces `dwmapi.dll`; the client resolves that from its own directory
+# (it is not a KnownDLL), so our copy loads instead of the system one, and we
+# forward every call straight back to the real system dwmapi.
+[lib]
+name = "dwmapi"
+crate-type = ["cdylib"]
+
+# Headless self-test: loads the built proxy into *this* process (never the
+# client, no window) and checks forwarding + that the host kick fired.
+[[bin]]
+name = "rekindle-proxy-selftest"
+path = "src/selftest.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+# state.json: which installed version a launch loads.
+rekindle-install = { workspace = true }
+
+[lints]
+workspace = true

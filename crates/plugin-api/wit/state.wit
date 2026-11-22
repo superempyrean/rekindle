@@ -1,0 +1,535 @@
+// Read-only client state. Three interfaces, one per data class, so the
+// import itself says what a plugin can see (and is refused at load if that
+// class wasn't granted).
+//
+// Common rules (design doc §4):
+//   * Queries answer from what the client already holds. They never cause
+//     a network request, never page history, never fetch members: a plugin
+//     sees what the user's client has, not more.
+//   * Within one callback, answers are a consistent snapshot.
+//   * Records are rekindle's own projection, modelled on the client's
+//     stores (MessageStore, ChannelStore, GuildMemberStore, ...), not on
+//     gateway JSON. Secrets never appear: no tokens, no voice session ids,
+//     no activity secrets, no email/phone/MFA, no private user flags.
+//   * `none` means "not loaded / not visible to you", never an error.
+//   * Lists are capped (200 unless noted); a capped list says so via the
+//     paired `*-count` query where one exists.
+
+/// The records the state queries and events return, in a type-only
+/// interface: importing it grants nothing, so `events` and `render` can
+/// share these shapes without importing the query interfaces (a `use` of
+/// another interface is an import of it).
+interface records {
+    use types.{snowflake, color, user-ref, message-ref};
+
+    /// One permission overwrite on a channel.
+    record overwrite {
+        /// Role or member id.
+        id: snowflake,
+        /// True for a member overwrite, false for a role.
+        member: bool,
+        allow: u64,
+        deny: u64,
+    }
+
+    record selection {
+        guild: option<snowflake>,
+        channel: option<snowflake>,
+        /// The voice channel you're connected to.
+        voice-channel: option<snowflake>,
+        /// The thread open in the side panel, if any.
+        side-thread: option<snowflake>,
+        /// Window has focus.
+        focused: bool,
+        /// The client considers you idle/AFK.
+        idle: bool,
+    }
+
+    /// A user's public profile fields. No avatar URL: plugins can't load
+    /// images; the host draws avatars (`element.user`).
+    record user {
+        id: snowflake,
+        username: string,
+        global-name: option<string>,
+        bot: bool,
+        system: bool,
+        /// Public badge bits (`public_flags`). SDK constants.
+        public-flags: u64,
+        /// Profile accent colour, if set.
+        accent: option<color>,
+        /// An avatar decoration or nameplate is set (rendered by the host).
+        has-decoration: bool,
+    }
+
+    record custom-status { text: option<string>, emoji: option<string>, expires-ms: option<u64> }
+
+    record guild {
+        id: snowflake,
+        name: string,
+        owner: snowflake,
+        description: option<string>,
+        /// Discord feature strings ("COMMUNITY", "VERIFIED", ...).
+        features: list<string>,
+        premium-tier: u8,
+        premium-subscribers: u32,
+        verification-level: u8,
+        nsfw-level: u8,
+        preferred-locale: string,
+        /// From the client's guild record (approximate for large guilds).
+        member-count: option<u32>,
+        /// When you joined, epoch ms.
+        joined-ms: option<u64>,
+        /// You've muted the guild.
+        muted: bool,
+    }
+
+    record guild-folder {
+        /// None for a guild that isn't in a folder.
+        id: option<u64>,
+        name: option<string>,
+        color: option<color>,
+        guilds: list<snowflake>,
+    }
+
+    record thread-meta {
+        owner: snowflake,
+        archived: bool,
+        locked: bool,
+        message-count: u32,
+        member-count: u32,
+        /// Forum tag ids applied to this post.
+        applied-tags: list<snowflake>,
+        /// You've joined it.
+        joined: bool,
+    }
+
+    record forum-tag { id: snowflake, name: string, emoji: option<string>, moderated: bool }
+
+    record channel {
+        id: snowflake,
+        /// Discord channel type number (SDK constants).
+        kind: u16,
+        guild: option<snowflake>,
+        /// Category for guild channels, parent channel for threads.
+        parent: option<snowflake>,
+        name: string,
+        topic: option<string>,
+        position: s32,
+        nsfw: bool,
+        /// Slowmode seconds.
+        slowmode: u32,
+        last-message: option<snowflake>,
+        /// DM / group DM recipients.
+        recipients: list<user-ref>,
+        thread: option<thread-meta>,
+        forum-tags: list<forum-tag>,
+        /// You've muted it.
+        muted: bool,
+        /// You can see it (VIEW_CHANNEL). Hidden channels are listed only
+        /// by `channels(guild, include-hidden: true)`, a host policy
+        /// decision (allowed).
+        visible: bool,
+    }
+
+    record role {
+        id: snowflake,
+        guild: snowflake,
+        name: string,
+        /// Primary colour; none = default.
+        color: option<color>,
+        /// Gradient/holographic secondary colours, if any.
+        colors-extra: list<color>,
+        position: s32,
+        /// Permission bits (SDK constants; up to bit 53).
+        permissions: u64,
+        hoist: bool,
+        mentionable: bool,
+        /// Managed by an integration (bot role, booster role).
+        managed: bool,
+        /// Unicode emoji role icon; image icons are host-rendered only.
+        unicode-emoji: option<string>,
+    }
+
+    record emoji {
+        id: snowflake,
+        name: string,
+        animated: bool,
+        guild: option<snowflake>,
+        /// Usable by you right now.
+        available: bool,
+    }
+
+    record sticker { id: snowflake, name: string, guild: option<snowflake>, format: u8 }
+
+    record read-state {
+        channel: snowflake,
+        unread: bool,
+        mentions: u32,
+        /// Last message you've read.
+        last-read: option<snowflake>,
+        /// You marked it unread yourself.
+        manual: bool,
+    }
+
+    record guild-read-state { guild: snowflake, unread: bool, mentions: u32 }
+
+    record my-voice {
+        channel: snowflake,
+        guild: option<snowflake>,
+        /// When you connected, epoch ms (CallTimer needs nothing else).
+        since-ms: u64,
+        self-mute: bool,
+        self-deaf: bool,
+        self-video: bool,
+        streaming: bool,
+        /// "connecting", "connected", "reconnecting", ...
+        connection: string,
+        /// Round-trip ms to the voice server, if known.
+        ping-ms: option<u32>,
+    }
+
+    record activity {
+        /// Discord activity type number (0 playing, 1 streaming, 2
+        /// listening, 3 watching, 4 custom, 5 competing, ...).
+        kind: u8,
+        name: string,
+        details: option<string>,
+        state: option<string>,
+        application: option<snowflake>,
+        started-ms: option<u64>,
+        ends-ms: option<u64>,
+        /// Custom-status emoji, as text or `name:id`.
+        emoji: option<string>,
+        /// Stream URL for `streaming` activities.
+        url: option<string>,
+        // Party ids, join/spectate secrets and asset keys are never exposed.
+    }
+
+    /// Per-platform status: PlatformIndicators' data. "" = not on it.
+    record client-status { desktop: string, mobile: string, web: string, embedded: string }
+
+    record presence {
+        user: snowflake,
+        status: string,
+        client-status: client-status,
+        activities: list<activity>,
+    }
+
+    record voice-state {
+        user: snowflake,
+        guild: option<snowflake>,
+        channel: snowflake,
+        /// Server mute/deafen.
+        mute: bool,
+        deaf: bool,
+        self-mute: bool,
+        self-deaf: bool,
+        self-video: bool,
+        self-stream: bool,
+        /// Stage: not a speaker.
+        suppress: bool,
+        // The voice `session_id` is never exposed (it resumes a gateway
+        // session alongside the token).
+    }
+
+    enum relationship-kind { friend, blocked, incoming, outgoing, implicit, ignored }
+
+    record relationship {
+        user: snowflake,
+        kind: relationship-kind,
+        /// Your private nickname for a friend.
+        nickname: option<string>,
+        /// When this relationship started, epoch ms, if the client knows.
+        since-ms: option<u64>,
+    }
+
+    record attachment {
+        id: snowflake,
+        filename: string,
+        content-type: option<string>,
+        size: u64,
+        width: option<u32>,
+        height: option<u32>,
+        spoiler: bool,
+        /// Alt text.
+        description: option<string>,
+        /// Voice messages: length and waveform.
+        duration-secs: option<f32>,
+        /// Signed CDN URL; expires. Fetchable only if the plugin has
+        /// `network` with the CDN host declared.
+        url: string,
+    }
+
+    record embed-media { url: string, width: u32, height: u32 }
+
+    record embed {
+        /// "rich", "image", "video", "gifv", "article", "link", "poll_result", ...
+        kind: string,
+        title: option<string>,
+        description: option<string>,
+        url: option<string>,
+        color: option<color>,
+        author: option<string>,
+        provider: option<string>,
+        footer: option<string>,
+        fields: list<tuple<string, string>>,
+        image: option<embed-media>,
+        thumbnail: option<embed-media>,
+        video: option<embed-media>,
+    }
+
+    record reaction {
+        /// Unicode emoji, or `name:id` for a custom one.
+        emoji: string,
+        count: u32,
+        /// Super reactions.
+        burst-count: u32,
+        me: bool,
+        me-burst: bool,
+    }
+
+    record poll {
+        question: string,
+        answers: list<tuple<u32, string, u32>>,  // (answer id, text, votes)
+        expires-ms: option<u64>,
+        multiselect: bool,
+        finalized: bool,
+        /// Answer ids you voted for.
+        my-votes: list<u32>,
+    }
+
+    /// A forwarded message's snapshot.
+    record forwarded {
+        content: string,
+        attachments: list<attachment>,
+        embeds: list<embed>,
+        origin: option<message-ref>,
+    }
+
+    record message {
+        id: snowflake,
+        channel: snowflake,
+        guild: option<snowflake>,
+        author: user-ref,
+        /// The author is a bot / webhook.
+        bot: bool,
+        webhook: bool,
+        /// Discord message type number (0 default, 19 reply, 7 join, ...).
+        kind: u16,
+        /// Message flag bits (SDK constants).
+        flag-bits: u64,
+        content: string,
+        edited-ms: option<u64>,
+        pinned: bool,
+        tts: bool,
+        mentions-everyone: bool,
+        mentions: list<snowflake>,
+        mention-roles: list<snowflake>,
+        /// The message this one replies to.
+        reply-to: option<message-ref>,
+        attachments: list<attachment>,
+        embeds: list<embed>,
+        reactions: list<reaction>,
+        stickers: list<string>,
+        poll: option<poll>,
+        /// The thread started from this message.
+        thread: option<snowflake>,
+        forwarded: option<forwarded>,
+        /// Only you can see it (ephemeral / local system message).
+        ephemeral: bool,
+        /// Still sending / failed to send (your own).
+        sending: bool,
+        failed: bool,
+    }
+}
+
+/// Client structure and your own state (requires `read-client`).
+interface client-state {
+    use types.{snowflake, color, user-ref, member};
+    use records.{selection, user, custom-status, guild, guild-folder, channel, role, emoji, sticker, read-state, guild-read-state, my-voice, overwrite};
+
+    // ---- Where the user is (SelectedGuildStore, SelectedChannelStore,
+    //      WindowStore) ----
+
+    get-selection: func() -> selection;
+
+    // ---- You (UserStore.getCurrentUser, own presence) ----
+
+    me: func() -> user;
+    /// "online", "idle", "dnd", "invisible".
+    my-status: func() -> string;
+    my-custom-status: func() -> option<custom-status>;
+
+    /// A user the client knows, by id (UserStore.getUser). Users appear in
+    /// channel lists and DMs, so this is client structure; their presence,
+    /// membership and activity are `users`.
+    get-user: func(id: snowflake) -> option<user>;
+
+    // ---- Guilds (GuildStore, SortedGuildStore, guild folders) ----
+
+    get-guild: func(id: snowflake) -> option<guild>;
+    /// Guild ids in the user's sidebar order.
+    guild-ids: func() -> list<snowflake>;
+
+    guild-folders: func() -> list<guild-folder>;
+
+    // ---- Channels and threads (ChannelStore, GuildChannelStore,
+    //      ActiveThreadsStore) ----
+
+    get-channel: func(id: snowflake) -> option<channel>;
+    /// A guild's channels in sidebar order (categories first within their
+    /// group, as GuildChannelStore.getChannels sorts them).
+    channels: func(guild: snowflake, include-hidden: bool) -> list<channel>;
+    /// Active threads the client knows under a channel.
+    threads: func(parent: snowflake) -> list<channel>;
+    /// DMs and group DMs, most recent first.
+    private-channels: func() -> list<channel>;
+    /// The DM channel with a user, if one exists.
+    dm-channel: func(user: snowflake) -> option<snowflake>;
+
+    // ---- Roles, emoji, stickers (GuildRoleStore, EmojiStore,
+    //      GuildStickersStore: three of the five stores libdiscore
+    //      already runs in Rust) ----
+
+    get-role: func(guild: snowflake, id: snowflake) -> option<role>;
+    /// Highest position first.
+    roles: func(guild: snowflake) -> list<role>;
+
+    guild-emoji: func(guild: snowflake) -> list<emoji>;
+    /// Most-used first (frecency), as the picker orders them. Unicode
+    /// emoji come back with id 0 and the emoji in `name`.
+    frequent-emoji: func(limit: u32) -> list<emoji>;
+
+    guild-stickers: func(guild: snowflake) -> list<sticker>;
+
+    // ---- You in a guild (GuildMemberStore.getSelfMember, PermissionStore) --
+
+    // `member` lives in `types` so `users` can use it without importing
+    // this interface (a `use` across interfaces is an import).
+    my-member: func(guild: snowflake) -> option<member>;
+
+    /// Your effective permission bits in a channel (overwrites applied),
+    /// or in a guild when `channel` is a guild id.
+    my-permissions: func(channel-or-guild: snowflake) -> u64;
+    /// `my-permissions(...) & bits == bits`.
+    can: func(bits: u64, channel-or-guild: snowflake) -> bool;
+    /// A channel's permission overwrites (PermissionsViewer).
+    permission-overwrites: func(channel: snowflake) -> list<overwrite>;
+
+    // ---- Read states (ReadStateStore, GuildReadStateStore) ----
+
+    get-read-state: func(channel: snowflake) -> option<read-state>;
+    get-guild-read-state: func(guild: snowflake) -> guild-read-state;
+    /// Channels with unread messages, most recent first.
+    unread-channels: func(limit: u32) -> list<read-state>;
+
+    // ---- Your voice connection (RTCConnectionStore, MediaEngineStore) ----
+
+    get-my-voice: func() -> option<my-voice>;
+
+    // ---- Your settings (UserSettingsProtoStore, AccessibilityStore, ...) --
+    //
+    // A curated, read-only allowlist of setting keys, as strings, so the
+    // list can grow without a contract change. Keys follow the settings
+    // proto ("text-and-images.gif-auto-play", "appearance.message-display-
+    // compact", "notifications.quiet-mode", "localization.timezone" is NOT
+    // offered). Safety filters and privacy settings are readable; nothing
+    // here is writable (writes are `actions` or `tweaks`).
+
+    my-setting: func(key: string) -> option<string>;
+    my-setting-keys: func() -> list<string>;
+}
+
+/// Other people, as your client sees them (requires `read-users`, or
+/// `read-messages`, which implies it).
+interface users {
+    use types.{snowflake, color, member};
+    use records.{presence, voice-state, relationship, relationship-kind};
+
+    /// Presence as the client knows it (guild-scoped if `guild` is given).
+    get-presence: func(user: snowflake, guild: option<snowflake>) -> option<presence>;
+
+    /// A member, if the client has them loaded (GuildMemberStore.getMember).
+    /// Never triggers a member request.
+    get-member: func(guild: snowflake, user: snowflake) -> option<member>;
+    /// Loaded members of a guild, up to `limit` (max 1000), and the count
+    /// actually loaded.
+    loaded-members: func(guild: snowflake, limit: u32) -> tuple<list<member>, u32>;
+    /// Effective permissions of another member in a channel (for
+    /// PermissionsViewer-style plugins). None if they aren't loaded.
+    member-permissions: func(user: snowflake, channel-or-guild: snowflake) -> option<u64>;
+    /// The member's display colour (highest coloured role), as shown.
+    member-color: func(guild: snowflake, user: snowflake) -> option<color>;
+
+    /// Who's typing in a channel, oldest first (TypingStore).
+    typing: func(channel: snowflake) -> list<snowflake>;
+
+    voice-states: func(channel: snowflake) -> list<voice-state>;
+    get-voice-state: func(user: snowflake) -> option<voice-state>;
+    /// Currently speaking (SpeakingStore). Only for your voice channel.
+    speaking: func(user: snowflake) -> bool;
+
+    // ---- Your relationships and notes (your own data about others) ----
+
+    relationships: func() -> list<relationship>;
+    get-relationship: func(user: snowflake) -> option<relationship-kind>;
+    /// Your private note on a user.
+    note: func(user: snowflake) -> option<string>;
+    /// Guilds you share with a user, from loaded members only.
+    mutual-guilds: func(user: snowflake) -> list<snowflake>;
+}
+
+/// Message content your client has received (requires `read-messages`).
+interface messages {
+    use types.{snowflake, message-ref};
+    use records.{message};
+
+    /// One loaded message (MessageStore.getMessage).
+    get-message: func(channel: snowflake, id: snowflake) -> option<message>;
+    /// Loaded messages in a channel, newest first, older than `before` if
+    /// given; at most `limit` (max 100). Only what the client has loaded:
+    /// scrolling up loads more, plugins can't.
+    loaded-messages: func(channel: snowflake, before: option<snowflake>, limit: u32) -> list<message>;
+    /// Messages currently on screen, top to bottom.
+    visible-messages: func() -> list<message-ref>;
+    /// Pinned messages the client has loaded for a channel.
+    pins: func(channel: snowflake) -> list<message-ref>;
+
+    enum link-error {
+        /// No message on screen contains this link right now.
+        not-visible,
+        /// Not a Discord message link.
+        invalid,
+        /// The message is gone, or you can't open that channel.
+        not-found,
+        /// The host's per-plugin rate limit (default 10/min).
+        rate-limited,
+        /// Not available on this client build.
+        unavailable,
+    }
+
+    /// The message a link points to (`https://discord.com/channels/g/c/m`),
+    /// for link previews (MessageLinkEmbeds). It is the one query that may
+    /// fetch. Allowed only while a message on screen contains `url`; it is
+    /// the fetch the client makes when the user clicks the link, so it only
+    /// reaches channels the user can open. Answered from the client's cache
+    /// when loaded; fetched results are cached by the host. Owner decision
+    /// 2026-11-07.
+    resolve-message-link: func(url: string) -> result<message, link-error>;
+}
+
+/// A developer view of what the client holds about a target (requires
+/// `read-client`, plus `read-users` for users and members and
+/// `read-messages` for messages; otherwise `none`). For ViewRaw-style
+/// plugins.
+///
+/// UNSTABLE BY DESIGN (owner decision 2026-11-07): the host produces the
+/// JSON from its own model with secrets stripped (tokens, email, phone,
+/// session and auth fields, attachment signing parameters). Its shape may
+/// change in any build and is excluded from the API snapshot check (design
+/// doc §3.4). Index rule: show it, don't parse it.
+interface inspect {
+    use types.{target};
+
+    raw-json: func(target: target) -> option<string>;
+}

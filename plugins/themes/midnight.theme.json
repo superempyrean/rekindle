@@ -1,0 +1,67 @@
+{
+  "rekindle-theme": 1,
+  "id": "dev.rekindle.midnight-file",
+  "name": "Midnight",
+  "version": "1.0.0",
+  "description": "A deep dark theme in three variants, as a theme file: the midnight-theme plugin without the code.",
+  "authors": ["rekindle"],
+  "tokens": {
+    "text-strong": "#f2f3f5",
+    "text-subtle": "#b5bac1",
+    "text-muted": "#949ba4",
+    "interactive-text-default": "#b5bac1",
+    "interactive-text-hover": "#dbdee1",
+    "interactive-text-active": "#ffffff",
+    "icon-muted": "#80848e",
+    "icon-subtle": "#4e5058",
+    "background-surface-high": "#0d1016",
+    "background-mod-subtle": "#1a1d24",
+    "background-mod-normal": "#232733",
+    "background-mod-strong": "#2c3140",
+    "border-subtle": "#1f232c",
+    "channeltextarea-background": "#13161d",
+    "scrollbar-auto-thumb": "#1a1b1e"
+  },
+  "variants": [
+    {
+      "name": "midnight",
+      "label": "Midnight",
+      "tokens": {
+        "background-base-low": "#0b0d12",
+        "background-base-lower": "#080a0e",
+        "background-base-lowest": "#050609",
+        "background-surface-higher": "#050609",
+        "input-background-default": "#13161d",
+        "background-brand": "#6d8cff",
+        "text-default": "#d6dce8"
+      }
+    },
+    {
+      "name": "abyss",
+      "label": "Abyss",
+      "tokens": {
+        "background-base-low": "#000000",
+        "background-base-lower": "#000000",
+        "background-base-lowest": "#000000",
+        "background-surface-higher": "#0a0a0a",
+        "input-background-default": "#111111",
+        "background-brand": "#9b8cff",
+        "text-default": "#e6e6e6"
+      }
+    },
+    {
+      "name": "dusk",
+      "label": "Dusk",
+      "tokens": {
+        "background-base-low": "#1d1826",
+        "background-base-lower": "#17131f",
+        "background-base-lowest": "#110e17",
+        "background-surface-higher": "#110e17",
+        "input-background-default": "#262031",
+        "background-brand": "#ff8f6b",
+        "text-default": "#e8dff0"
+      }
+    }
+  ],
+  "default-variant": "midnight"
+}

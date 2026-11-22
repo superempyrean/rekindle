@@ -1,0 +1,10 @@
+/target
+/client/target
+# Build output and toolchains of the non-Rust example plugins
+/plugins/**/target/
+node_modules/
+# editor/OS
+.vscode/
+.idea/
+*.swp
+.DS_Store

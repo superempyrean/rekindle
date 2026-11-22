@@ -1,0 +1,29 @@
+[package]
+name = "rekindle-cli"
+# The `rekindle` CLI's version: a `cli-v<version>` tag releases it
+# (.github/workflows/cli.yml).
+version = "0.2.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+description = "The rekindle command line: scaffold, build, preview, test, sign and install plugins."
+
+[[bin]]
+name = "rekindle"
+path = "src/main.rs"
+
+[dependencies]
+rekindle-plugin-host = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing-subscriber = { workspace = true }
+url = { workspace = true }
+tiny_http = { workspace = true }
+anstream = { workspace = true }
+anstyle = { workspace = true }
+
+[lints]
+workspace = true

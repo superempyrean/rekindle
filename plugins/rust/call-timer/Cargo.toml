@@ -1,0 +1,21 @@
+[package]
+name = "call-timer"
+version = "0.1.0"
+edition = "2024"
+description = "How long you've been in voice, as a live line in the voice panel (my-voice events + voice status)."
+license = "GPL-3.0-or-later"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[package.metadata.rekindle]
+id = "dev.rekindle.call-timer"
+name = "Call Timer"
+capabilities = ["read-client", "ui"]
+
+[dependencies]
+rekindle-sdk = { path = "../../../crates/sdk" }
+
+[lints]
+workspace = true

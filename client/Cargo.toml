@@ -1,0 +1,100 @@
+# What rekindle ships into the client. A separate workspace, pinned to the
+# client's toolchain (rust-toolchain.toml): these crates build bytes at
+# offsets in the client's own types and call its compiled gpui, so they're
+# built by the same rustc. None of them depends on gpui or names the client.
+#
+#  - `proxy/` (rekindle-proxy, cdylib `dwmapi.dll`): the side-load shim the
+#    client's own loader maps. It forwards dwmapi and loads the host.
+#  - `host/` (rekindle-host, cdylib `rekindle_host.dll`): rekindle on the
+#    inside. It resolves its hook points by anchor and drives them.
+#  - `extension/`, `ui-hook/`: the plugin runtime in the client and the
+#    framework layer, driven by recovered layout.
+#  - `native/`: rekindle's UI as real GPUI elements, built by calling the
+#    client's own compiled gpui.
+[workspace]
+resolver = "2"
+members = [
+    "proxy",
+    "host",
+    "extension",
+    "ui-hook",
+    "native",
+]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/superempyrean/rekindle"
+rust-version = "1.98"
+publish = false
+
+[workspace.dependencies]
+anyhow = "1.0.104"
+image = { version = "0.25", default-features = false, features = ["png", "gif"] }
+libc = "0.2"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sha2 = "0.10"
+tracing = "0.1.41"
+url = "2.5.7"
+x11rb = "0.13.1"
+
+# This workspace's crates, and the root workspace's crates they build on.
+rekindle-extension = { path = "extension" }
+rekindle-native = { path = "native" }
+rekindle-ui-hook = { path = "ui-hook" }
+rekindle-anchor = { path = "../crates/anchor" }
+rekindle-hook = { path = "../crates/hook" }
+rekindle-install = { path = "../crates/install" }
+rekindle-plugin-host = { path = "../crates/plugin-host" }
+rekindle-release = { path = "../crates/release" }
+rekindle-sigmatch = { path = "../crates/sigmatch" }
+rekindle-wire = { path = "../crates/wire" }
+rekindle-wire-inject = { path = "../crates/wire-inject" }
+
+# The lint policy, the same as the root workspace's. Every crate opts in
+# with `[lints] workspace = true`, and CI denies warnings. A suppression is
+# `#[expect(lint, reason = "...")]` on the narrowest item, so it fails once
+# the code no longer needs it.
+[workspace.lints.rust]
+unreachable_pub = "warn"
+unsafe_op_in_unsafe_fn = "warn"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+allow_attributes = "warn"
+allow_attributes_without_reason = "warn"
+dbg_macro = "warn"
+todo = "warn"
+undocumented_unsafe_blocks = "warn"
+# Pedantic lints left off. Binary formats and recovered layouts are read with
+# integer casts whose ranges the format bounds, and addresses and byte
+# patterns are written as a disassembler shows them.
+cast_possible_truncation = "allow"
+cast_possible_wrap = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
+unreadable_literal = "allow"
+# Colour and geometry code uses the names of the maths (h, s, l, x, y).
+many_single_char_names = "allow"
+similar_names = "allow"
+# Rustdoc sections on every fallible function and `#[must_use]` on every
+# getter repeat what the signature says.
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
+return_self_not_must_use = "allow"
+module_name_repetitions = "allow"
+struct_excessive_bools = "allow"
+
+[profile.dev]
+debug = "limited"
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+debug = "limited"
+lto = "thin"
+codegen-units = 1

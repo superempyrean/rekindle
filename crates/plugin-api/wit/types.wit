@@ -1,0 +1,279 @@
+// rekindle:plugin@0.8.0 is the stable contract between the host (rekindle)
+// and plugins.
+//
+// Plugins are WebAssembly components; this package is the ONLY thing they
+// depend on. Everything about the native client that changes per build
+// lives on the host side of this boundary. Static metadata (id, name,
+// capabilities, network hosts, settings schema, strings) is not part of it:
+// it lives in the plugin's project file, and `rekindle build` embeds it in
+// the component as the `rekindle:manifest` custom section, so the host, the
+// install screen, a reviewer and the signature see what a plugin wants
+// without running any of its code.
+//
+// Capability enforcement: each imported interface maps to one capability
+// (the table above `world plugin` in world.wit). A component importing an
+// interface it wasn't granted is refused at load; imports outside
+// `rekindle:plugin` (WASI included) are refused outright.
+//
+// Evolution rules (design doc §3.4):
+//   * Records and variants are frozen once a minor version ships. New data
+//     arrives through new functions, or a new record (`message-v2`), never
+//     a new field: the component model has no structural subtyping, so a
+//     field added to a host type breaks every plugin built against the old
+//     one.
+//   * Discord's own numbering (channel types, message types, flags,
+//     permission bits) is passed through as integers, not WIT enums: Discord
+//     adds values often (build 600539 has channel types 19-21 and message
+//     flag 1<<20, which the public docs lack). The SDKs carry named
+//     constants; unknown values pass through untouched.
+//   * Our own vocabulary (slot names, surface names, tweak ids, event kinds)
+//     is strings or enums we control.
+
+package rekindle:plugin@0.8.0;
+
+/// Shared types.
+interface types {
+    /// A Discord snowflake. Ids sort by creation time; `host.snowflake-ms`
+    /// turns one into a timestamp.
+    type snowflake = u64;
+
+    /// Capabilities, by data class and by what they let a plugin do. Each
+    /// imported interface maps to one capability (see the world at the end
+    /// of world.wit); a few gate delivery instead of an import. Manifest
+    /// aliases: `observe-events` = `read-client`.
+    enum capability {
+        // ---- seeing ----
+        /// Client structure and your own state: which guild/channel you're
+        /// viewing, guilds, channels, threads, roles, emoji, your own user,
+        /// member and settings, read states, your permissions, your own
+        /// voice/presence. No message content, nothing about other people
+        /// beyond what a channel list shows.
+        read-client,
+        /// Other people, as your client sees them: presence and activities,
+        /// typing, voice states, members and their roles, your
+        /// relationships, your notes.
+        read-users,
+        /// Message content your client has received, as queries over loaded
+        /// messages and as events. Implies `read-users`.
+        read-messages,
+        /// Transform how messages *look*, in an isolate that sees content but
+        /// can't keep or send it (design doc §6).
+        render-messages,
+        /// Cursor position (the `pointer-moved` event). Throttled.
+        pointer,
+
+        // ---- showing ----
+        /// Panels, settings page, palette and slash commands, slots, keyed
+        /// decorations, toasts, notices, modals, keybinds, navigation.
+        ui,
+        /// Theme tokens, tint, fonts, named surfaces, background image.
+        theming,
+        /// Draw the plugin's own sprites on a layer over the client.
+        overlay,
+        /// Play the plugin's own sounds; replace client sounds.
+        audio,
+        /// Desktop notifications from the plugin; suppress or annotate the
+        /// client's own.
+        notifications,
+
+        // ---- keeping and talking ----
+        storage,
+        /// HTTPS to the hosts the manifest declares, and no others.
+        network,
+        /// Write-only clipboard, during a gesture.
+        clipboard,
+
+        // ---- acting as you (all gesture-bound, design doc §5) ----
+        /// Change your own outgoing messages and edits as you send them;
+        /// slash commands that send.
+        compose,
+        /// Local and self-only actions: mark read, open a reply/edit in the
+        /// composer, per-user volume, notes, saved messages.
+        act-local,
+        /// Add and remove your own reactions: narrow, gesture-bound and
+        /// undoable (owner decision 2026-11-07).
+        react,
+        /// Visible actions others see: pin, delete or edit your message,
+        /// vote, join voice, join a thread. Implies `react`.
+        act,
+        /// Your presence: status and nickname (on a gesture), custom status
+        /// and rich presence (any time, rate-limited).
+        presence,
+        /// Flip host-maintained client tweaks (design doc §9).
+        tweaks,
+        /// Save/open files through the system dialogs, on a gesture.
+        files,
+        /// See events before the client processes them, and drop or change
+        /// them (`event-filter`). Each kind also needs its own read
+        /// capability.
+        intercept,
+    }
+
+    /// 8-bit sRGB, straight alpha.
+    record color { r: u8, g: u8, b: u8, a: u8 }
+
+    // ---- References: what a callback is about ----
+    //
+    // Ids plus what the user already sees next to them. Full records come
+    // from `state` (with the matching capability).
+
+    record user-ref {
+        id: snowflake,
+        /// The name the client shows here: guild nickname, else global
+        /// display name, else username.
+        name: string,
+    }
+
+    record channel-ref {
+        id: snowflake,
+        name: string,
+        guild: option<snowflake>,
+        /// Discord's channel type number (0 text, 1 DM, 2 voice, 3 group
+        /// DM, 4 category, 5 announcement, 10-12 threads, 13 stage, 15
+        /// forum, 16 media, ...). Constants in the SDKs.
+        kind: u16,
+    }
+
+    record guild-ref { id: snowflake, name: string }
+
+    /// A message by reference. No content (that's `read-messages`).
+    record message-ref {
+        id: snowflake,
+        channel: snowflake,
+        guild: option<snowflake>,
+        author: snowflake,
+    }
+
+    /// A guild member (GuildMemberStore record).
+    record member {
+        guild: snowflake,
+        user: snowflake,
+        nick: option<string>,
+        roles: list<snowflake>,
+        joined-ms: option<u64>,
+        boosting-since-ms: option<u64>,
+        timed-out-until-ms: option<u64>,
+        /// Membership screening not yet passed.
+        pending: bool,
+    }
+    record role-ref { id: snowflake, guild: snowflake, name: string }
+
+    /// An image/video the user right-clicked or opened: an attachment, an
+    /// embed image, an avatar, an emoji. `url` is a Discord CDN URL the
+    /// client already loaded (signed and expiring: don't store it).
+    record media-ref {
+        url: string,
+        /// "image/png", "video/mp4", ...
+        content-type: string,
+        width: u32,
+        height: u32,
+        /// The message it's in, if any.
+        message: option<message-ref>,
+    }
+
+    /// What a slot interaction, menu or command was about.
+    variant target {
+        none,
+        message(message-ref),
+        user(tuple<user-ref, option<snowflake>>),   // (user, guild context)
+        channel(channel-ref),
+        guild(guild-ref),
+        role(role-ref),
+        media(media-ref),
+        /// A link the user right-clicked.
+        link(string),
+        /// Text the user had selected (`selection.context-menu`).
+        selection(string),
+    }
+
+    /// Mouse/keyboard modifiers held during a gesture.
+    record modifiers { shift: bool, ctrl: bool, alt: bool, meta: bool }
+
+    // ---- Panel elements (shared by panels, modals, settings, accessories,
+    //      profile sections) ----
+    //
+    // Host-rendered, data only: no markup, no pixels, no URLs that load
+    // anything (images are the plugin's own bundled assets, by id).
+
+    /// Host-defined icon names, drawn with the client's own icon set.
+    enum icon {
+        star, bookmark, note, palette, bolt, heart, bell, gear, link,
+        search, sparkle, eye, eye-off, clock, pin, puzzle, translate,
+        microphone, headphones, camera, shield, lock, user, users, chat,
+        reply, copy, trash, edit, check, cross, info, warning, download,
+        upload, globe, code, hash, at, smile, image, music, play, pause,
+    }
+
+    /// A small inline text run with optional style, for `rich-text`.
+    record span {
+        text: string,
+        bold: bool,
+        italic: bool,
+        code: bool,
+        /// Semantic theme token for the colour ("text-muted",
+        /// "text-feedback-critical", ...) or a plugin colour.
+        color: option<span-color>,
+        /// Click target, host-handled (no URLs: links go through
+        /// `ui.open-url` on a gesture).
+        target: option<target>,
+    }
+
+    variant span-color { token(string), rgba(color) }
+
+    record toggle { id: string, label: string, value: bool }
+    record slider { id: string, label: string, min: f64, max: f64, step: f64, value: f64 }
+    record color-picker { id: string, label: string, value: color }
+    record text-input { id: string, label: string, value: string, placeholder: string, multiline: bool }
+    record button { id: string, label: string, icon: option<icon>, danger: bool }
+    record select { id: string, label: string, options: list<string>, selected: u32 }
+    /// A rows-of-fields editor (TextReplace's rules, PinDMs' categories).
+    /// `value` is the rows, each a list of cell strings, one per column.
+    record table { id: string, label: string, columns: list<string>, rows: list<list<string>> }
+    /// An editable list of strings or ids (ignore lists, keyword lists).
+    record string-list { id: string, label: string, items: list<string>, placeholder: string }
+
+    variant element {
+        heading(string),
+        text(string),
+        rich-text(list<span>),
+        separator,
+        toggle(toggle),
+        slider(slider),
+        color-picker(color-picker),
+        text-input(text-input),
+        button(button),
+        select(select),
+        table(table),
+        string-list(string-list),
+        /// A plugin image by asset id (bundled PNG; see `ui.register-image`).
+        image(tuple<string, u32, u32>),
+        /// A user shown the client's way (avatar + name), clickable.
+        user(snowflake),
+        /// A key/value row ("Created", "3 years ago").
+        field(tuple<string, string>),
+        // No nesting: WIT types can't be recursive, and flat lists keep
+        // host rendering predictable. Layout is the host's.
+    }
+
+    /// The new value of the element the user interacted with.
+    variant ui-value {
+        toggled(bool),
+        number(f64),
+        color(color),
+        text(string),
+        selected(u32),
+        clicked,
+        rows(list<list<string>>),
+        items(list<string>),
+    }
+
+    record ui-event {
+        /// Where the element is: a panel or modal (its id), `settings-page`
+        /// (extras under the generated settings page), `notice` (the
+        /// notice's button, element `button`), or `message:<id>` (an
+        /// accessory). A panel/modal id wins over the reserved names.
+        surface: string,
+        element: string,
+        value: ui-value,
+    }
+}

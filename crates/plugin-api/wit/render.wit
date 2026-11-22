@@ -1,0 +1,104 @@
+// Message rendering (design doc §6). The `renderer` export runs in a
+// separate *render isolate*: a second instance of the plugin's own
+// component, linked with a restricted import set (log, settings and
+// storage reads, theme reads; no http, no storage writes, no timers, no
+// UI, no actions). It sees message content; it has no way to keep or send
+// it. Its only output is the transforms below, which the host renders
+// locally. That is why `render-messages` is a lesser capability than
+// `read-messages`: a highlighter needs only this one.
+//
+// Output rules, enforced by the host:
+//   * No URLs: spans can't target `link` or `media`, images are the
+//     plugin's registered assets by id.
+//   * Interactive elements (buttons in an accessory) may only use element
+//     ids the plugin's main instance declared in advance with
+//     `render-control.declare-actions`; a click reaches the main instance
+//     as `on-ui { surface: "message:<id>", element }`. Free-form ids would
+//     be a channel from the isolate to the main instance.
+//   * Budget: a few ms per message; over budget, the message renders
+//     untransformed. Results are cached per (message id, edit time,
+//     render epoch); `render-control.invalidate` bumps the epoch.
+
+interface render-types {
+    use types.{snowflake, span, span-color, element, icon, color};
+    use records.{message};
+
+    record render-input {
+        message: message,
+        /// The author's roles in this guild (for role-based styling).
+        author-roles: list<snowflake>,
+        /// Grouped under the previous message (no header shown).
+        grouped: bool,
+        /// The user's base theme, so colours can be chosen to contrast.
+        dark: bool,
+    }
+
+    record highlight {
+        /// Byte range in `message.content`.
+        start: u32,
+        end: u32,
+        color: option<span-color>,
+        bold: bool,
+        tooltip: option<string>,
+    }
+
+    record badge {
+        icon: option<icon>,
+        /// A registered plugin image id.
+        image: option<string>,
+        text: option<string>,
+        tooltip: string,
+        color: option<color>,
+    }
+
+    /// Changes to one embed. Fields left `none` stay as they are.
+    record embed-patch {
+        title: option<string>,
+        description: option<list<span>>,
+        footer: option<string>,
+        /// The colour bar down the embed's left edge.
+        color: option<color>,
+        /// Show one of the plugin's registered images in place of the
+        /// embed's image or thumbnail.
+        image: option<string>,
+        /// Hide the embed's image, thumbnail and video.
+        hide-media: bool,
+    }
+
+    variant transform {
+        /// Show a "hidden by <plugin>: reason" bar with a Show button instead.
+        collapse(string),
+        /// Blur the content until clicked, like a spoiler.
+        blur,
+        /// Replace how the content reads (the original stays one click
+        /// away under "Show original").
+        replace-content(list<span>),
+        /// Style ranges of the original content.
+        highlight(list<highlight>),
+        /// Inline spans after the content ("(translated)", "edited 3x").
+        append(list<span>),
+        /// Re-highlight the nth code block (ShikiCodeblocks).
+        code-block(tuple<u32, list<span>>),
+        /// Badge after the author's name.
+        author-badge(badge),
+        /// Override the author name colour for this message.
+        author-color(color),
+        /// Tint the message row (keyword highlight).
+        background(span-color),
+        /// Elements under the message (accessory).
+        accessory(list<element>),
+        /// Hide the nth embed / attachment (NoEmbed-style, per message).
+        hide-embed(u32),
+        hide-attachment(u32),
+        /// Change the nth embed.
+        replace-embed(tuple<u32, embed-patch>),
+    }
+}
+
+/// The main instance's side of rendering (requires `render-messages`).
+interface render-control {
+    /// Element ids accessory buttons may use (see the output rules).
+    declare-actions: func(ids: list<string>);
+    /// Re-render: all messages, or one channel's.
+    invalidate: func(channel: option<u64>);
+}

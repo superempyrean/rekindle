@@ -1,0 +1,179 @@
+// What a plugin exports. 0.7.0 had one `guest` interface every plugin had
+// to implement in full; here each hook is its own export, and a plugin
+// exports only the ones it handles (design doc §3.2). `rekindle build`
+// already generates a per-plugin world for imports; it does the same for
+// exports, so the component itself says what the plugin hooks (visible to
+// `rekindle inspect`, the install screen and review without running
+// it), and the host refuses an export the plugin's capabilities don't
+// cover (a `renderer` without `render-messages`, a `compose-handler`
+// without `compose`).
+
+/// Required.
+interface lifecycle {
+    use types.{capability};
+
+    /// Once, after load. `granted` may be a subset of what the manifest
+    /// asked for.
+    activate: func(granted: list<capability>) -> result<_, string>;
+    /// Graceful shutdown. Everything host-side the plugin contributed is
+    /// removed afterwards.
+    deactivate: func();
+    /// A setting changed (by the user on the generated page, or by `set`).
+    on-settings-changed: func(key: string);
+    /// `host.features()` changed: a hook point resolved or went away (a
+    /// client update applied live, a re-anchor). Re-add items if needed.
+    on-features-changed: func();
+}
+
+interface event-handler {
+    use events.{event};
+    /// Events in arrival order. Batched: one call per host tick.
+    on-events: func(batch: list<event>);
+}
+
+interface ui-handler {
+    use types.{ui-event, target, modifiers, user-ref, snowflake, message-ref};
+    use command-types.{invocation, command-reply};
+
+    record slot-click {
+        slot: string,
+        item: string,
+        target: target,
+        modifiers: modifiers,
+    }
+
+    variant slot-event {
+        clicked(slot-click),
+        /// (decoration kind, key)
+        decoration-clicked(tuple<string, snowflake>),
+        /// A profile with this plugin's section opened.
+        profile-opened(tuple<string, user-ref>),
+        /// A click binding fired: (binding id, message). A gesture.
+        message-clicked(tuple<string, message-ref>),
+    }
+
+    /// Panel / modal / settings-extra / accessory / notice interactions.
+    on-ui: func(ev: ui-event);
+    on-command: func(id: string);
+    on-slot: func(ev: slot-event);
+    on-keybind: func(id: string);
+    on-slash-command: func(inv: invocation) -> command-reply;
+    /// Suggestions while typing an option marked `autocomplete`: (label,
+    /// value) pairs, max 25. Must answer fast (budgeted like a render).
+    on-autocomplete: func(command: string, option-name: string, partial: string) -> list<tuple<string, string>>;
+}
+
+interface timer-handler {
+    on-timer: func(id: string);
+}
+
+/// Requires `compose`.
+interface compose-handler {
+    use compose-types.{draft, compose-result, upload, upload-result};
+
+    /// The user is sending or saving an edit. Plugins run in load order,
+    /// each seeing the previous result. May use `http` within the host's
+    /// deadline (default 3 s, with a "processing" indicator); past it the
+    /// message goes as it stands and the user is told.
+    on-compose: func(d: draft) -> compose-result;
+    /// A file is about to be uploaded (only if the plugin's manifest opts
+    /// in with `compose-uploads = true`).
+    on-upload: func(u: upload) -> upload-result;
+}
+
+/// Requires `render-messages`. Runs in the render isolate (render.wit).
+interface renderer {
+    use render-types.{render-input, transform};
+    /// Transforms per message, same order as `batch`.
+    on-render: func(batch: list<render-input>) -> list<list<transform>>;
+}
+
+/// Requires `intercept`. Called for each event of a kind registered with
+/// `host-events.intercept`, before the client processes it, in the main
+/// instance. Plugins see the event in load order, each getting what the
+/// one before returned; the first `drop` ends it. Over the per-call budget,
+/// or if the plugin traps, the event passes unchanged.
+interface event-filter {
+    use events.{event};
+
+    variant verdict {
+        /// The client processes the event unchanged.
+        pass,
+        /// The client never sees the event.
+        drop,
+        /// The client processes this instead. It must be the same kind of
+        /// event; anything else counts as `pass`.
+        replace(event),
+    }
+
+    on-intercept: func(event: event) -> verdict;
+}
+
+/// Requires `notifications`. Runs in the render isolate: it sees the
+/// notification's text, and its only output is the decision.
+interface notification-filter {
+    use notification-types.{client-notification, notification-decision};
+    on-notification: func(n: client-notification) -> notification-decision;
+}
+
+/// Everything. A plugin's generated world imports only the interfaces its
+/// capabilities cover and exports only the handlers it implements.
+///
+/// import            capability
+///   host, host-events, settings     (always)
+///   storage           storage
+///   client-state      read-client
+///   users             read-users (or read-messages)
+///   messages          read-messages
+///   inspect           read-client (+ read-users / read-messages per target)
+///   render-control    render-messages
+///   ui                ui
+///   theming           theming
+///   overlay           overlay
+///   audio             audio
+///   notify            notifications
+///   http              network
+///   clipboard         clipboard
+///   local-actions     act-local
+///   reactions         react (or act)
+///   actions           act
+///   presence          presence
+///   tweaks            tweaks
+///   files             files
+///   compose-control   compose
+/// (`pointer` gates the pointer-moved event; `compose` also gates the
+/// compose-handler export and `command-reply.send`.)
+world plugin {
+    import host;
+    import host-events;
+    import settings;
+    import storage;
+    import client-state;
+    import users;
+    import messages;
+    import inspect;
+    import render-control;
+    import ui;
+    import theming;
+    import overlay;
+    import audio;
+    import notify;
+    import http;
+    import clipboard;
+    import local-actions;
+    import reactions;
+    import actions;
+    import presence;
+    import tweaks;
+    import files;
+    import compose-control;
+
+    export lifecycle;
+    export event-handler;
+    export ui-handler;
+    export timer-handler;
+    export compose-handler;
+    export renderer;
+    export notification-filter;
+    export event-filter;
+}

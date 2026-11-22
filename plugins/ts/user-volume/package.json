@@ -1,0 +1,20 @@
+{
+  "name": "user-volume",
+  "version": "0.1.0",
+  "description": "Set a user's volume exactly, up to 200%, from their menu.",
+  "private": true,
+  "type": "module",
+  "rekindle": {
+    "id": "dev.rekindle.user-volume",
+    "name": "User Volume",
+    "capabilities": ["ui", "act-local"]
+  },
+  "scripts": {
+    "build": "rekindle build",
+    "check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@bytecodealliance/jco": "1.41.0",
+    "typescript": "7.0.2"
+  }
+}

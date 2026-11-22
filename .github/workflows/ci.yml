@@ -1,0 +1,83 @@
+# Tests and lints both workspaces. The root workspace runs on Linux on every
+# push to main and every pull request; a Linux runner minute is cheaper and
+# builds are faster. The Windows job builds and lints the client workspace
+# and tests the launcher, the root workspace's one Windows-only crate. A
+# Windows minute counts double against the Actions quota, so that job runs
+# on pull requests and on demand, not on every push. The client's
+# live self-test runs against the mock client, which isn't in this
+# repository.
+
+name: CI
+
+# Changes to Markdown alone don't run it. Code comments and rustdoc are in
+# .rs files, so they still do.
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["**/*.md", "LICENSE"]
+  pull_request:
+    paths-ignore: ["**/*.md", "LICENSE"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  root:
+    name: Root workspace
+    runs-on: ubuntu-latest
+    env:
+      REKINDLE_REQUIRE_GUEST_TOOLCHAINS: "1"
+    steps:
+      - uses: actions/checkout@v7
+      # rust-toolchain.toml pins the compiler, its wasm target and clippy.
+      - name: Install the toolchain
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: plugins/package-lock.json
+      - name: Install the TypeScript toolchain
+        run: npm ci
+        working-directory: plugins
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Test
+        run: cargo test --workspace --locked
+
+  client:
+    name: Client workspace
+    if: github.event_name != 'push'
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - uses: actions/checkout@v7
+      # rust-toolchain.toml in client/ pins the toolchain; rustup installs it.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            client
+            . -> target
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Build
+        run: cargo build --workspace --locked
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # The launcher and the hook crate's Windows paths, which the Linux job
+      # doesn't compile.
+      - name: Launcher and hook on Windows
+        working-directory: .
+        run: |
+          cargo clippy -p rekindle-launcher -p rekindle-hook --all-targets --locked -- -D warnings
+          cargo test -p rekindle-launcher -p rekindle-hook --locked

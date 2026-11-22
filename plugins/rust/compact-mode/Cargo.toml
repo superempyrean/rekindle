@@ -1,0 +1,21 @@
+[package]
+name = "compact-mode"
+version = "0.1.0"
+edition = "2024"
+description = "A palette command that toggles the client's compact density, remembered across restarts."
+license = "GPL-3.0-or-later"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[package.metadata.rekindle]
+id = "dev.rekindle.compact-mode"
+name = "Compact Mode"
+capabilities = ["ui", "storage", "theming"]
+
+[dependencies]
+rekindle-sdk = { path = "../../../crates/sdk" }
+
+[lints]
+workspace = true

@@ -1,0 +1,20 @@
+{
+  "name": "permissions-viewer",
+  "version": "0.1.0",
+  "description": "Shows what a member can do in a server or channel, from the user and channel menus.",
+  "private": true,
+  "type": "module",
+  "rekindle": {
+    "id": "dev.rekindle.permissions-viewer",
+    "name": "Permissions Viewer",
+    "capabilities": ["ui", "read-client", "read-users"]
+  },
+  "scripts": {
+    "build": "rekindle build",
+    "check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@bytecodealliance/jco": "1.41.0",
+    "typescript": "7.0.2"
+  }
+}

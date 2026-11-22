@@ -1,0 +1,162 @@
+/// The user's own outgoing message, as it's being sent or edited (design
+/// doc §7). Type-only; the hook is the `compose-handler` export, called
+/// only with `compose`.
+interface compose-types {
+    use types.{snowflake, message-ref, user-ref};
+
+    enum compose-kind {
+        /// Enter in the composer.
+        send,
+        /// Saving an edit of your own message.
+        edit,
+        /// Text a slash command returned as `send` (see command-types).
+        command,
+    }
+
+    record reply-info {
+        message: message-ref,
+        author: user-ref,
+        /// Whether the reply pings its author.
+        mention: bool,
+    }
+
+    record attachment-info {
+        filename: string,
+        size: u64,
+        content-type: option<string>,
+        spoiler: bool,
+    }
+
+    record draft {
+        channel: snowflake,
+        guild: option<snowflake>,
+        kind: compose-kind,
+        /// For `edit`: the message being edited.
+        editing: option<message-ref>,
+        /// The text as it stands after earlier plugins' rewrites.
+        text: string,
+        reply: option<reply-info>,
+        attachments: list<attachment-info>,
+        sticker-count: u32,
+        /// Sent with @silent (no push notification).
+        silent: bool,
+    }
+
+    record rewrite {
+        text: string,
+        /// Change whether a reply pings (NoReplyMention).
+        mention: option<bool>,
+        silent: option<bool>,
+    }
+
+    variant compose-result {
+        /// Leave it as it is.
+        keep,
+        replace(rewrite),
+        /// Don't send; keep the draft in the composer and show the reason.
+        cancel(string),
+    }
+
+    /// A file the user attached, offered for transformation before upload
+    /// (strip EXIF, rename, convert). Optional hook; bytes are copied into
+    /// the plugin, so the host caps it (25 MiB per file).
+    record upload {
+        filename: string,
+        content-type: option<string>,
+        data: list<u8>,
+    }
+
+    variant upload-result {
+        keep,
+        replace(upload),
+        /// Remove the attachment, telling the user why.
+        drop(string),
+    }
+}
+
+/// Sending the user's message as several (design doc §7.1). Needs
+/// `compose`, and works only within `on-compose` for a `send`.
+interface compose-control {
+    enum split-error {
+        /// Not within `on-compose` for a send (an edit can't be split).
+        not-sending,
+        /// Fewer than 2 parts, or more than 10.
+        part-count,
+        /// A part is empty, longer than one message may be, or has control
+        /// characters.
+        bad-part,
+    }
+
+    /// Send the message as `parts`, in order, instead of as one. The reply,
+    /// attachments and stickers go with the first part. Plugins after this
+    /// one still see the draft as it stands; if one of them changes its
+    /// text, the split is dropped and its text is sent as one message.
+    split: func(parts: list<string>) -> result<_, split-error>;
+}
+
+/// Local slash commands (registered with `ui.register-slash-command`).
+/// Type-only.
+interface command-types {
+    use types.{snowflake, channel-ref, span};
+
+    enum option-kind {
+        text, integer, number, boolean, user, channel, role, mentionable,
+        /// One of `choices`.
+        choice,
+    }
+
+    record command-option {
+        name: string,
+        description: string,
+        kind: option-kind,
+        required: bool,
+        /// (label, value) pairs for `choice`.
+        choices: list<tuple<string, string>>,
+        min: option<f64>,
+        max: option<f64>,
+        /// Ask `on-autocomplete` for suggestions as the user types.
+        autocomplete: bool,
+    }
+
+    record slash-command {
+        /// Lower-case, 1-32 chars; shown as `/name`. Shares the client's
+        /// command list with built-in and bot commands, marked with the
+        /// plugin's name.
+        name: string,
+        description: string,
+        options: list<command-option>,
+        /// Where it's offered.
+        in-guilds: bool,
+        in-dms: bool,
+    }
+
+    variant option-value {
+        text(string),
+        integer(s64),
+        number(f64),
+        boolean(bool),
+        user(snowflake),
+        channel(snowflake),
+        role(snowflake),
+        choice(string),
+    }
+
+    record invocation {
+        command: string,
+        options: list<tuple<string, option-value>>,
+        channel: channel-ref,
+    }
+
+    variant command-reply {
+        none,
+        /// A message only you can see (the client's "Only you can see
+        /// this" local message; Vencord's sendBotMessage).
+        local(list<span>),
+        /// Put this in the composer for the user to edit and send.
+        insert(string),
+        /// Send this as the user's message. Pressing Enter on the command
+        /// was the user's send; it still goes through every plugin's
+        /// compose hook. Requires `compose`.
+        send(string),
+    }
+}

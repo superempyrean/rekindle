@@ -1,0 +1,24 @@
+{
+  "name": "keyword-highlight-ts",
+  "version": "0.1.0",
+  "description": "Highlight words you choose in every message (TypeScript port of keyword-highlight).",
+  "private": true,
+  "type": "module",
+  "rekindle": {
+    "id": "dev.rekindle.keyword-highlight-ts",
+    "name": "Keyword Highlight (TypeScript)",
+    "capabilities": ["render-messages"],
+    "settings": [
+      { "key": "keywords", "type": "string-list", "label": "Words to highlight", "default": ["rekindle"] },
+      { "key": "tint-rows", "type": "toggle", "label": "Tint the whole message", "default": false }
+    ]
+  },
+  "scripts": {
+    "build": "rekindle build",
+    "check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@bytecodealliance/jco": "1.41.0",
+    "typescript": "7.0.2"
+  }
+}

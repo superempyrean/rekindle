@@ -1,0 +1,9 @@
+# The compiler for the root workspace: the plugin platform, the CLI, the
+# launcher and the example plugins. Pinned so the same source gives the
+# same plugin file on every machine, which the community index and anyone
+# checking a release rely on. `client/` pins its own, to match the client.
+[toolchain]
+channel = "1.97.1"
+profile = "minimal"
+components = ["clippy", "rustfmt"]
+targets = ["wasm32-unknown-unknown"]

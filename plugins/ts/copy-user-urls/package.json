@@ -1,0 +1,20 @@
+{
+  "name": "copy-user-urls-ts",
+  "version": "0.1.0",
+  "description": "Copy a user's profile URL from their context menu (TypeScript port of copy-user-urls).",
+  "private": true,
+  "type": "module",
+  "rekindle": {
+    "id": "dev.rekindle.copy-user-urls-ts",
+    "name": "Copy User URLs (TypeScript)",
+    "capabilities": ["ui", "clipboard"]
+  },
+  "scripts": {
+    "build": "rekindle build",
+    "check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@bytecodealliance/jco": "1.41.0",
+    "typescript": "7.0.2"
+  }
+}

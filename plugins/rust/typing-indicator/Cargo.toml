@@ -1,0 +1,21 @@
+[package]
+name = "typing-indicator"
+version = "0.1.0"
+edition = "2024"
+description = "Who's typing in each channel, as a badge on the channel list (user events + keyed decorations)."
+license = "GPL-3.0-or-later"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[package.metadata.rekindle]
+id = "dev.rekindle.typing-indicator"
+name = "Typing Indicator"
+capabilities = ["read-client", "read-users", "ui"]
+
+[dependencies]
+rekindle-sdk = { path = "../../../crates/sdk" }
+
+[lints]
+workspace = true

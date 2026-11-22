@@ -1,0 +1,724 @@
+//! `rekindle-wire-inject`: rekindle's transforms on a split client's wire.
+//!
+//! On a wire-split build, every element the guest creates and every cell it
+//! writes reaches the host as one op buffer per turn, and every event
+//! reaches the guest as one buffer from the host. [`Engine`] rewrites both
+//! before the other side sees them, as a [`Work`] value says:
+//!
+//! - **Mounts.** Subtrees rekindle creates from the fixed element set and
+//!   mounts under a node of the guest's. The root is spliced into the
+//!   guest's own `SetChildren` op when a later turn rewrites that list, so
+//!   the host's keyed diff keeps its node across turns.
+//! - **Cells.** Cells written by `PropId` on the nodes a selector finds, after
+//!   the guest's ops. A cell is written again only when the host's tree holds
+//!   a different value, which happens when the guest writes its own.
+//! - **Rows.** The guest's nodes a selector finds are dropped (every op on
+//!   the node or a node under it is left out of the turn), have a string
+//!   cell rewritten inside the guest's own op, or get cells written.
+//! - **Presses.** A press on a guest node a selector finds is consumed or
+//!   retargeted at another node. A press on rekindle's own nodes is always
+//!   consumed, after its [`Handler`] runs. A [`Handler::Plugin`] keeps the
+//!   press for the host to deliver ([`Engine::take_presses`]).
+//! - **Labels.** An `accessibilityLabel` for each node the guest left
+//!   without one, made from another of its cells.
+//! - **Recolours.** A colour the guest writes, replaced in every colour cell
+//!   that holds it. A theme's token values map to these, one recolour for
+//!   each token a plugin overrides.
+//!
+//! [`Engine::set_work`] replaces the work while turns go through. Cells the
+//! old work wrote and the new one doesn't are set back to the guest's own
+//! values in the next turn. A mount the new work leaves out is taken out of
+//! the host's tree in the next turn, and a new one is created.
+//!
+//! [`Engine`] keeps two trees: the guest's, from the turns as the guest sent
+//! them, and a mirror of the host's, from the turns it rewrote. Rows,
+//! presses and labels are matched in the guest's tree, so a dropped or
+//! rewritten node is still found by what the guest said. Mounts and cells are
+//! placed from the mirror.
+//!
+//! # Modelled
+//!
+//! The framing the engine decodes and re-encodes is `rekindle_wire::turn`,
+//! and the event layout is `rekindle_wire::event::Event`, both modelled. A
+//! desktop build's framing replaces them there, and the engine follows. The
+//! node ids rekindle takes ([`RESERVED`] and up) assume the guest never
+//! reaches them. The real client should supply how its guest allocates ids,
+//! or a range the host never hands out.
+
+mod json;
+mod select;
+mod work;
+
+use std::collections::{BTreeMap, BTreeSet};
+
+use rekindle_wire::a11y::ids as a11y;
+use rekindle_wire::event::{Event, EventKind};
+use rekindle_wire::{DecodeError, NodeId, NodeOp, PropId, Tree, Turn, Value};
+
+pub use select::{Selector, TEXT};
+pub use work::{
+    Cell, Handler, LabelRule, Mount, MountNode, PluginPress, PressAction, PressRule, Recolor,
+    RowAction, RowRule, Work, WorkError, Write,
+};
+
+/// The first of the node ids rekindle takes for its own nodes.
+pub const RESERVED: NodeId = 0xF000_0000;
+
+/// The cells a [`Recolor`] reads and writes: every recolour id that holds
+/// one colour.
+pub const COLOR_PROPS: &[PropId] = &[
+    rekindle_wire::ids::BACKGROUND,
+    rekindle_wire::ids::COLOR,
+    rekindle_wire::ids::BORDER_COLOR,
+    rekindle_wire::ids::TINT,
+    rekindle_wire::ids::SCRIM_COLOR,
+    rekindle_wire::ids::PLACEHOLDER_COLOR,
+    rekindle_wire::ids::SELECTION_COLOR,
+    rekindle_wire::ids::HANDLE_COLOR,
+    rekindle_wire::ids::ACTIVE_BACKGROUND,
+    rekindle_wire::ids::ACTIVE_BORDER_COLOR,
+];
+
+/// A colour as the wire carries it: RGBA in a tag-9 `Vec4`, from
+/// `0xRRGGBBAA`.
+pub fn rgba(hex: u32) -> Value {
+    let b = |shift: u32| f32::from(((hex >> shift) & 0xff) as u8) / 255.0;
+    Value::Vec4([b(24), b(16), b(8), b(0)])
+}
+
+/// What [`Engine::event`] does with an event.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Verdict {
+    /// The guest receives it as the host raised it.
+    Pass,
+    /// The guest receives this event instead.
+    Replace(Event),
+    /// The guest never receives it. If the event pressed one of rekindle's
+    /// nodes with a handler, the value is the handler's reply.
+    Consume(Option<Value>),
+}
+
+/// Rewrites a guest's turns and the host's events, as its [`Work`] says.
+/// See the crate docs.
+pub struct Engine {
+    work: Work,
+    /// The tree as the guest's own turns would leave it.
+    guest: Tree,
+    /// The host's tree as the rewritten turns leave it.
+    mirror: Tree,
+    /// The roots of the mounts that have been created.
+    created: BTreeSet<NodeId>,
+    /// Mounts an earlier work made, to take out of the host's tree in the
+    /// next turn.
+    unmount: Vec<Mount>,
+    /// Presses on nodes with a [`Handler::Plugin`], for the host.
+    presses: Vec<PluginPress>,
+    /// The guest's nodes kept out of the host's tree.
+    dropped: BTreeSet<NodeId>,
+    /// The cells each of rekindle's nodes should hold.
+    cells: BTreeMap<NodeId, Vec<(PropId, Value)>>,
+    /// Presses each handler has counted.
+    counts: BTreeMap<NodeId, u32>,
+    /// Cells an earlier work wrote, to set back to the guest's values unless
+    /// the current work writes them.
+    restore: BTreeSet<(NodeId, PropId)>,
+}
+
+impl Engine {
+    pub fn new(work: Work) -> Result<Engine, WorkError> {
+        work.check()?;
+        let mut engine = Engine {
+            work,
+            guest: Tree::new(),
+            mirror: Tree::new(),
+            created: BTreeSet::new(),
+            unmount: Vec::new(),
+            presses: Vec::new(),
+            dropped: BTreeSet::new(),
+            cells: BTreeMap::new(),
+            counts: BTreeMap::new(),
+            restore: BTreeSet::new(),
+        };
+        engine.mount_cells();
+        Ok(engine)
+    }
+
+    /// Set the cells of the mounts' nodes from the work, with each count
+    /// handler's count in its cell.
+    fn mount_cells(&mut self) {
+        self.cells = self
+            .work
+            .mounts
+            .iter()
+            .flat_map(|m| &m.nodes)
+            .map(|n| {
+                let cells = n.cells.iter().map(|c| (c.prop, c.value.clone())).collect();
+                (n.id, cells)
+            })
+            .collect();
+        let handlers: Vec<NodeId> = self.handlers().map(|(id, _)| id).collect();
+        for id in handlers {
+            self.show_count(id);
+        }
+    }
+
+    pub fn work(&self) -> &Work {
+        &self.work
+    }
+
+    /// Replace the work. The trees and the counts stay. Cells the old
+    /// work's rules wrote and the new one's don't go back to the guest's
+    /// values in the next turn. A replaced text goes back only when the
+    /// guest writes the cell again.
+    ///
+    /// A mount the new work keeps with the same shape stays in the host's
+    /// tree, and only its cells change. A mount it leaves out, or changes
+    /// the shape of, is taken out in the next turn: its root out of its
+    /// parent's children, then a `Remove` for each of its nodes. A new
+    /// mount is created as in the first turn.
+    pub fn set_work(&mut self, work: Work) -> Result<(), WorkError> {
+        work.check()?;
+        let before = self.rule_writes();
+        self.restore.extend(
+            before
+                .into_iter()
+                .flat_map(|(n, cells)| cells.into_iter().map(move |(p, _)| (n, p))),
+        );
+        for old in &self.work.mounts {
+            if let Some(new) = work.mounts.iter().find(|m| m.same_shape(old)) {
+                // Cells the kept mount no longer writes go to null.
+                for (o, n) in old.nodes.iter().zip(&new.nodes) {
+                    for c in &o.cells {
+                        if !n.cells.iter().any(|x| x.prop == c.prop) {
+                            self.restore.insert((o.id, c.prop));
+                        }
+                    }
+                }
+                continue;
+            }
+            if self.created.remove(&old.root) {
+                self.unmount.push(old.clone());
+            }
+            for n in &old.nodes {
+                self.counts.remove(&n.id);
+            }
+        }
+        self.work = work;
+        self.mount_cells();
+        Ok(())
+    }
+
+    /// The presses on nodes with a [`Handler::Plugin`] since the last call,
+    /// in order.
+    pub fn take_presses(&mut self) -> Vec<PluginPress> {
+        std::mem::take(&mut self.presses)
+    }
+
+    /// The tree as the guest's own turns leave it.
+    pub fn guest(&self) -> &Tree {
+        &self.guest
+    }
+
+    /// The tree as the host holds it after the turns this rewrote.
+    pub fn mirror(&self) -> &Tree {
+        &self.mirror
+    }
+
+    /// The guest's nodes the last turn left out of the host's tree.
+    pub fn dropped(&self) -> &BTreeSet<NodeId> {
+        &self.dropped
+    }
+
+    /// Presses the handler on `node` has counted.
+    pub fn count(&self, node: NodeId) -> u32 {
+        self.counts.get(&node).copied().unwrap_or(0)
+    }
+
+    fn handlers(&self) -> impl Iterator<Item = (NodeId, &Handler)> {
+        self.work
+            .mounts
+            .iter()
+            .flat_map(|m| &m.nodes)
+            .filter_map(|n| n.on_press.as_ref().map(|h| (n.id, h)))
+    }
+
+    /// Write the count of the handler on `id` into the cell it shows it in.
+    fn show_count(&mut self, id: NodeId) {
+        let n = self.count(id);
+        let Some(Handler::Count {
+            node,
+            prop,
+            one,
+            many,
+        }) = self
+            .handlers()
+            .find(|(h, _)| *h == id)
+            .map(|(_, h)| h.clone())
+        else {
+            return;
+        };
+        let value = Value::Str(Handler::count_text(&one, &many, n));
+        let cells = self.cells.entry(node).or_default();
+        match cells.iter_mut().find(|(p, _)| *p == prop) {
+            Some((_, v)) => *v = value,
+            None => cells.push((prop, value)),
+        }
+    }
+
+    /// Decide what happens to one event before the guest sees it.
+    pub fn event(&mut self, bytes: &[u8]) -> Result<Verdict, DecodeError> {
+        let ev = Event::from_bytes(bytes)?;
+        if ev.node >= RESERVED {
+            let handler = self
+                .handlers()
+                .find(|(id, _)| *id == ev.node)
+                .map(|(_, h)| h.clone());
+            match handler {
+                Some(Handler::Count { .. }) if ev.kind == EventKind::Press => {
+                    let n = self.count(ev.node).saturating_add(1);
+                    self.counts.insert(ev.node, n);
+                    self.show_count(ev.node);
+                    return Ok(Verdict::Consume(Some(Value::I32(
+                        i32::try_from(n).unwrap_or(i32::MAX),
+                    ))));
+                }
+                Some(Handler::Plugin {
+                    plugin,
+                    surface,
+                    element,
+                }) if ev.kind == EventKind::Press => self.presses.push(PluginPress {
+                    plugin,
+                    surface,
+                    element,
+                }),
+                _ => {}
+            }
+            return Ok(Verdict::Consume(None));
+        }
+        if ev.kind != EventKind::Press {
+            return Ok(Verdict::Pass);
+        }
+        let guest = select::View::new(&self.guest);
+        for rule in &self.work.presses {
+            if !guest.matches(ev.node, &rule.select) {
+                continue;
+            }
+            match &rule.action {
+                PressAction::Drop => return Ok(Verdict::Consume(None)),
+                PressAction::Retarget(to) => {
+                    if let Some(target) = guest.first(to) {
+                        return Ok(Verdict::Replace(Event { node: target, ..ev }));
+                    }
+                }
+            }
+        }
+        Ok(Verdict::Pass)
+    }
+
+    /// Rewrite one turn's bytes. `None` when the turn goes through unchanged.
+    pub fn filter(&mut self, guest: &[u8]) -> Result<Option<Vec<u8>>, DecodeError> {
+        let original = Turn::from_bytes(guest)?;
+        self.guest.apply(&original);
+        let mut turn = self.intercept(&original);
+        let mut front = self.unmount();
+        self.mirror.apply(&turn);
+        let (mut created, mut back) = self.inject(&mut turn);
+        front.append(&mut created);
+        front.append(&mut turn.ops);
+        front.append(&mut back);
+        if front == original.ops {
+            return Ok(None);
+        }
+        Ok(Some(Turn { ops: front }.to_bytes()))
+    }
+
+    /// The guest's nodes the row rules drop, and the rewrites they make, as
+    /// the guest's tree stands.
+    fn row_rules(&self) -> (BTreeSet<NodeId>, Vec<Rewrite<'_>>) {
+        let guest = select::View::new(&self.guest);
+        let mut drop = BTreeSet::new();
+        let mut rewrites = Vec::new();
+        for rule in &self.work.rows {
+            match &rule.action {
+                RowAction::Drop => {
+                    for n in guest.select(&rule.select) {
+                        guest.subtree(n, &mut drop);
+                    }
+                }
+                RowAction::Replace { prop, from, to } => rewrites.push(Rewrite {
+                    nodes: guest.select(&rule.select).into_iter().collect(),
+                    prop: *prop,
+                    from,
+                    to,
+                }),
+                RowAction::Cells(_) => {}
+            }
+        }
+        (drop, rewrites)
+    }
+
+    /// The guest's turn with the dropped nodes taken out and the replaced
+    /// text rewritten, as the host should apply it.
+    fn intercept(&mut self, original: &Turn) -> Turn {
+        let (drop, rewrites) = self.row_rules();
+        let rewrite = |node: NodeId, props: &mut [(PropId, Value)]| {
+            for r in &rewrites {
+                r.apply(node, props);
+            }
+        };
+        let guest = select::View::new(&self.guest);
+        let kept = |n: &NodeId| !drop.contains(n);
+
+        // Nodes that stopped matching: rebuild them from the guest's tree.
+        let restored: Vec<NodeId> = self
+            .dropped
+            .iter()
+            .copied()
+            .filter(|n| kept(n) && self.guest.node(*n).is_some())
+            .collect();
+        // Nodes that started matching after the host mounted them.
+        let removed: Vec<NodeId> = drop
+            .iter()
+            .copied()
+            .filter(|n| !self.dropped.contains(n) && self.mirror.node(*n).is_some())
+            .collect();
+
+        let mut ops = Vec::new();
+        for &n in &restored {
+            let Some(kind) = self.guest.node(n).map(|g| g.kind) else {
+                continue;
+            };
+            ops.push(NodeOp::Create { node: n, kind });
+            let mut props: Vec<(PropId, Value)> = self
+                .guest
+                .props()
+                .node_props(n)
+                .filter(|(_, v)| **v != Value::Null)
+                .map(|(p, v)| (p, v.clone()))
+                .collect();
+            rewrite(n, &mut props);
+            if !props.is_empty() {
+                ops.push(NodeOp::SetProps { node: n, props });
+            }
+        }
+        for &n in &restored {
+            let children: Vec<NodeId> = guest.children(n).iter().copied().filter(kept).collect();
+            if !children.is_empty() {
+                ops.push(NodeOp::SetChildren { node: n, children });
+            }
+        }
+
+        for op in &original.ops {
+            let mut op = op.clone();
+            let node = match &mut op {
+                NodeOp::Create { node, .. } | NodeOp::Remove { node } => *node,
+                NodeOp::SetProps { node, props } => {
+                    rewrite(*node, props);
+                    *node
+                }
+                NodeOp::SetChildren { node, children } => {
+                    children.retain(kept);
+                    *node
+                }
+            };
+            if kept(&node) {
+                ops.push(op);
+            }
+        }
+
+        // A parent whose children changed only by what was dropped or
+        // restored gets its list again.
+        let parents: BTreeSet<NodeId> = restored
+            .iter()
+            .chain(&removed)
+            .filter_map(|n| guest.parent(*n))
+            .filter(kept)
+            .collect();
+        for p in parents {
+            if !ops
+                .iter()
+                .any(|op| matches!(op, NodeOp::SetChildren { node, .. } if *node == p))
+            {
+                let children = guest.children(p).iter().copied().filter(kept).collect();
+                ops.push(NodeOp::SetChildren { node: p, children });
+            }
+        }
+        ops.extend(removed.into_iter().map(|node| NodeOp::Remove { node }));
+        self.dropped = drop;
+        Turn { ops }
+    }
+
+    /// The ops that take out the mounts an earlier work made, against the
+    /// host's tree before this turn: each root out of its parent's
+    /// children, then its nodes removed. They go in front of the turn, so a
+    /// mount made again with the same ids is created after them.
+    fn unmount(&mut self) -> Vec<NodeOp> {
+        let mut ops = Vec::new();
+        for m in std::mem::take(&mut self.unmount) {
+            let mut out = Vec::new();
+            let view = select::View::new(&self.mirror);
+            if let Some(parent) = view.parent(m.root) {
+                let children = view
+                    .children(parent)
+                    .iter()
+                    .copied()
+                    .filter(|c| *c != m.root)
+                    .collect();
+                out.push(NodeOp::SetChildren {
+                    node: parent,
+                    children,
+                });
+            }
+            out.extend(
+                m.nodes
+                    .iter()
+                    .filter(|n| self.mirror.node(n.id).is_some())
+                    .map(|n| NodeOp::Remove { node: n.id }),
+            );
+            self.mirror.apply(&Turn { ops: out.clone() });
+            ops.append(&mut out);
+            // What the earlier work wrote on its nodes went with them.
+            self.restore
+                .retain(|(n, _)| m.nodes.iter().all(|x| x.id != *n));
+        }
+        ops
+    }
+
+    /// The mounts and the cells rekindle writes: the ops to put in front of
+    /// the turn and after it.
+    fn inject(&mut self, turn: &mut Turn) -> (Vec<NodeOp>, Vec<NodeOp>) {
+        let mut front = Vec::new();
+        let mut back = Vec::new();
+        let mut writes = Vec::new();
+        for i in 0..self.work.mounts.len() {
+            if self.mount(i, turn, &mut front, &mut back) {
+                for n in &self.work.mounts[i].nodes {
+                    writes.push((n.id, self.cells.get(&n.id).cloned().unwrap_or_default()));
+                }
+            }
+        }
+        writes.append(&mut self.rule_writes());
+        let written: BTreeSet<(NodeId, PropId)> = writes
+            .iter()
+            .flat_map(|(n, cells)| cells.iter().map(move |(p, _)| (*n, *p)))
+            .collect();
+        for (node, prop) in std::mem::take(&mut self.restore) {
+            if written.contains(&(node, prop)) || self.mirror.node(node).is_none() {
+                continue;
+            }
+            let own = self.guest.props().get(node, prop).cloned();
+            writes.push((node, vec![(prop, own.unwrap_or(Value::Null))]));
+        }
+
+        for (node, cells) in writes {
+            let props: Vec<_> = cells
+                .into_iter()
+                .filter(|(p, v)| self.mirror.props().get(node, *p) != Some(v))
+                .collect();
+            if !props.is_empty() {
+                back.push(NodeOp::SetProps { node, props });
+            }
+        }
+        let sets = back
+            .iter()
+            .filter(|op| matches!(op, NodeOp::SetProps { .. }))
+            .cloned()
+            .collect();
+        self.mirror.apply(&Turn { ops: sets });
+        (front, back)
+    }
+
+    /// Create mount `i` if it is new and its node is in the host's tree, and
+    /// keep it in that node's children, splicing it into the turn's own list
+    /// op. False when the node isn't there.
+    fn mount(
+        &mut self,
+        i: usize,
+        turn: &mut Turn,
+        front: &mut Vec<NodeOp>,
+        back: &mut Vec<NodeOp>,
+    ) -> bool {
+        let mount = &self.work.mounts[i];
+        let Some(under) = select::View::new(&self.mirror).first(&mount.under) else {
+            return false;
+        };
+        if !self.created.contains(&mount.root) {
+            let mut ops: Vec<NodeOp> = mount
+                .nodes
+                .iter()
+                .map(|n| NodeOp::Create {
+                    node: n.id,
+                    kind: n.kind,
+                })
+                .collect();
+            for n in &mount.nodes {
+                let props = self.cells.get(&n.id).cloned().unwrap_or_default();
+                if !props.is_empty() {
+                    ops.push(NodeOp::SetProps { node: n.id, props });
+                }
+            }
+            for n in mount.nodes.iter().filter(|n| !n.children.is_empty()) {
+                ops.push(NodeOp::SetChildren {
+                    node: n.id,
+                    children: n.children.clone(),
+                });
+            }
+            self.mirror.apply(&Turn { ops: ops.clone() });
+            front.append(&mut ops);
+            self.created.insert(mount.root);
+        }
+        let listed = self
+            .mirror
+            .node(under)
+            .map_or_else(Vec::new, |n| n.children.clone());
+        if !listed.contains(&mount.root) {
+            let mut mounted = listed;
+            mounted.push(mount.root);
+            // Splice into the guest's own op when this turn rewrote the list,
+            // so the host diffs the list once and keeps the mount.
+            let own = turn.ops.iter_mut().find_map(|op| match op {
+                NodeOp::SetChildren { node, children } if *node == under => Some(children),
+                _ => None,
+            });
+            match own {
+                Some(c) => c.clone_from(&mounted),
+                None => back.push(NodeOp::SetChildren {
+                    node: under,
+                    children: mounted.clone(),
+                }),
+            }
+            self.mirror.apply(&Turn {
+                ops: vec![NodeOp::SetChildren {
+                    node: under,
+                    children: mounted,
+                }],
+            });
+        }
+        true
+    }
+
+    /// The cells the `cells`, `labels` and row rules write this turn, before
+    /// the ones the host's tree already holds are left out.
+    fn rule_writes(&self) -> Vec<(NodeId, Vec<(PropId, Value)>)> {
+        let pairs = |cells: &[Cell]| -> Vec<(PropId, Value)> {
+            cells.iter().map(|c| (c.prop, c.value.clone())).collect()
+        };
+        let mut writes = Vec::new();
+        let mirror = select::View::new(&self.mirror);
+        for w in &self.work.cells {
+            for n in mirror.select(&w.select) {
+                writes.push((n, pairs(&w.cells)));
+            }
+        }
+        let guest = select::View::new(&self.guest);
+        let cell = |node: NodeId, p: PropId| {
+            self.guest
+                .props()
+                .get(node, p)
+                .filter(|v| **v != Value::Null)
+        };
+        for rule in &self.work.labels {
+            for n in guest.select(&rule.select) {
+                if self.mirror.node(n).is_none() || cell(n, a11y::LABEL).is_some() {
+                    continue;
+                }
+                if let Some(Value::Str(s)) = cell(n, rule.from) {
+                    writes.push((
+                        n,
+                        vec![(a11y::LABEL, Value::Str(format!("{}{s}", rule.prefix)))],
+                    ));
+                }
+            }
+        }
+        for rule in &self.work.rows {
+            let RowAction::Cells(cells) = &rule.action else {
+                continue;
+            };
+            for n in guest.select(&rule.select) {
+                if self.mirror.node(n).is_some() {
+                    writes.push((n, pairs(cells)));
+                }
+            }
+        }
+        let ruled: BTreeSet<(NodeId, PropId)> = writes
+            .iter()
+            .flat_map(|(n, cells)| cells.iter().map(move |(p, _)| (*n, *p)))
+            .collect();
+        writes.append(&mut self.recolor_writes(&ruled));
+        writes
+    }
+
+    /// The cells the recolours write, from the colours in the guest's tree,
+    /// except the ones in `ruled`, which a rule writes.
+    fn recolor_writes(
+        &self,
+        ruled: &BTreeSet<(NodeId, PropId)>,
+    ) -> Vec<(NodeId, Vec<(PropId, Value)>)> {
+        if self.work.recolors.is_empty() {
+            return Vec::new();
+        }
+        let to: BTreeMap<u32, u32> = self
+            .work
+            .recolors
+            .iter()
+            .map(|r| (r.from & 0x00ff_ffff, r.to))
+            .collect();
+        let mut writes = Vec::new();
+        for n in self.guest.nodes() {
+            if self.mirror.node(n.id).is_none() {
+                continue;
+            }
+            let cells: Vec<(PropId, Value)> = COLOR_PROPS
+                .iter()
+                .filter(|p| !ruled.contains(&(n.id, **p)))
+                .filter_map(|p| match self.guest.props().get(n.id, *p) {
+                    Some(Value::Vec4(c)) => to.get(&rgb8(*c)).map(|t| (*p, recolored(c[3], *t))),
+                    _ => None,
+                })
+                .collect();
+            if !cells.is_empty() {
+                writes.push((n.id, cells));
+            }
+        }
+        writes
+    }
+}
+
+/// A colour's red, green and blue as `0xRRGGBB`, each rounded to a byte.
+fn rgb8([r, g, b, _]: [f32; 4]) -> u32 {
+    let byte = |v: f32| u32::from((v.clamp(0.0, 1.0) * 255.0).round() as u8);
+    (byte(r) << 16) | (byte(g) << 8) | byte(b)
+}
+
+/// `to` (`0xRRGGBBAA`) with its alpha multiplied by `alpha`.
+fn recolored(alpha: f32, to: u32) -> Value {
+    let byte = |shift: u32| f32::from(((to >> shift) & 0xff) as u8) / 255.0;
+    Value::Vec4([byte(24), byte(16), byte(8), byte(0) * alpha])
+}
+
+/// A [`RowAction::Replace`], with the nodes it applies to this turn.
+struct Rewrite<'w> {
+    nodes: BTreeSet<NodeId>,
+    prop: PropId,
+    from: &'w str,
+    to: &'w str,
+}
+
+impl Rewrite<'_> {
+    fn apply(&self, node: NodeId, props: &mut [(PropId, Value)]) {
+        if !self.nodes.contains(&node) {
+            return;
+        }
+        for (p, v) in props.iter_mut() {
+            if let Value::Str(s) = &*v
+                && *p == self.prop
+                && s.contains(self.from)
+            {
+                *v = Value::Str(s.replace(self.from, self.to));
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests;

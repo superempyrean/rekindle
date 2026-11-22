@@ -1,0 +1,28 @@
+[package]
+name = "mute-words"
+version = "0.1.0"
+edition = "2024"
+description = "Messages that contain a muted word never reach the client: they're dropped before it processes them."
+license = "GPL-3.0-or-later"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[package.metadata.rekindle]
+id = "dev.rekindle.mute-words"
+name = "Mute Words"
+capabilities = ["read-messages", "intercept"]
+
+[[package.metadata.rekindle.settings]]
+key = "words"
+type = "string-list"
+label = "Muted words"
+description = "A message containing any of these (in any case) is dropped. So is an edit that adds one."
+default = []
+
+[dependencies]
+rekindle-sdk = { path = "../../../crates/sdk" }
+
+[lints]
+workspace = true

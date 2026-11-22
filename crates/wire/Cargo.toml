@@ -1,0 +1,16 @@
+[package]
+name = "rekindle-wire"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "The wire a split GPUI client speaks between guest and host: the recovered 13-tag value codec and 855-entry PropId table, a view_props store, a keyed child diff, and the modelled turn framing, events and motion around them."
+publish = false
+
+# No third-party crates: the codec is pure std. The PropId table is
+# generated at build time from `propid-names.tsv` (see build.rs).
+[dependencies]
+
+[lints]
+workspace = true

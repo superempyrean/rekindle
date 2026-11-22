@@ -1,0 +1,44 @@
+[package]
+name = "message-logger"
+version = "0.1.0"
+edition = "2024"
+description = "Keeps deleted and edited messages you received, on this device, and shows them as ghost rows and edit history (read-messages + ghost messages + accessories + settings schema)."
+license = "GPL-3.0-or-later"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[package.metadata.rekindle]
+id = "dev.rekindle.message-logger"
+name = "Message Logger"
+capabilities = ["read-messages", "ui", "storage"]
+
+[[package.metadata.rekindle.settings]]
+key = "log-deletes"
+type = "toggle"
+label = "Keep deleted messages"
+default = true
+
+[[package.metadata.rekindle.settings]]
+key = "log-edits"
+type = "toggle"
+label = "Keep edit history"
+default = true
+
+[[package.metadata.rekindle.settings]]
+key = "ignore-bots"
+type = "toggle"
+label = "Ignore bots"
+default = true
+
+[[package.metadata.rekindle.settings]]
+key = "ignored-users"
+type = "users"
+label = "Don't log these people"
+
+[dependencies]
+rekindle-sdk = { path = "../../../crates/sdk" }
+
+[lints]
+workspace = true

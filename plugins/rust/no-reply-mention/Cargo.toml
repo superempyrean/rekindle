@@ -1,0 +1,26 @@
+[package]
+name = "no-reply-mention"
+version = "0.1.0"
+edition = "2024"
+description = "Replies don't ping by default, except to people you list (compose v2)."
+license = "GPL-3.0-or-later"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[package.metadata.rekindle]
+id = "dev.rekindle.no-reply-mention"
+name = "No Reply Mention"
+capabilities = ["compose"]
+
+[[package.metadata.rekindle.settings]]
+key = "always-ping"
+type = "users"
+label = "Still ping these people"
+
+[dependencies]
+rekindle-sdk = { path = "../../../crates/sdk" }
+
+[lints]
+workspace = true

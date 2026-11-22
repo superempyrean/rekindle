@@ -1,0 +1,240 @@
+/// Notifications (requires `notifications`; a desktop notification can
+/// imitate Discord's own, so the host rate-limits them). Posting is here; the
+/// filter over the client's notifications is the `notification-filter`
+/// export, which runs in the render isolate.
+interface notification-types {
+    use types.{snowflake, user-ref, message-ref};
+
+    enum notification-kind { message, mention, reply, dm, friend-request, call, go-live, reminder, other }
+
+    /// A notification the client is about to show.
+    record client-notification {
+        kind: notification-kind,
+        guild: option<snowflake>,
+        channel: option<snowflake>,
+        author: option<user-ref>,
+        message: option<message-ref>,
+        title: string,
+        body: string,
+        /// The client sound it would play ("message1", ...), if any.
+        sound: option<string>,
+    }
+
+    variant notification-decision {
+        show,
+        /// Don't show it (and don't play its sound).
+        suppress,
+        /// Show it without the sound.
+        silent,
+        /// Play the sound only (no desktop popup).
+        sound-only,
+        /// Show it with a different client sound or a plugin sound id.
+        sound(string),
+    }
+}
+
+interface notify {
+    use types.{target};
+
+    record desktop-notification {
+        title: string,
+        body: string,
+        /// A registered plugin image id.
+        icon: option<string>,
+        /// Where clicking it goes (host navigates).
+        on-click: option<target>,
+        /// A client sound name or plugin sound id.
+        sound: option<string>,
+    }
+
+    enum notify-error { rate-limited, invalid, disabled-by-user }
+
+    /// Post a desktop notification, labelled with the plugin's name. Rate
+    /// limited (default 5/min) and subject to the client's own quiet hours
+    /// and Do Not Disturb.
+    post: func(n: desktop-notification) -> result<_, notify-error>;
+}
+
+/// Sounds (requires `audio`). The plugin ships its own sounds; nothing is
+/// fetched, and nothing is ever recorded (no capture API exists).
+interface audio {
+    enum audio-error { too-large, decode-failed, too-many, unknown-sound, invalid }
+
+    /// Register an Ogg/Opus or WAV sound (max 1 MiB, 30 s; 16 per plugin).
+    register-sound: func(id: string, data: list<u8>) -> result<_, audio-error>;
+    /// Play at `volume` (0..1, scaled by the client's notification volume).
+    play: func(id: string, volume: f32) -> result<_, audio-error>;
+    stop: func(id: string);
+    /// The client's own sound names ("message1", "deafen", "undeafen",
+    /// "mute", "unmute", "ptt_start", "ptt_stop", "user_join", "user_leave",
+    /// "call_ringing", ...).
+    client-sounds: func() -> list<string>;
+    /// Replace a client sound with a registered one (`none` restores).
+    /// Layered per plugin like theme overrides.
+    override-sound: func(client-sound: string, sound: option<string>) -> result<_, audio-error>;
+    /// Read text aloud with the client's own text-to-speech voice (local;
+    /// nothing is sent). Rate-limited.
+    speak: func(text: string) -> result<_, audio-error>;
+}
+
+/// Files, through the system's own dialogs (requires `files`; every call is
+/// gesture-bound). The plugin never sees a path or the filesystem: the user
+/// picks, the host reads or writes. For exporting a log, importing a theme
+/// or settings, saving a generated image.
+interface files {
+    enum file-error { no-gesture, cancelled, too-large, failed }
+
+    /// Show a Save dialog with `suggested-name`; write `data` where the
+    /// user chose. Max 64 MiB.
+    save: func(suggested-name: string, content-type: string, data: list<u8>) -> result<_, file-error>;
+
+    record picked { name: string, content-type: option<string>, data: list<u8> }
+    /// Show an Open dialog filtered to `accept` extensions ("json",
+    /// "css"); returns the file's bytes (max 16 MiB).
+    open: func(accept: list<string>) -> result<picked, file-error>;
+}
+
+/// Host-maintained client tweaks (requires `tweaks`; design doc §9). The
+/// host implements each tweak against the client build (one anchor-backed
+/// behaviour switch each: AlwaysAnimate, NoTypingAnimation, SilentTyping,
+/// NoMosaic, ...); the user can always flip them in rekindle's settings.
+/// Plugins can bundle a preset.
+interface tweaks {
+    enum tweak-kind { toggle, choice, number }
+
+    record tweak-info {
+        id: string,
+        label: string,
+        description: string,
+        kind: tweak-kind,
+        choices: list<string>,
+        /// Current effective value as text ("true", "compact", "3").
+        value: string,
+        /// Resolved on this build.
+        available: bool,
+    }
+
+    enum tweak-error { unknown, unavailable, invalid-value, user-locked }
+
+    all: func() -> list<tweak-info>;
+    /// Set while this plugin is enabled. Layered per plugin; a value the
+    /// user set by hand wins (`user-locked`).
+    set: func(id: string, value: string) -> result<_, tweak-error>;
+    reset: func(id: string);
+}
+
+/// Theme tokens (requires `theming`). 0.7.0's interface plus named
+/// surfaces and a background image.
+interface theming {
+    use types.{color};
+
+    enum token-kind { color, length, font, choice }
+    record token-info {
+        name: string,
+        kind: token-kind,
+        group: string,
+        aliases: list<string>,
+        choices: list<string>,
+        min: option<f32>,
+        max: option<f32>,
+    }
+    variant theme-value { color(color), length(f32), font(string), choice(string) }
+    enum theme-error { unknown-token, wrong-kind, out-of-range, unknown-surface }
+
+    tokens: func() -> list<token-info>;
+    get: func(token: string) -> option<theme-value>;
+    set: func(token: string, value: theme-value) -> result<_, theme-error>;
+    reset: func(token: string);
+    get-color: func(token: string) -> option<color>;
+    set-color: func(token: string, value: color) -> bool;
+
+    record tint { color: color, amount: f32, text-amount: f32 }
+    set-tint: func(tint: option<tint>);
+    register-font: func(family: string, data: list<u8>) -> result<_, string>;
+
+    // ---- Named surfaces (Equicord's SurfaceClassesAPI, as data) ----
+    //
+    // Stable names for the client's layout regions and chrome
+    // ("guild-list", "channel-list", "member-list", "chat.gift-button",
+    // "chat.sticker-button", "title-bar.help", "user-area", ...;
+    // `surfaces()` lists those resolved on this build). A plugin can hide
+    // one or restyle it within bounds; it can't move or redraw it.
+
+    record surface-style {
+        hidden: bool,
+        /// 0..1
+        opacity: option<f32>,
+        radius: option<f32>,
+        background: option<color>,
+    }
+    surfaces: func() -> list<string>;
+    set-surface: func(surface: string, style: surface-style) -> result<_, theme-error>;
+    reset-surface: func(surface: string);
+
+    /// A plugin image (see `ui.register-image`) behind the chat area.
+    record background { image: string, opacity: f32, blur: f32 }
+    set-background: func(bg: option<background>);
+
+    /// The keys of the client's own UI strings this build lets plugins
+    /// replace ("composer.placeholder", "channel-list.header", ...).
+    strings: func() -> list<string>;
+    /// Show `text` in place of one of the client's strings; `none` restores
+    /// it.
+    enum string-error {
+        /// This build has no string with that key.
+        unknown-string,
+        /// Empty, or longer than 120 characters.
+        invalid,
+    }
+    set-string: func(key: string, text: option<string>) -> result<_, string-error>;
+}
+
+/// Outbound HTTPS (requires `network`). Unchanged from 0.7.0.
+interface http {
+    enum method { get, post, put, patch, delete, head }
+    record request {
+        method: method,
+        url: string,
+        headers: list<tuple<string, string>>,
+        body: option<list<u8>>,
+    }
+    record response {
+        status: u16,
+        headers: list<tuple<string, string>>,
+        body: list<u8>,
+    }
+    variant http-error {
+        host-not-allowed(string),
+        insecure-scheme,
+        invalid-url(string),
+        timeout,
+        too-large,
+        transport(string),
+    }
+    fetch: func(req: request) -> result<response, http-error>;
+}
+
+/// Write-only clipboard (requires `clipboard`), during a gesture.
+/// Unchanged from 0.7.0, plus images.
+interface clipboard {
+    enum clipboard-error { no-gesture, too-large }
+    write-text: func(text: string) -> result<_, clipboard-error>;
+    /// A PNG the plugin made or ships (max 8 MiB).
+    write-png: func(png: list<u8>) -> result<_, clipboard-error>;
+}
+
+/// Sprites over the client (requires `overlay`). Unchanged from 0.7.0.
+interface overlay {
+    enum overlay-error { too-many-images, image-too-large, decode-failed, too-many-sprites, invalid }
+    register-image: func(id: string, png: list<u8>) -> result<_, overlay-error>;
+    remove-image: func(id: string);
+    record sprite {
+        instance: string,
+        image: string,
+        sx: u32, sy: u32, sw: u32, sh: u32,
+        x: f32, y: f32, w: f32, h: f32,
+    }
+    draw: func(s: sprite) -> result<_, overlay-error>;
+    clear: func(instance: string);
+    viewport: func() -> tuple<f32, f32>;
+}

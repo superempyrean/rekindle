@@ -1,0 +1,21 @@
+[package]
+name = "midnight-theme"
+version = "0.1.0"
+edition = "2024"
+description = "A deep blue-black theme with three variants, switchable from the command palette."
+license = "GPL-3.0-or-later"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[package.metadata.rekindle]
+id = "dev.rekindle.midnight-theme"
+name = "Midnight"
+capabilities = ["theming", "storage", "ui"]
+
+[dependencies]
+rekindle-sdk = { path = "../../../crates/sdk" }
+
+[lints]
+workspace = true

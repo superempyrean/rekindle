@@ -1,0 +1,27 @@
+[package]
+name = "message-click-actions"
+version = "0.1.0"
+edition = "2024"
+description = "Double-click your message to edit it, someone else's to reply; Shift+double-click to delete (click bindings + gesture-bound actions)."
+license = "GPL-3.0-or-later"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[package.metadata.rekindle]
+id = "dev.rekindle.message-click-actions"
+name = "Message Click Actions"
+capabilities = ["read-client", "ui", "act-local", "act"]
+
+[[package.metadata.rekindle.settings]]
+key = "reply-mention"
+type = "toggle"
+label = "Mention when replying"
+default = true
+
+[dependencies]
+rekindle-sdk = { path = "../../../crates/sdk" }
+
+[lints]
+workspace = true

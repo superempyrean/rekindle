@@ -1,0 +1,1447 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rekindle preview</title>
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --fg: #1d2129; --muted: #626b78; --line: #dde1e7;
+  --soft: #eef0f3; --accent: #4f5bd5; --ok: #1f8f4e; --warn: #a86b00; --bad: #c62828;
+  --bad-bg: #fdecec; --warn-bg: #fff6e0; --mono: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15171b; --panel: #1d2026; --fg: #e3e6eb; --muted: #949ba6; --line: #2e323a;
+    --soft: #252931; --accent: #8c96ff; --ok: #4cc883; --warn: #f0b545; --bad: #ff6b6b;
+    --bad-bg: #3a1d1f; --warn-bg: #3a2f17;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header.top { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 5; }
+header.top h1 { font-size: 15px; margin: 0; font-weight: 600; }
+.spacer { flex: 1; }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 999px; font-size: 12px; background: var(--soft); color: var(--muted); white-space: nowrap; }
+.pill.ok { color: var(--ok); } .pill.bad { color: var(--bad); background: var(--bad-bg); } .pill.warn { color: var(--warn); background: var(--warn-bg); }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; display: inline-block; }
+button, select, input, textarea { font: inherit; color: inherit; }
+button { background: var(--soft); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+select, input[type=text], textarea { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; }
+main { display: grid; grid-template-columns: minmax(480px, 1.15fr) minmax(360px, 1fr); gap: 16px; padding: 16px; align-items: start; }
+@media (max-width: 1000px) { main { grid-template-columns: 1fr; } }
+.col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.card > h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0; padding: 10px 14px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 8px; }
+.card > .body { padding: 12px 14px; }
+#banners:empty { display: none; }
+.banner { border-radius: 10px; padding: 10px 14px; border: 1px solid var(--bad); background: var(--bad-bg); color: var(--fg); }
+.banner.warn { border-color: var(--warn); background: var(--warn-bg); }
+.banner strong { color: var(--bad); } .banner.warn strong { color: var(--warn); }
+.banner pre { margin: 8px 0 0; max-height: 320px; overflow: auto; font: 12px/1.4 var(--mono); white-space: pre-wrap; }
+.banner .actions { margin-top: 8px; }
+.muted { color: var(--muted); }
+.mono { font-family: var(--mono); font-size: 12px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.chip { font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); }
+.chip.granted { border-color: var(--ok); color: var(--ok); }
+.chip.denied { border-color: var(--bad); color: var(--bad); }
+table { border-collapse: collapse; width: 100%; }
+td, th { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+th { font-weight: 600; color: var(--muted); font-size: 12px; }
+tr.overridden td { background: color-mix(in srgb, var(--accent) 9%, transparent); }
+.swatch { width: 22px; height: 16px; border-radius: 4px; border: 1px solid var(--line); display: inline-block; vertical-align: middle;
+  background-image: linear-gradient(45deg, #8884 25%, transparent 25%, transparent 75%, #8884 75%), linear-gradient(45deg, #8884 25%, transparent 25%, transparent 75%, #8884 75%);
+  background-size: 8px 8px; background-position: 0 0, 4px 4px; position: relative; overflow: hidden; }
+.swatch > i { position: absolute; inset: 0; }
+.scroll { max-height: 340px; overflow: auto; }
+
+/* plugin panels, rendered from the element tree */
+.ppanel { border: 1px solid var(--line); border-radius: 8px; margin: 10px 0; }
+.ppanel > .ptitle { font-weight: 600; padding: 7px 12px; border-bottom: 1px solid var(--line); background: var(--soft); display: flex; gap: 8px; align-items: baseline; }
+.ppanel > .pbody { padding: 8px 12px; display: flex; flex-direction: column; gap: 8px; }
+.el-heading { font-size: 15px; font-weight: 600; margin: 4px 0 0; }
+.el-text { margin: 0; white-space: pre-wrap; }
+.el-sep { border: 0; border-top: 1px solid var(--line); margin: 2px 0; width: 100%; }
+.row { display: flex; align-items: center; gap: 10px; }
+.row > .lbl { flex: 0 0 38%; min-width: 0; overflow-wrap: anywhere; }
+.row > .ctl { flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.row input[type=range] { flex: 1; min-width: 0; }
+.row input[type=text], .row select { flex: 1; min-width: 0; }
+.switch { position: relative; width: 36px; height: 20px; flex: none; }
+.switch input { opacity: 0; width: 100%; height: 100%; margin: 0; position: absolute; cursor: pointer; z-index: 1; }
+.switch span { position: absolute; inset: 0; background: var(--line); border-radius: 999px; transition: background .15s; }
+.switch span::after { content: ""; position: absolute; width: 16px; height: 16px; top: 2px; left: 2px; background: #fff; border-radius: 50%; transition: transform .15s; }
+.switch input:checked + span { background: var(--accent); }
+.switch input:checked + span::after { transform: translateX(16px); }
+.switch input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+input[type=color] { width: 40px; height: 26px; padding: 0 2px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
+.cmd { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--line); }
+.cmd:last-child { border-bottom: 0; }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; }
+.kv > :nth-child(odd) { color: var(--muted); }
+.logs { font: 12px/1.45 var(--mono); max-height: 320px; overflow: auto; padding: 8px 14px; }
+.logs div { white-space: pre-wrap; overflow-wrap: anywhere; }
+.lv-error { color: var(--bad); } .lv-warn { color: var(--warn); } .lv-info { color: var(--ok); } .lv-debug, .lv-trace { color: var(--muted); }
+.form { display: grid; grid-template-columns: max-content 1fr; gap: 8px 10px; align-items: center; }
+.form textarea { min-height: 60px; font: 12px var(--mono); resize: vertical; }
+#toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--bad); color: #fff; padding: 8px 14px; border-radius: 8px; display: none; max-width: 80vw; z-index: 10; }
+
+/* the mock client, painted entirely from the effective theme tokens */
+.mc { display: grid; grid-template-columns: 64px 220px 1fr; height: 560px; border-radius: 10px; overflow: hidden; border: 1px solid var(--line);
+  font: 14px/1.375 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--t-text-normal); background: var(--t-background-primary); }
+.mc-rail { background: var(--t-background-tertiary); display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 12px 0; }
+.mc-guild { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; background: var(--t-background-primary); color: var(--t-interactive-normal); font-weight: 600; font-size: 13px; cursor: default; transition: border-radius .15s; }
+.mc-guild.active { background: var(--t-accent); color: #fff; border-radius: 30%; }
+.mc-guild.add { color: var(--t-status-online); font-size: 22px; font-weight: 400; }
+.mc-sep { width: 32px; height: 2px; background: var(--t-background-modifier-hover); border-radius: 1px; }
+.mc-side { background: var(--t-background-secondary); display: flex; flex-direction: column; min-width: 0; }
+.mc-side-h { height: 48px; display: flex; align-items: center; padding: 0 14px; font-weight: 600; color: var(--t-interactive-active); border-bottom: 1px solid var(--t-background-tertiary); flex: none; }
+.mc-chans { flex: 1; overflow: auto; padding: 8px 8px; }
+.mc-cat { font-size: 11px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; color: var(--t-channel-icon); padding: 14px 6px 4px; }
+.mc-chan { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-radius: 4px; color: var(--t-channel-icon); cursor: pointer; user-select: none; }
+.mc-chan b { font-weight: 400; color: var(--t-interactive-normal); }
+.mc-chan:hover { background: var(--t-background-modifier-hover); }
+.mc-chan:hover b { color: var(--t-interactive-hover); }
+.mc-chan.sel { background: var(--t-background-modifier-selected); }
+.mc-chan.sel b { color: var(--t-interactive-active); }
+.mc-hash { font-size: 18px; width: 18px; text-align: center; }
+.mc-av { width: 22px; height: 22px; border-radius: 50%; background: var(--t-accent); display: inline-grid; place-items: center; color: #fff; font-size: 11px; flex: none; }
+.mc-user { flex: none; height: 52px; background: var(--t-background-floating); display: flex; align-items: center; gap: 8px; padding: 0 8px; }
+.mc-me { position: relative; width: 32px; height: 32px; border-radius: 50%; background: var(--t-accent); color: #fff; display: grid; place-items: center; font-weight: 600; flex: none; }
+.mc-st { position: absolute; right: -2px; bottom: -2px; width: 12px; height: 12px; border-radius: 50%; border: 3px solid var(--t-background-floating); background: var(--t-status-online); box-sizing: content-box; }
+.mc-st.idle { background: var(--t-status-idle); } .mc-st.dnd { background: var(--t-status-danger); } .mc-st.invisible { background: var(--t-text-muted); }
+.mc-user select { background: var(--t-input-background); color: var(--t-text-normal); border: 1px solid var(--t-border); font-size: 12px; padding: 2px 4px; border-radius: 4px; }
+.mc-name { flex: 1; min-width: 0; } .mc-name div:first-child { color: var(--t-interactive-active); font-weight: 600; font-size: 13px; } .mc-name div:last-child { color: var(--t-text-muted); font-size: 11px; }
+.mc-main { display: flex; flex-direction: column; min-width: 0; }
+.mc-head { height: 48px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 16px; border-bottom: 1px solid var(--t-border); }
+.mc-head b { color: var(--t-interactive-active); } .mc-head span.topic { color: var(--t-text-muted); font-size: 13px; padding-left: 10px; border-left: 1px solid var(--t-border); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mc-msgs { flex: 1; overflow: auto; padding: 12px 0; scrollbar-color: var(--t-scrollbar) transparent; }
+.mc-msg { display: flex; gap: 14px; padding: 6px 16px; }
+.mc-msg:hover { background: var(--t-background-modifier-hover); }
+.mc-msg.mention { background: var(--t-mention-background); box-shadow: inset 2px 0 0 var(--t-status-idle); }
+.mc-msg .mc-av { width: 38px; height: 38px; font-size: 15px; }
+.mc-msg .who { color: var(--t-interactive-active); font-weight: 600; } .mc-msg .when { color: var(--t-text-muted); font-size: 11px; margin-left: 6px; }
+.mc-msg a { color: var(--t-text-link); text-decoration: none; } .mc-msg a:hover { text-decoration: underline; }
+.mc-ping { color: var(--t-accent); background: color-mix(in srgb, var(--t-accent) 22%, transparent); border-radius: 3px; padding: 0 2px; }
+.mc-input { flex: none; margin: 0 16px 16px; display: flex; align-items: center; gap: 2px; padding-right: 6px; border-radius: 8px; background: var(--t-input-background); }
+.mc-input input { flex: 1; min-width: 0; border: 0; outline: none; padding: 11px 14px; background: transparent; color: var(--t-text-normal); }
+.mc-input input::placeholder { color: var(--t-text-muted); }
+
+/* slots: everything below is drawn by the client from plugin *data* */
+.mc { position: relative; }
+.mc-msg .who, .mc-msg > .mc-av { cursor: pointer; }
+.mc-msg .who:hover { text-decoration: underline; }
+.mc-cbtn { width: 32px; height: 32px; display: grid; place-items: center; border: 0; padding: 0; border-radius: 6px; background: transparent; color: var(--t-interactive-normal); cursor: pointer; }
+.mc-cbtn:hover { color: var(--t-interactive-hover); background: var(--t-background-modifier-hover); border: 0; }
+.mc-cbtn svg, .mc-ico { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.mc-layer { position: absolute; z-index: 20; }
+.mc-menu { min-width: 188px; max-width: 260px; padding: 6px; border-radius: 8px; background: var(--t-background-floating); color: var(--t-text-normal);
+  border: 1px solid var(--t-border-subtle, var(--t-border)); box-shadow: 0 8px 24px rgba(0,0,0,.28); font-size: 14px; }
+.mc-menu .mi { display: block; width: 100%; text-align: left; border: 0; border-radius: 4px; padding: 6px 8px; background: transparent; color: var(--t-interactive-normal); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mc-menu .mi:hover, .mc-menu .mi:focus-visible { background: var(--t-accent); color: #fff; outline: none; border: 0; }
+.mc-menu .mi.danger { color: var(--t-status-danger); }
+.mc-menu .mi.danger:hover, .mc-menu .mi.danger:focus-visible { background: var(--t-status-danger); color: #fff; }
+.mc-menu .msep { height: 1px; margin: 4px 6px; background: var(--t-border-subtle, var(--t-border)); }
+.mc-menu .mgroup { font-size: 11px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; color: var(--t-text-muted); padding: 4px 8px 2px; }
+.mc-pop { width: 300px; max-height: calc(100% - 16px); overflow: auto; border-radius: 8px; background: var(--t-background-floating); color: var(--t-text-normal);
+  border: 1px solid var(--t-border-subtle, var(--t-border)); box-shadow: 0 8px 24px rgba(0,0,0,.28); }
+.mc-pop .banner2 { height: 56px; }
+.mc-pop .who2 { padding: 0 14px 10px; margin-top: -26px; }
+.mc-pop .who2 .mc-av { width: 60px; height: 60px; font-size: 24px; border: 5px solid var(--t-background-floating); box-sizing: content-box; }
+.mc-pop .who2 .nm { font-size: 18px; font-weight: 700; color: var(--t-interactive-active); margin-top: 4px; }
+.mc-pop .who2 .id { font-size: 12px; color: var(--t-text-muted); font-family: var(--mono); }
+.mc-pop .psec { margin: 0 10px 10px; padding: 8px 10px; border-radius: 6px; background: var(--t-background-secondary); }
+.mc-pop .psec h4 { margin: 0 0 4px; font-size: 11px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; color: var(--t-text-muted); display: flex; gap: 6px; }
+.mc-pop .psec h4 span { font-weight: 400; text-transform: none; letter-spacing: 0; margin-left: auto; }
+.mc-pop .psec .pbody, .mc-modal .pbody { display: flex; flex-direction: column; gap: 8px; }
+.mc-scrim { position: absolute; inset: 0; z-index: 30; display: grid; place-items: center; background: var(--t-background-scrim, rgba(0,0,0,.6)); }
+.mc-modal { width: min(440px, calc(100% - 32px)); max-height: calc(100% - 48px); display: flex; flex-direction: column; border-radius: 8px;
+  background: var(--t-modal-background, var(--t-background-primary)); color: var(--t-text-normal); box-shadow: 0 12px 40px rgba(0,0,0,.4); }
+.mc-modal .mhead { display: flex; align-items: center; gap: 8px; padding: 14px 16px 8px; }
+.mc-modal .mhead b { font-size: 18px; color: var(--t-interactive-active); }
+.mc-modal .mhead .by { font-size: 12px; color: var(--t-text-muted); }
+.mc-modal .mhead button { margin-left: auto; border: 0; background: transparent; color: var(--t-interactive-normal); font-size: 20px; line-height: 1; padding: 2px 6px; }
+.mc-modal .mhead button:hover { color: var(--t-interactive-hover); border: 0; }
+.mc-modal .pbody { padding: 4px 16px 16px; overflow: auto; }
+.mc-modal button, .mc-pop button { background: var(--t-control-secondary-background-default, var(--t-background-secondary)); color: var(--t-control-secondary-text-default, var(--t-text-normal)); border: 0; border-radius: 4px; padding: 5px 12px; }
+.mc-modal button:hover, .mc-pop button:hover { background: var(--t-control-secondary-background-hover, var(--t-background-modifier-hover)); border: 0; }
+.mc-modal .el-sep, .mc-pop .el-sep { border-top-color: var(--t-border-subtle, var(--t-border)); }
+.mc-modal input[type=text], .mc-modal select { background: var(--t-input-background); color: var(--t-text-normal); border: 1px solid var(--t-border); }
+.mc-toasts { position: absolute; right: 12px; bottom: 72px; z-index: 40; display: flex; flex-direction: column; gap: 8px; align-items: flex-end; pointer-events: none; }
+.mc-toast { pointer-events: auto; max-width: 300px; padding: 8px 12px 8px 10px; border-radius: 8px; background: var(--t-toast-background, var(--t-background-floating)); color: var(--t-text-normal);
+  border-left: 4px solid var(--t-accent); box-shadow: 0 6px 18px rgba(0,0,0,.3); animation: mc-in .16s ease-out; }
+.mc-toast.success { border-left-color: var(--t-status-positive, var(--t-status-online)); }
+.mc-toast.warning { border-left-color: var(--t-status-warning, var(--t-status-idle)); }
+.mc-toast.error { border-left-color: var(--t-status-danger); }
+.mc-toast .from { font-size: 11px; color: var(--t-text-muted); }
+.mc-toast.out { opacity: 0; transition: opacity .3s; }
+@keyframes mc-in { from { transform: translateY(6px); opacity: 0; } }
+.slotrow { display: flex; align-items: center; gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--line); }
+.slotrow:last-child { border-bottom: 0; }
+.slotrow .nm { flex: 1; min-width: 0; }
+.slotrow .nm div:last-child { font-size: 12px; overflow-wrap: anywhere; }
+
+/* 0.8.0 surfaces */
+.sub { font-size: 12px; margin: 12px 0 4px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); display: flex; gap: 8px; align-items: baseline; }
+.sub span { text-transform: none; letter-spacing: 0; }
+.el-rich code, .mc code { font: 12px var(--mono); background: color-mix(in srgb, currentColor 12%, transparent); border-radius: 3px; padding: 0 3px; }
+.el-field { display: grid; grid-template-columns: 38% 1fr; gap: 10px; }
+.el-field > :first-child { color: var(--muted); }
+.el-img { display: grid; place-items: center; border: 1px dashed var(--line); border-radius: 6px; color: var(--muted); font-size: 11px; max-width: 100%; }
+.el-user { display: flex; align-items: center; gap: 8px; }
+.el-list { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
+.el-list .li { display: flex; gap: 6px; align-items: center; }
+.el-list .li span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.el-table { flex: 1; min-width: 0; overflow: auto; }
+.el-table input { width: 100%; min-width: 60px; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 2px 4px; }
+button.danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, var(--line)); }
+button.xs { padding: 0 6px; font-size: 12px; }
+button:disabled, input:disabled, select:disabled, textarea:disabled { opacity: .55; cursor: default; }
+.row textarea { flex: 1; min-width: 0; min-height: 54px; resize: vertical; }
+.setting-desc { font-size: 12px; color: var(--muted); margin-top: -4px; }
+.slash { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin: 6px 0; display: flex; flex-direction: column; gap: 6px; }
+.lines { font: 12px/1.45 var(--mono); max-height: 220px; overflow: auto; }
+.lines div { white-space: pre-wrap; overflow-wrap: anywhere; padding: 1px 0; }
+.mc-rail .mc-guild { position: relative; cursor: pointer; }
+.mc-rail .mc-deco { position: absolute; right: -4px; bottom: -4px; }
+.mc-deco { display: inline-flex; align-items: center; gap: 2px; font-size: 11px; line-height: 1; padding: 1px 3px; border-radius: 4px; border: 0; background: color-mix(in srgb, currentColor 14%, transparent); color: var(--t-text-muted); vertical-align: middle; margin-left: 4px; }
+.mc-deco .mc-ico { width: 12px; height: 12px; }
+button.mc-deco { cursor: pointer; } button.mc-deco:hover { border: 0; background: color-mix(in srgb, currentColor 26%, transparent); }
+.mc-chan .sub2 { display: block; font-size: 11px; color: var(--t-text-muted); }
+.mc-chan .nm2 { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mc-chan.unread b { font-weight: 600; color: var(--t-interactive-active); }
+.mc-chan .badge { background: var(--t-status-danger); color: #fff; border-radius: 8px; font-size: 11px; padding: 0 5px; }
+.mc-side-h .mc-cbtn, .mc-head .mc-cbtn { width: 28px; height: 28px; }
+.mc-head .tools { margin-left: auto; display: flex; gap: 2px; }
+.mc-msg { position: relative; }
+.mc-msg .mc-hover { display: none; position: absolute; right: 16px; top: -12px; background: var(--t-background-floating); border: 1px solid var(--t-border-subtle, var(--t-border)); border-radius: 6px; padding: 1px; box-shadow: 0 2px 8px rgba(0,0,0,.2); }
+.mc-msg:hover .mc-hover { display: flex; }
+.mc-msg .mc-hover .mc-cbtn { width: 28px; height: 28px; }
+.mc-cbtn.active { color: var(--t-accent); }
+.mc-avwrap { position: relative; flex: none; height: 38px; }
+.mc-avwrap .mc-deco { position: absolute; right: -6px; bottom: -4px; margin: 0; }
+.mc-replyto { font-size: 12px; color: var(--t-text-muted); margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mc-reacts { display: flex; gap: 4px; margin-top: 4px; flex-wrap: wrap; }
+.mc-react { font-size: 12px; padding: 1px 6px; border-radius: 8px; background: var(--t-background-secondary); border: 1px solid transparent; }
+.mc-react.me { border-color: var(--t-accent); }
+.mc-acc { margin-top: 6px; padding: 8px 10px; border-radius: 6px; background: var(--t-background-secondary); display: flex; flex-direction: column; gap: 6px; max-width: 520px; }
+.mc-acc .by { font-size: 11px; color: var(--t-text-muted); }
+.mc-msg.ghost { opacity: .75; }
+.mc-msg.ghost .body { border-left: 2px solid var(--t-status-danger); padding-left: 8px; }
+.mc-msg.ghost.edited .body { border-left-color: var(--t-status-idle); }
+.mc-msg.ghost.note .body { border-left-color: var(--t-accent); }
+.mc-msg .tag { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--t-text-muted); margin-left: 6px; }
+.mc-notice { display: flex; align-items: center; gap: 10px; padding: 6px 16px; font-size: 13px; background: var(--t-accent); color: #fff; }
+.mc-notice.warning { background: var(--t-status-idle); color: #111; } .mc-notice.error { background: var(--t-status-danger); } .mc-notice.success { background: var(--t-status-online); color: #111; }
+.mc-notice .from { opacity: .8; font-size: 11px; }
+.mc-notice button { margin-left: auto; background: rgba(255,255,255,.18); color: inherit; border: 1px solid rgba(255,255,255,.4); }
+.mc-typing { height: 18px; padding: 0 16px; font-size: 12px; color: var(--t-text-muted); flex: none; }
+.mc-compose-note { margin: 0 16px; padding: 4px 10px; font-size: 12px; color: var(--t-text-muted); background: var(--t-background-secondary); border-radius: 8px 8px 0 0; }
+.mc-spanlink { text-decoration: underline dotted; cursor: help; }
+.mc-rbadge { display: inline-block; font-size: 10px; font-weight: 700; line-height: 15px; padding: 0 5px; border-radius: 4px; margin-left: 6px; color: #fff; background: var(--t-accent); vertical-align: 1px; cursor: default; }
+.mc-blur { filter: blur(5px); cursor: pointer; }
+.mc-collapsed { font-size: 12px; color: var(--t-text-muted); font-style: italic; }
+.mc-toggle { font-size: 11px; margin-left: 2px; }
+.mc-hl { border-radius: 3px; padding: 0 1px; }
+</style>
+</head>
+<body>
+<header class="top">
+  <h1 id="title">rekindle preview</h1>
+  <span id="buildPill" class="pill"></span>
+  <span class="spacer"></span>
+  <span id="conn" class="pill"><span class="dot"></span><span>connecting…</span></span>
+  <button id="reloadAll" title="Rebuild (or restart) every plugin">Reload</button>
+</header>
+<main>
+  <div class="col">
+    <div id="banners" class="col"></div>
+    <section class="card">
+      <h2>Mock client <span class="muted" style="text-transform:none;letter-spacing:0">— painted from the effective theme; click a channel to select it; right-click messages, authors, links, channels and servers; click an author for their profile</span></h2>
+      <div class="body" style="padding:10px">
+        <div class="mc" id="mc">
+          <nav class="mc-rail" id="mcRail"></nav>
+          <aside class="mc-side">
+            <div class="mc-side-h" id="mcSideHead"></div>
+            <div class="mc-chans" id="mcChans"></div>
+            <div class="mc-user">
+              <div class="mc-me" id="mcMe">Y<span class="mc-st" id="mcSt"></span></div>
+              <div class="mc-name"><div id="mcMeName">you</div><div id="mcStName">online</div></div>
+              <span id="mcUserButtons" style="display:contents"></span>
+              <button class="mc-cbtn" id="mcCog" title="User settings (settings.cog-menu)"></button>
+              <select id="mcPresence" title="Your status (my-presence)"></select>
+            </div>
+          </aside>
+          <div class="mc-main">
+            <div class="mc-head"><span class="mc-hash" style="color:var(--t-channel-icon)" id="mcChanIcon">#</span><b id="mcChanName"></b><span class="topic" id="mcTopic"></span><span class="tools" id="mcToolbar"></span></div>
+            <div id="mcNotices"></div>
+            <div class="mc-msgs" id="mcMsgs"></div>
+            <div class="mc-typing" id="mcTyping"></div>
+            <div id="mcComposeNote"></div>
+            <div class="mc-input"><button class="mc-cbtn" id="mcAttach" title="Attach (composer.attach-menu)"></button><input id="mcInput" type="text" placeholder="Message" autocomplete="off"><span id="mcChatBar" style="display:contents"></span></div>
+          </div>
+          <div id="mcOverlay" style="display:contents"></div>
+          <div id="mcModals" style="display:contents"></div>
+          <div class="mc-toasts" id="mcToasts"></div>
+        </div>
+      </div>
+    </section>
+    <section class="card">
+      <h2>Decorations <span class="muted" id="decoSummary" style="text-transform:none;letter-spacing:0"></span></h2>
+      <div class="body" id="decoRows"></div>
+    </section>
+    <section class="card">
+      <h2>Theme tokens <span class="muted" id="themeSummary" style="text-transform:none;letter-spacing:0"></span></h2>
+      <div class="body scroll" style="padding-top:4px"><table><thead><tr><th>Token</th><th></th><th>Value</th><th>Overridden by</th></tr></thead><tbody id="themeRows"></tbody></table></div>
+    </section>
+  </div>
+  <div class="col">
+    <div id="plugins" class="col"></div>
+    <section class="card">
+      <h2>Activity <span class="muted" style="text-transform:none;letter-spacing:0">— what the client did, what plugins did as you</span></h2>
+      <div class="body">
+        <div id="lastSend"></div>
+        <div class="sub">Actions performed <span class="muted">(as the user, in a gesture)</span></div><div class="lines" id="performed"></div>
+        <div class="sub">Desktop notifications</div><div class="lines" id="notifications"></div>
+        <div class="sub">Client activity</div><div class="lines" id="activity"></div>
+      </div>
+    </section>
+    <section class="card">
+      <h2>Slots <span class="muted" id="slotSummary" style="text-transform:none;letter-spacing:0"></span></h2>
+      <div class="body" id="slotRows"></div>
+    </section>
+    <section class="card">
+      <h2>Inject event</h2>
+      <div class="body">
+        <div class="form">
+          <label for="evKind">Event</label>
+          <select id="evKind">
+            <option value="select">selection-changed (select a channel)</option>
+            <option value="presence">my-presence</option>
+            <option value="receive">message-created (someone writes)</option>
+            <option value="typing">typing</option>
+            <option value="hook">hook (custom)</option>
+            <option value="raw">any event (JSON)</option>
+          </select>
+          <label data-for="select receive typing">Channel</label><select id="evChannel" data-for="select receive typing"></select>
+          <label data-for="presence">Status</label><select id="evPresence" data-for="presence"></select>
+          <label data-for="receive">Author</label><select id="evAuthor" data-for="receive"></select>
+          <label data-for="receive">Content</label><input id="evContent" data-for="receive" type="text" value="hey, did the plugin load?">
+          <label data-for="typing">User ids</label><input id="evTyping" data-for="typing" type="text" value="101" spellcheck="false">
+          <label data-for="hook">Hook name</label><input id="evHook" data-for="hook" type="text" value="message-sent" spellcheck="false">
+          <label data-for="hook">Payload (JSON)</label><textarea id="evPayload" data-for="hook" spellcheck="false">{"channel": 1002, "content": "hello"}</textarea>
+          <label data-for="raw">Event (JSON)</label><textarea id="evRaw" data-for="raw" spellcheck="false" style="min-height:110px">{"Presence": {"user": 101, "status": "idle", "client_status": {"desktop": "idle", "mobile": "", "web": "", "embedded": ""}, "activities": []}}</textarea>
+          <span></span><div><button class="primary" id="evSend">Send to plugins</button> <span class="muted" style="font-size:12px">delivered to plugins granted the event's capability and subscribed to its kind</span></div>
+        </div>
+      </div>
+    </section>
+    <section class="card">
+      <h2>Logs <span class="muted" style="text-transform:none;letter-spacing:0">(also in the terminal)</span><span class="spacer"></span>
+        <select id="logLevel" style="text-transform:none;letter-spacing:0;font-size:12px"><option value="trace">all</option><option value="debug">debug+</option><option value="info" selected>info+</option><option value="warn">warn+</option><option value="error">error</option></select></h2>
+      <div class="logs" id="logs"></div>
+    </section>
+  </div>
+</main>
+<div id="toast"></div>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const LEVELS = ["trace", "debug", "info", "warn", "error"];
+let state = null;
+let rev = -1;
+
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null || v === false) continue;
+    if (k === "class") el.className = v;
+    else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+    else if (k in el && typeof v !== "string") el[k] = v;
+    else el.setAttribute(k, v === true ? "" : v);
+  }
+  for (const kid of kids.flat()) if (kid != null && kid !== false) el.append(kid instanceof Node ? kid : String(kid));
+  return el;
+}
+
+let toastTimer = 0;
+function toast(msg) {
+  const t = $("toast");
+  t.textContent = msg; t.style.display = "block";
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => (t.style.display = "none"), 5000);
+}
+
+// Request bodies. Snowflakes can exceed a JS number, so targets travel as the
+// JSON text the state gave us (`raw`), spliced in verbatim.
+class Raw { constructor(t) { this.t = t; } }
+const raw = (t) => new Raw(t);
+function enc(v) {
+  if (v instanceof Raw) return v.t;
+  if (Array.isArray(v)) return "[" + v.map(enc).join(",") + "]";
+  if (v && typeof v === "object") return "{" + Object.entries(v).filter(([, x]) => x !== undefined).map(([k, x]) => JSON.stringify(k) + ":" + enc(x)).join(",") + "}";
+  return JSON.stringify(v === undefined ? null : v);
+}
+
+// `body`: an object (encoded with enc) or a JSON string (sent as is).
+async function api(path, body) {
+  const opts = body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: typeof body === "string" ? body : enc(body) };
+  const r = await fetch(path, opts);
+  const j = await r.json().catch(() => ({ error: "bad response (" + r.status + ")" }));
+  if (!r.ok) {
+    toast(j.error || ("HTTP " + r.status));
+    if (j.state) apply(j.state);
+    return null;
+  }
+  apply(j);
+  return j;
+}
+
+function apply(s) {
+  state = s; rev = s.rev;
+  render();
+}
+
+const modsOf = (ev) => ({ shift: !!(ev && ev.shiftKey), ctrl: !!(ev && ev.ctrlKey), alt: !!(ev && ev.altKey), meta: !!(ev && ev.metaKey) });
+const NONE = { target: '"None"', facts: [] };
+
+// ---------- colors ----------
+const hex6 = (c) => (c || "#000000").slice(0, 7);
+const alphaOf = (c) => (c && c.length === 9 ? c.slice(7, 9) : "");
+
+// ---------- rendering ----------
+function render() {
+  document.title = state.title;
+  $("title").textContent = state.title;
+  renderTheme();
+  renderBuildPill();
+  renderBanners();
+  renderPlugins();
+  renderClient();
+  renderSlots();
+  renderDecorations();
+  renderActivity();
+  fillEventForm();
+  renderLogs();
+}
+
+function renderTheme() {
+  const root = $("mc");
+  const rows = [];
+  let overridden = 0;
+  for (const t of state.theme) {
+    root.style.setProperty("--t-" + t.token, t.value);
+    // Legacy names still drive this page's CSS.
+    for (const a of (t.aliases || [])) root.style.setProperty("--t-" + a, t.value);
+    if (t.owner) overridden++;
+    rows.push(h("tr", { class: t.owner ? "overridden" : "" },
+      h("td", { class: "mono" }, t.token),
+      h("td", {}, t.kind === "color" ? h("span", { class: "swatch" }, h("i", { style: "background:" + t.value })) : h("span", { class: "muted" }, t.kind)),
+      h("td", { class: "mono" }, t.value),
+      h("td", { class: "mono" }, t.owner || h("span", { class: "muted" }, "—"))));
+  }
+  $("themeRows").replaceChildren(...rows);
+  $("themeSummary").textContent = "— " + overridden + " of " + state.theme.length + " overridden";
+}
+
+function renderBuildPill() {
+  const p = $("buildPill");
+  const builds = state.plugins.map((x) => x.build).filter(Boolean);
+  if (!builds.length) { p.style.display = "none"; return; }
+  p.style.display = "";
+  const failed = builds.some((b) => b.state === "failed"), building = builds.some((b) => b.state === "building");
+  p.className = "pill " + (building ? "warn" : failed ? "bad" : "ok");
+  const last = builds[0];
+  p.replaceChildren(h("span", { class: "dot" }), building ? "building…" : failed ? "build failed" : "built" + (last.duration_ms ? " in " + (last.duration_ms / 1000).toFixed(1) + "s" : "") + " · #" + last.generation);
+}
+
+function renderBanners() {
+  const out = [];
+  for (const p of state.plugins) {
+    const name = (p.info && p.info.name) || p.id;
+    if (p.info && p.info.status.state === "faulted") {
+      out.push(h("div", { class: "banner" }, h("strong", {}, name + " faulted and was disabled. "), p.info.status.reason,
+        h("div", { class: "actions" }, h("button", { onclick: () => api("/api/reload", { plugin: p.id }) }, p.has_source ? "Rebuild & restart" : "Restart"))));
+    }
+    if (p.info && p.info.renderer_disabled) {
+      out.push(h("div", { class: "banner warn" }, h("strong", {}, name + "'s renderer was switched off. "), p.info.renderer_disabled));
+    }
+    if (p.load_error) {
+      out.push(h("div", { class: "banner" }, h("strong", {}, name + " failed to load. "), h("pre", {}, p.load_error)));
+    }
+    if (p.build && p.build.state === "failed") {
+      out.push(h("div", { class: "banner warn" }, h("strong", {}, "Build failed"), p.info ? " — the previous build of " + name + " is still running." : " — " + name + " is not running yet.",
+        h("pre", {}, p.build.error || "")));
+    }
+  }
+  $("banners").replaceChildren(...out);
+}
+
+function statusPill(p) {
+  if (!p.info) return h("span", { class: "pill bad" }, h("span", { class: "dot" }), "not loaded");
+  if (p.info.status.state === "faulted") return h("span", { class: "pill bad" }, h("span", { class: "dot" }), "faulted");
+  return h("span", { class: "pill ok" }, h("span", { class: "dot" }), "active");
+}
+
+const sub = (title, note) => h("div", { class: "sub" }, title, note ? h("span", { class: "muted" }, note) : null);
+
+function renderPlugins() {
+  const host = $("plugins");
+  const seen = new Set();
+  for (const p of state.plugins) {
+    seen.add(p.id);
+    let card = [...host.children].find((c) => c.dataset.plugin === p.id);
+    if (!card) {
+      card = h("section", { class: "card", "data-plugin": p.id }, h("h2", { class: "phead" }),
+        h("div", { class: "body" }, ...["pmeta", "ppanels", "psettings", "pcmds", "pkeys", "pslash", "pclicks", "pstore"].map((c) => h("div", { class: c }))));
+      host.append(card);
+    }
+    renderPluginCard(card, p);
+  }
+  for (const card of [...host.children]) if (!seen.has(card.dataset.plugin)) card.remove();
+}
+
+function renderPluginCard(card, p) {
+  const m = p.manifest, i = p.info;
+  const part = (c) => card.querySelector("." + c);
+  part("phead").replaceChildren(
+    h("span", { style: "text-transform:none;letter-spacing:0;color:var(--fg);font-size:14px" }, (i && i.name) || (m && m.name) || p.id),
+    h("span", { class: "mono", style: "text-transform:none;letter-spacing:0" }, i ? i.version : ""),
+    h("span", { class: "spacer" }), statusPill(p),
+    i ? h("span", { class: "pill" }, i.trust) : null,
+    h("button", { title: p.has_source ? "Rebuild from source and reload" : "Restart from the installed component", onclick: () => api("/api/reload", { plugin: p.id }) }, p.has_source ? "Rebuild" : "Restart"));
+
+  const meta = [h("div", { class: "mono muted" }, p.id)];
+  if (m && m.description) meta.push(h("div", { class: "muted" }, m.description));
+  if (i) {
+    const chips = [...i.granted].map((c) => h("span", { class: "chip granted", title: "granted" }, c));
+    for (const d of i.denied) chips.push(h("span", { class: "chip denied", title: "denied" }, d));
+    for (const n of i.network_allowlist) chips.push(h("span", { class: "chip", title: "network allowlist" }, "net: " + n));
+    if (!chips.length) chips.push(h("span", { class: "muted" }, "no capabilities"));
+    meta.push(h("div", { class: "chips" }, chips));
+    if (i.hooks && i.hooks.length) meta.push(h("div", { class: "muted", style: "font-size:12px" }, "hooks: " + i.hooks.join(", ")));
+  }
+  part("pmeta").replaceChildren(...meta);
+
+  renderPanels(part("ppanels"), p);
+  renderSettings(part("psettings"), p);
+
+  part("pcmds").replaceChildren(...(p.commands.length ? [sub("Commands"),
+    ...p.commands.map((c) => h("div", { class: "cmd" }, h("span", {}, c.title, " ", h("span", { class: "mono muted" }, c.id)),
+      h("button", { onclick: () => api("/api/command", { plugin: p.id, id: c.id }) }, "Run")))] : []));
+
+  part("pkeys").replaceChildren(...(p.keybinds.length ? [sub("Keybinds", "— window-focused only"),
+    ...p.keybinds.map((k) => h("div", { class: "cmd" }, h("span", {}, k.label, " ", h("span", { class: "mono muted" }, k.default || "(unbound)")),
+      h("button", { onclick: () => api("/api/keybind", { plugin: p.id, id: k.id }) }, "Press")))] : []));
+
+  renderSlash(part("pslash"), p);
+
+  part("pclicks").replaceChildren(...(p.click_bindings.length ? [sub("Message clicks"),
+    ...p.click_bindings.map((b) => h("div", { class: "cmd" }, h("span", {}, b.label, " ", h("span", { class: "mono muted" }, gestureText(b.gesture)))))] : []));
+
+  const entries = p.storage ? Object.entries(p.storage) : [];
+  part("pstore").replaceChildren(sub("Storage"),
+    entries.length ? h("div", { class: "kv mono" }, entries.flatMap(([k, v]) => [h("span", {}, k), h("span", { style: "overflow-wrap:anywhere" }, v)]))
+      : h("div", { class: "muted" }, "empty"));
+}
+
+function gestureText(g) {
+  const mods = Object.entries(g.mods).filter(([, on]) => on).map(([k]) => k);
+  return [...mods, (g.clicks === 2 ? "double-click " : g.clicks === 3 ? "triple-click " : "click ") + g.area].join("+");
+}
+
+// Panels re-render in place, keyed by element, so a control the user is
+// dragging or typing into isn't replaced underneath them.
+function renderPanels(host, p) {
+  const keep = new Set();
+  for (const panel of p.panels) {
+    keep.add(panel.id);
+    let box = [...host.children].find((c) => c.dataset.panel === panel.id);
+    if (!box) {
+      box = h("div", { class: "ppanel", "data-panel": panel.id }, h("div", { class: "ptitle" }), h("div", { class: "pbody" }));
+      host.append(box);
+    }
+    box.querySelector(".ptitle").replaceChildren(panel.title, h("span", { class: "mono muted", style: "font-weight:400" }, panel.id));
+    renderElements(box.querySelector(".pbody"), panel.elements, uiSender(p.id, panel.id));
+  }
+  for (const c of [...host.children]) if (!keep.has(c.dataset.panel)) c.remove();
+}
+
+const uiSender = (plugin, surface) => (element, value) => api("/api/ui", { plugin, surface, element, value });
+
+// ---------- generated settings page ----------
+function settingEl(e) {
+  const s = e.spec, v = e.value.value;
+  const base = { id: s.key, label: s.label, _desc: s.description, _disabled: !e.enabled, _setting: e };
+  switch (s.type) {
+    case "toggle": return { ...base, kind: "toggle", value: v };
+    case "select": return { ...base, kind: "select", options: s.options || [], selected: v };
+    case "slider": return { ...base, kind: "slider", min: s.min ?? 0, max: s.max ?? 100, step: s.step ?? 1, value: v };
+    case "number": return { ...base, kind: "number", min: s.min, max: s.max, step: s.step, value: v };
+    case "color": return { ...base, kind: "color-picker", value: v };
+    case "string-list": return { ...base, kind: "string-list", items: v || [], placeholder: s.placeholder || "" };
+    case "table": return { ...base, kind: "table", columns: s.columns || [], rows: v || [] };
+    case "users": case "channels": case "guilds":
+      return { ...base, kind: "text-input", value: (v || []).join(", "), placeholder: s.type.slice(0, -1) + " ids, comma-separated" };
+    default: return { ...base, kind: "text-input", value: v == null ? "" : String(v), placeholder: s.placeholder || (s.type === "keybind" ? "e.g. Ctrl+Shift+K" : ""), multiline: !!s.multiline };
+  }
+}
+
+// An element value back into a setting value (most share the shape).
+function settingValue(spec, ui) {
+  if (ui.kind === "toggled") return { kind: "boolean", value: ui.value };
+  if (ui.kind !== "text") return ui;
+  if (spec.type === "keybind") return { kind: "keybind", value: ui.value };
+  if (["users", "channels", "guilds"].includes(spec.type)) {
+    const ids = ui.value.split(/[\s,]+/).filter(Boolean);
+    if (ids.some((x) => !/^\d{1,20}$/.test(x))) { toast("ids are numbers, comma-separated"); return null; }
+    return { kind: "ids", value: raw("[" + ids.join(",") + "]") };
+  }
+  return ui;
+}
+
+function renderSettings(host, p) {
+  const entries = (p.settings && p.settings.entries) || [];
+  const shown = entries.filter((e) => e.visible);
+  if (!entries.length && !p.settings_extra.length) { host.replaceChildren(); return; }
+  if (!host.children.length) host.append(h("div"), h("div", { class: "pbody", style: "display:flex;flex-direction:column;gap:8px" }), h("div"), h("div", { class: "pbody", style: "display:flex;flex-direction:column;gap:8px" }));
+  const [head, body, extraHead, extra] = host.children;
+  const hidden = entries.length - shown.length;
+  head.replaceChildren(sub("Settings", hidden ? "— " + hidden + " hidden by visible-when" : "— generated from the manifest"));
+  const bySpec = new Map(entries.map((e) => [e.spec.key, e.spec]));
+  renderElements(body, shown.map(settingEl), (key, ui) => {
+    const value = settingValue(bySpec.get(key), ui);
+    if (value) api("/api/setting", { plugin: p.id, key, value });
+  });
+  extraHead.replaceChildren(...(p.settings_extra.length ? [sub("Settings page extras", "— surface settings-page")] : []));
+  renderElements(extra, p.settings_extra, uiSender(p.id, "settings-page"), true);
+}
+
+// ---------- slash commands ----------
+function renderSlash(host, p) {
+  const sig = JSON.stringify(p.slash_commands);
+  if (host.dataset.sig !== sig) {
+    host.dataset.sig = sig;
+    host.replaceChildren(...(p.slash_commands.length ? [sub("Slash commands", "— run in the selected channel"), ...p.slash_commands.map((c) => slashForm(p.id, c)), h("div", { class: "slash-reply" })] : []));
+  }
+  const out = host.querySelector(".slash-reply");
+  if (!out) return;
+  const last = state.last_slash;
+  out.replaceChildren(...(last && last.plugin === p.id ? [h("div", { class: "muted", style: "font-size:12px" }, "/" + last.command + " replied: "), replyNode(last.reply)] : []));
+}
+
+function slashForm(plugin, c) {
+  const inputs = c.options.map((o) => {
+    let input;
+    if (o.kind === "Choice") input = h("select", {}, h("option", { value: "" }, "—"), ...o.choices.map(([label, value]) => h("option", { value }, label)));
+    else if (o.kind === "Boolean") input = h("select", {}, h("option", { value: "" }, "—"), h("option", { value: "true" }, "true"), h("option", { value: "false" }, "false"));
+    else input = h("input", { type: "text", spellcheck: false, placeholder: o.kind.toLowerCase() + (["User", "Channel", "Role", "Mentionable"].includes(o.kind) ? " id" : "") });
+    return [o, input];
+  });
+  const where = c.in_guilds && c.in_dms ? "" : c.in_guilds ? " (servers only)" : " (DMs only)";
+  return h("div", { class: "slash" },
+    h("div", {}, h("span", { class: "mono" }, "/" + c.name), " ", h("span", { class: "muted" }, c.description + where)),
+    ...inputs.map(([o, input]) => h("div", { class: "row" }, h("label", { class: "lbl", title: o.description }, o.name + (o.required ? " *" : "")), h("div", { class: "ctl" }, input))),
+    h("div", {}, h("button", { onclick: () => {
+      const options = {};
+      for (const [o, input] of inputs) if (input.value.trim()) options[o.name] = input.value;
+      api("/api/slash", { plugin, command: c.name, options });
+    } }, "Run")));
+}
+
+function replyNode(r) {
+  if (r === "None") return h("span", { class: "muted" }, "nothing");
+  if (r.Local) return h("div", { class: "el-rich" }, h("span", { class: "muted" }, "(only you can see this) "), spans(r.Local));
+  if (r.Insert != null) return h("span", {}, "inserted into the composer: ", h("span", { class: "mono" }, r.Insert));
+  if (r.Send != null) return h("span", {}, "sent: ", h("span", { class: "mono" }, r.Send));
+  return h("span", { class: "mono" }, JSON.stringify(r));
+}
+
+// ---------- elements ----------
+// `send(id, value)` delivers an interaction; null renders read-only.
+function renderElements(body, elements, send, quietIfEmpty) {
+  const old = new Map([...body.children].map((c) => [c.dataset.key, c]));
+  const next = elements.map((el, idx) => {
+    const k = idx + ":" + el.kind + ":" + (el.id || "");
+    let node = old.get(k);
+    if (node && node._update) node._update(el);
+    else node = element(el, k, send);
+    lock(node, !send || el._disabled);
+    return node;
+  });
+  if (!next.length && !quietIfEmpty) next.push(h("div", { class: "muted" }, "(empty)"));
+  body.replaceChildren(...next);
+}
+
+function lock(node, off) {
+  for (const c of node.querySelectorAll("input, select, button, textarea")) if (!c.classList.contains("reset")) c.disabled = !!off;
+}
+
+const focused = (node) => node.contains(document.activeElement);
+
+function element(el, key, send) {
+  const emit = (value) => send && send(el.id, value);
+  const row = (...ctl) => {
+    const label = h("label", { class: "lbl", title: el._desc || null });
+    const ctls = h("div", { class: "ctl" }, ...ctl);
+    if (el._setting) ctls.append(h("button", { class: "xs reset", title: "Reset to default", onclick: () => api("/api/setting/reset", { plugin: currentSettingPlugin(ctls), key: el.id }) }, "↺"));
+    const r = h("div", { class: "row", "data-key": key }, label, ctls);
+    return r;
+  };
+  const setLabel = (node, e) => { const l = node.querySelector(".lbl"); if (l) l.textContent = e.label; };
+  let node;
+  switch (el.kind) {
+    case "heading": node = h("h3", { class: "el-heading", "data-key": key }); node._update = (e) => (node.textContent = e.text); break;
+    case "text": node = h("p", { class: "el-text", "data-key": key }); node._update = (e) => (node.textContent = e.text); break;
+    case "rich-text": node = h("p", { class: "el-text el-rich", "data-key": key }); node._update = (e) => node.replaceChildren(...spans(e.spans)); break;
+    case "separator": node = h("hr", { class: "el-sep", "data-key": key }); node._update = () => {}; break;
+    case "field": {
+      const k = h("span"), v = h("span", { style: "overflow-wrap:anywhere" });
+      node = h("div", { class: "el-field", "data-key": key }, k, v);
+      node._update = (e) => { k.textContent = e.key; v.textContent = e.value; };
+      break;
+    }
+    case "user": {
+      node = h("div", { class: "el-user", "data-key": key });
+      node._update = (e) => { const n = userName(e.id); node.replaceChildren(h("span", { class: "mc-av" }, n[0].toUpperCase()), h("span", {}, n)); };
+      break;
+    }
+    case "image": {
+      node = h("div", { class: "el-img", "data-key": key });
+      node._update = (e) => { node.style.width = Math.min(e.width, 320) + "px"; node.style.height = Math.min(e.height, 240) + "px"; node.textContent = "image " + e.image + " (" + e.width + "×" + e.height + ")"; };
+      break;
+    }
+    case "toggle": {
+      const input = h("input", { type: "checkbox", onchange: () => emit({ kind: "toggled", value: input.checked }) });
+      node = row(h("span", { class: "switch" }, input, h("span")));
+      node._update = (e) => { setLabel(node, e); input.checked = e.value; };
+      break;
+    }
+    case "slider": {
+      const out = h("span", { class: "mono", style: "min-width:3.5em;text-align:right" });
+      // Throttled while dragging so the theme follows the thumb, plus a final send on release.
+      let timer = 0, last = 0, dragging = false;
+      const push = () => { last = Date.now(); emit({ kind: "number", value: Number(input.value) }); };
+      const input = h("input", { type: "range",
+        onpointerdown: () => (dragging = true), onpointerup: () => (dragging = false),
+        oninput: () => { out.textContent = fmt(input.value); clearTimeout(timer); if (Date.now() - last > 120) push(); else timer = setTimeout(push, 120); },
+        onchange: () => { dragging = false; clearTimeout(timer); push(); } });
+      node = row(input, out);
+      node._update = (e) => {
+        setLabel(node, e);
+        input.min = e.min; input.max = e.max; input.step = e.step > 0 ? e.step : "any";
+        if (!dragging) { input.value = e.value; out.textContent = fmt(e.value); }
+      };
+      break;
+    }
+    case "number": {
+      const input = h("input", { type: "number", style: "flex:1;min-width:0", onchange: () => { const n = Number(input.value); if (Number.isFinite(n)) emit({ kind: "number", value: n }); } });
+      node = row(input);
+      node._update = (e) => {
+        setLabel(node, e);
+        if (e.min != null) input.min = e.min; if (e.max != null) input.max = e.max; input.step = e.step > 0 ? e.step : "any";
+        if (!focused(node)) input.value = e.value;
+      };
+      break;
+    }
+    case "color-picker": {
+      let alpha = alphaOf(el.value);
+      const hexOut = h("span", { class: "mono" });
+      const input = h("input", { type: "color",
+        oninput: () => (hexOut.textContent = input.value + alpha),
+        // <input type=color> has no alpha channel: keep the plugin's.
+        onchange: () => emit({ kind: "color", value: input.value + alpha }) });
+      node = row(input, hexOut);
+      node._update = (e) => {
+        setLabel(node, e); alpha = alphaOf(e.value);
+        if (!focused(node)) { input.value = hex6(e.value); hexOut.textContent = e.value; }
+      };
+      break;
+    }
+    case "text-input": {
+      let sent = null;
+      const commit = () => { if (input.value !== sent) { sent = input.value; emit({ kind: "text", value: input.value }); } };
+      const input = el.multiline
+        ? h("textarea", { onchange: commit, onkeydown: (ev) => { if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) commit(); } })
+        : h("input", { type: "text", onchange: commit, onkeydown: (ev) => { if (ev.key === "Enter") commit(); } });
+      node = row(input);
+      node._update = (e) => {
+        setLabel(node, e); input.placeholder = e.placeholder || "";
+        if (!focused(node)) { input.value = e.value; sent = e.value; }
+      };
+      break;
+    }
+    case "button": {
+      const b = h("button", { onclick: () => emit({ kind: "clicked" }) });
+      node = h("div", { "data-key": key }, b);
+      node._update = (e) => { b.className = e.danger ? "danger" : ""; b.replaceChildren(...(e.icon ? [icon(e.icon, "mc-ico"), " "] : []), e.label); };
+      break;
+    }
+    case "select": {
+      const sel = h("select", { onchange: () => emit({ kind: "selected", value: Number(sel.value) }) });
+      let opts = "";
+      node = row(sel);
+      node._update = (e) => {
+        setLabel(node, e);
+        const sig = JSON.stringify(e.options);
+        if (sig !== opts) { opts = sig; sel.replaceChildren(...e.options.map((o, i) => h("option", { value: String(i) }, o))); }
+        if (!focused(node)) sel.value = String(e.selected);
+      };
+      break;
+    }
+    case "string-list": {
+      let items = [];
+      const list = h("div", { class: "el-list" });
+      const add = h("input", { type: "text", onkeydown: (ev) => { if (ev.key === "Enter" && add.value.trim()) { emit({ kind: "items", value: [...items, add.value] }); add.value = ""; } } });
+      node = row(list);
+      node._update = (e) => {
+        setLabel(node, e); items = e.items; add.placeholder = e.placeholder || "add…";
+        list.replaceChildren(...items.map((it, i) => h("div", { class: "li" }, h("span", {}, it),
+          h("button", { class: "xs", title: "Remove", onclick: () => emit({ kind: "items", value: items.filter((_, j) => j !== i) }) }, "×"))), add);
+      };
+      break;
+    }
+    case "table": {
+      let rows = [], cols = [];
+      const box = h("div", { class: "el-table" });
+      const sendRows = (next) => emit({ kind: "rows", value: next });
+      node = row(box);
+      node._update = (e) => {
+        setLabel(node, e); rows = e.rows; cols = e.columns;
+        if (focused(node)) return;
+        const cell = (r, c) => h("td", {}, h("input", { type: "text", value: rows[r][c], onchange: (ev) => sendRows(rows.map((x, i) => (i === r ? x.map((y, j) => (j === c ? ev.target.value : y)) : x))) }));
+        box.replaceChildren(h("table", {},
+          h("thead", {}, h("tr", {}, ...cols.map((c) => h("th", {}, c)), h("th"))),
+          h("tbody", {}, ...rows.map((r, i) => h("tr", {}, ...r.map((_, j) => cell(i, j)), h("td", {}, h("button", { class: "xs", title: "Remove row", onclick: () => sendRows(rows.filter((_, j) => j !== i)) }, "×")))))),
+          h("button", { class: "xs", onclick: () => sendRows([...rows, cols.map(() => "")]) }, "+ row"));
+      };
+      break;
+    }
+    default: node = h("div", { class: "muted", "data-key": key }, "unsupported element: " + el.kind); node._update = () => {};
+  }
+  node._update(el);
+  return node;
+}
+
+// The plugin card a settings row sits in.
+function currentSettingPlugin(node) { const card = node.closest("[data-plugin]"); return card ? card.dataset.plugin : ""; }
+
+function fmt(v) { const n = Number(v); return Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/0+$/, ""); }
+
+// Styled runs: host spans (`{kind, value}` colors) and contract spans (`{Token}` / `{Rgba}`).
+function spans(list) {
+  return (list || []).map((s) => {
+    const c = s.color;
+    let style = null;
+    if (c && c.kind === "token") style = "color:var(--t-" + c.value + ")";
+    else if (c && c.kind === "rgba") style = "color:" + c.value;
+    else if (c && c.Token) style = "color:var(--t-" + c.Token + ")";
+    else if (c && c.Rgba) style = "color:rgba(" + [c.Rgba.r, c.Rgba.g, c.Rgba.b, c.Rgba.a / 255].join(",") + ")";
+    let n = h(s.code ? "code" : "span", { style, class: s.target ? "mc-spanlink" : null, title: s.target ? "click target: " + JSON.stringify(s.target) : null }, s.text);
+    if (s.bold) n = h("b", {}, n);
+    if (s.italic) n = h("i", {}, n);
+    return n;
+  });
+}
+
+// ---------- icons, names, decorations ----------
+const ICONS = {
+  star: "M12 3l2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3l-5.6 2.9 1.1-6.2L3 9.6l6.2-.9z",
+  bookmark: "M6 3h12v18l-6-4-6 4z",
+  note: "M5 3h10l4 4v14H5z M14 3v5h5 M8 12h8 M8 16h6",
+  palette: "M12 3a9 9 0 1 0 0 18c1 0 1.5-.7 1.5-1.5 0-1-.8-1.3-.8-2.2 0-.8.7-1.3 1.5-1.3H17a4 4 0 0 0 4-4c0-5-4-9-9-9z M7.5 11h.01 M10.5 7h.01 M15 7.5h.01",
+  bolt: "M13 2L4 14h7l-1 8 9-12h-7z",
+  heart: "M12 20s-7-4.4-9-9a4.5 4.5 0 0 1 9-2 4.5 4.5 0 0 1 9 2c-2 4.6-9 9-9 9z",
+  bell: "M6 16v-5a6 6 0 0 1 12 0v5l2 2H4z M10 21h4",
+  gear: "M12 9a3 3 0 1 0 0 6 3 3 0 1 0 0-6z M12 2v3 M12 19v3 M2 12h3 M19 12h3 M4.9 4.9L7 7 M17 17l2.1 2.1 M4.9 19.1L7 17 M17 7l2.1-2.1",
+  link: "M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1 M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1",
+  search: "M11 4a7 7 0 1 0 0 14 7 7 0 1 0 0-14z M16 16l5 5",
+  sparkle: "M12 3l2 7 7 2-7 2-2 7-2-7-7-2 7-2z",
+  eye: "M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z M12 9a3 3 0 1 0 0 6 3 3 0 1 0 0-6z",
+  "eye-off": "M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z M4 4l16 16",
+  clock: "M12 3a9 9 0 1 0 0 18 9 9 0 1 0 0-18z M12 7v5l3 2",
+  pin: "M9 3h6l-1 6 3 3H7l3-3z M12 12v9",
+  puzzle: "M4 8h4a2 2 0 1 1 4 0h4v4a2 2 0 1 1 0 4v4H4z",
+  user: "M12 4a4 4 0 1 0 0 8 4 4 0 1 0 0-8z M4 21a8 8 0 0 1 16 0",
+  users: "M9 5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 1 0 0-7z M2 20a7 7 0 0 1 14 0 M16 5a3.5 3.5 0 0 1 0 7 M18 13.5a7 7 0 0 1 4 6.5",
+  chat: "M4 5h16v11H9l-5 4z",
+  reply: "M10 7L4 12l6 5 M4 12h10a6 6 0 0 1 6 6",
+  copy: "M8 8h12v12H8z M4 16V4h12",
+  trash: "M4 7h16 M9 7V4h6v3 M6 7l1 13h10l1-13",
+  edit: "M4 20h4L19 9l-4-4L4 16z",
+  check: "M5 12l5 5 9-10",
+  cross: "M6 6l12 12 M18 6L6 18",
+  info: "M12 3a9 9 0 1 0 0 18 9 9 0 1 0 0-18z M12 11v6 M12 7h.01",
+  warning: "M12 3l10 18H2z M12 10v5 M12 18h.01",
+  download: "M12 4v12 M6 10l6 6 6-6 M4 20h16",
+  upload: "M12 20V8 M6 14l6-6 6 6 M4 4h16",
+  globe: "M12 3a9 9 0 1 0 0 18 9 9 0 1 0 0-18z M3 12h18 M12 3c3 3 3 15 0 18 M12 3c-3 3-3 15 0 18",
+  code: "M8 7l-5 5 5 5 M16 7l5 5-5 5",
+  hash: "M5 9h15 M4 15h15 M10 3L8 21 M16 3l-2 18",
+  at: "M12 8a4 4 0 1 0 0 8 4 4 0 1 0 0-8z M16 12v1.5a2.5 2.5 0 0 0 5 0V12a9 9 0 1 0-4 7.5",
+  smile: "M12 3a9 9 0 1 0 0 18 9 9 0 1 0 0-18z M8 14s1.5 2 4 2 4-2 4-2 M9 9h.01 M15 9h.01",
+  image: "M4 5h16v14H4z M4 16l5-5 4 4 3-3 4 4 M15 9h.01",
+  play: "M7 4l13 8-13 8z",
+  pause: "M7 4h4v16H7z M14 4h4v16h-4z",
+  lock: "M6 11h12v10H6z M8 11V7a4 4 0 0 1 8 0v4",
+  shield: "M12 3l8 3v6c0 5-4 8-8 9-4-1-8-4-8-9V6z",
+  plus: "M12 5v14 M5 12h14",
+};
+function icon(name, cls) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24"); svg.setAttribute("aria-hidden", "true");
+  if (cls) svg.setAttribute("class", cls);
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute("d", ICONS[name] || ICONS.puzzle);
+  svg.append(path);
+  return svg;
+}
+
+const pluginName = (id) => { const p = state.plugins.find((x) => x.id === id); return (p && p.info && p.info.name) || id; };
+const slotItems = (slot) => (state.slots.items[slot] || []);
+const C = () => state.client;
+const userName = (id) => { const u = C().users[String(id)]; return u ? u.name : String(id); };
+const AVATAR = ["#5865f2", "#d9734e", "#3ba55d", "#9b59b6", "#e67e22", "#1abc9c"];
+const avatarColor = (id) => AVATAR[Number(String(id).slice(-3)) % AVATAR.length];
+
+function decos(kind, key) {
+  const d = state.decorations.find((x) => x.kind === kind);
+  return d ? d.items.filter((i) => String(i.key) === String(key)) : [];
+}
+function decoNode(kind, it) {
+  const d = it.decoration;
+  const click = d.clickable ? (ev) => { ev.stopPropagation(); api("/api/decoration", { plugin: it.plugin, kind, key: String(it.key) }); } : null;
+  return h(d.clickable ? "button" : "span", { class: "mc-deco", title: (d.tooltip ? d.tooltip + " — " : "") + pluginName(it.plugin) + " (" + kind + ")",
+    style: d.color ? "color:" + hex6(d.color) : null, onclick: click },
+    d.icon ? icon(d.icon, "mc-ico") : null, d.text || (d.icon ? null : d.image ? "▣" : "•"));
+}
+const decosFor = (kind, key) => decos(kind, key).map((it) => decoNode(kind, it));
+
+// An icon-button slot item, clicked on `desc`'s target.
+function slotButton(slot, { plugin, item, active }, desc) {
+  return h("button", { class: "mc-cbtn" + (active ? " active" : ""), title: item.tooltip + " — " + pluginName(plugin), "aria-label": item.tooltip,
+    onclick: (ev) => { ev.stopPropagation(); clickSlot(plugin, slot, item.id, desc, ev); } }, icon(item.icon));
+}
+const clickSlot = (plugin, slot, item, desc, ev) => api("/api/slot", { plugin, slot, item, target: raw(desc.target), mods: modsOf(ev) });
+
+// ---------- mock client ----------
+const selChannel = () => C().channels.find((c) => String(c.id) === String(C().selection.channel));
+
+function renderClient() {
+  renderRail();
+  renderSidebar();
+  renderUserArea();
+  const ch = selChannel();
+  $("mcChanIcon").textContent = ch && ch.guild == null ? "@" : "#";
+  $("mcChanName").textContent = ch ? ch.name : "(no channel)";
+  $("mcTopic").textContent = (ch && ch.topic) || "";
+  $("mcTopic").style.display = ch && ch.topic ? "" : "none";
+  $("mcToolbar").replaceChildren(...(ch ? slotItems("channel.toolbar").map((x) => slotButton("channel.toolbar", x, ch.t)) : []));
+  $("mcChatBar").replaceChildren(...(ch ? slotItems("chat-bar.button").map((x) => slotButton("chat-bar.button", x, ch.t)) : []));
+  $("mcInput").placeholder = ch ? "Message " + (ch.guild != null ? "#" : "@") + ch.name : "Pick a channel";
+  $("mcNotices").replaceChildren(...C().notices.map(({ plugin, notice }) => h("div", { class: "mc-notice " + notice.kind },
+    h("span", {}, notice.text), h("span", { class: "from" }, pluginName(plugin)),
+    notice.button ? h("button", { onclick: () => api("/api/ui", { plugin, surface: "notice", element: "button", value: { kind: "clicked" } }) }, notice.button) : null)));
+  const typing = C().typing;
+  $("mcTyping").textContent = typing.length ? typing.join(", ") + (typing.length === 1 ? " is" : " are") + " typing…" : "";
+  const note = C().editing ? "Editing a message — Enter saves (through compose plugins)" : C().replying ? "Replying to " + C().replying.to + (C().replying.mention ? " (mention on)" : " (mention off)") : "";
+  $("mcComposeNote").replaceChildren(...(note ? [h("div", { class: "mc-compose-note" }, note)] : []));
+  if (C().composer !== lastComposer) { lastComposer = C().composer; $("mcInput").value = lastComposer; }
+  renderMessages();
+}
+let lastComposer = "";
+
+function renderRail() {
+  const sel = C().selection;
+  const firstDm = C().channels.find((c) => c.guild == null);
+  const guildIcon = (g) => h("div", { class: "mc-guild" + (String(sel.guild) === String(g.id) ? " active" : ""), title: g.name,
+      onclick: () => { const c = C().channels.find((x) => String(x.guild) === String(g.id) && x.kind !== 4 && x.kind !== 2); if (c) api("/api/select", { channel: String(c.id) }); },
+      oncontextmenu: (ev) => { ev.preventDefault(); ev.stopPropagation(); openMenu("guild.context-menu", g.t, ev); } },
+    g.name.split(/\s+/).map((w) => w[0]).join("").slice(0, 3), ...decosFor("guild-list.overlay", g.id));
+  $("mcRail").replaceChildren(
+    h("div", { class: "mc-guild" + (sel.guild == null ? " active" : ""), title: "Direct messages", onclick: () => firstDm && api("/api/select", { channel: String(firstDm.id) }) }, "DM"),
+    h("div", { class: "mc-sep" }),
+    ...C().guilds.map(guildIcon),
+    ...slotItems("guild-list.button").map((x) => slotButton("guild-list.button", x, NONE)));
+}
+
+function renderSidebar() {
+  const sel = C().selection;
+  const inGuild = sel.guild != null;
+  const guild = C().guilds.find((g) => String(g.id) === String(sel.guild));
+  $("mcSideHead").replaceChildren(h("span", { style: "flex:1" }, inGuild ? (guild ? guild.name : "") : "Direct Messages"),
+    ...(inGuild ? [] : slotItems("dm-list.button").map((x) => slotButton("dm-list.button", x, NONE))));
+  const item = (c) => {
+    const unread = c.unread && c.unread.unread;
+    const recipient = c.recipient != null ? c.recipient : null;
+    const subtitle = decosFor("channel-list.subtitle", c.id);
+    return h("div", { class: "mc-chan" + (String(c.id) === String(sel.channel) ? " sel" : "") + (unread ? " unread" : ""),
+        onclick: () => api("/api/select", { channel: String(c.id) }),
+        oncontextmenu: (ev) => { ev.preventDefault(); ev.stopPropagation(); openMenu("channel.context-menu", c.t, ev); } },
+      c.guild != null ? h("span", { class: "mc-hash" }, c.kind === 2 ? "♪" : "#") : h("span", { class: "mc-av", style: "background:" + avatarColor(recipient || c.id) }, c.name[0].toUpperCase()),
+      h("span", { class: "nm2" }, h("b", {}, c.name), subtitle.length ? h("span", { class: "sub2" }, subtitle) : null),
+      c.unread && c.unread.mentions ? h("span", { class: "badge" }, c.unread.mentions) : null,
+      ...decosFor("channel-list.trailing", c.id),
+      ...(recipient != null ? decosFor("dm-list.trailing", recipient) : []));
+  };
+  const out = [];
+  if (inGuild) {
+    const chans = C().channels.filter((c) => String(c.guild) === String(sel.guild)).sort((a, b) => a.position - b.position);
+    const cats = chans.filter((c) => c.kind === 4);
+    out.push(...chans.filter((c) => c.kind !== 4 && c.parent == null).map(item));
+    for (const cat of cats) {
+      out.push(h("div", { class: "mc-cat" }, cat.name));
+      out.push(...chans.filter((c) => c.kind !== 4 && String(c.parent) === String(cat.id)).map(item));
+    }
+  } else {
+    out.push(h("div", { class: "mc-cat" }, "Direct messages"), ...C().channels.filter((c) => c.guild == null).map(item));
+  }
+  $("mcChans").replaceChildren(...out);
+}
+
+function renderUserArea() {
+  const me = C().me;
+  $("mcMeName").textContent = me.name;
+  $("mcMe").firstChild.textContent = me.name[0].toUpperCase();
+  $("mcSt").className = "mc-st " + C().status;
+  $("mcStName").textContent = C().status;
+  if (!$("mcPresence").options.length) for (const s of state.presence) { $("mcPresence").append(h("option", { value: s }, s)); $("evPresence").append(h("option", { value: s }, s)); }
+  if (document.activeElement !== $("mcPresence")) $("mcPresence").value = C().status;
+  $("mcUserButtons").replaceChildren(...slotItems("user-area.button").map((x) => slotButton("user-area.button", x, NONE)));
+  if (!$("mcCog").firstChild) $("mcCog").append(icon("gear"));
+  if (!$("mcAttach").firstChild) $("mcAttach").append(icon("plus"));
+}
+
+// Message rows are keyed; a row is rebuilt only when what it shows changed,
+// so an accessory input being typed into survives other updates.
+function renderMessages() {
+  const box = $("mcMsgs");
+  const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+  const old = new Map([...box.children].map((c) => [c.dataset.key, c]));
+  const hover = slotItems("message.hover-bar");
+  const next = C().rows.map((r) => {
+    const key = r.kind + ":" + r.id + ":" + (r.plugin || "");
+    const { accessories, ...rest } = r;
+    const sig = JSON.stringify([rest, hover, decos("message.trailing", r.id), decos("user.name-badge", r.author.id), decos("user.avatar-overlay", r.author.id),
+      (accessories || []).map((a) => a.plugin)]);
+    let node = old.get(key);
+    if (!node || node.dataset.sig !== sig) node = r.kind === "ghost" ? ghostRow(r) : messageRow(r, hover);
+    node.dataset.key = key; node.dataset.sig = sig;
+    if (r.kind === "message") for (const a of accessories) {
+      const body = [...node.querySelectorAll(".mc-acc")].find((x) => x.dataset.plugin === a.plugin);
+      if (body) renderElements(body.querySelector(".pbody"), a.elements, uiSender(a.plugin, a.surface));
+    }
+    return node;
+  });
+  if (!next.length) next.push(h("div", { class: "muted", style: "padding:16px" }, "No messages loaded here."));
+  box.replaceChildren(...next);
+  if (atBottom) box.scrollTop = 1e9;
+}
+
+function messageRow(m, hover) {
+  const toProfile = (ev) => { ev.stopPropagation(); openProfile(m.author, ev); };
+  const onUser = (ev) => { ev.preventDefault(); ev.stopPropagation(); openMenu("user.context-menu", m.author_t, ev, userBuiltins(m.author)); };
+  const onMessage = (ev) => {
+    ev.preventDefault();
+    const text = String(window.getSelection() || "").trim();
+    if (text && ev.currentTarget.contains(window.getSelection().anchorNode)) {
+      openMenu("selection.context-menu", { target: JSON.stringify({ Selection: text }), facts: [] }, ev);
+    } else {
+      openMenu("message.context-menu", m.t, ev, messageBuiltins(m));
+    }
+  };
+  const rd = rendered(m);
+  return h("div", { class: "mc-msg", oncontextmenu: onMessage, style: rd.background ? "background:color-mix(in srgb, " + rd.background + " 22%, transparent)" : null },
+    h("span", { class: "mc-avwrap" }, h("span", { class: "mc-av", style: "background:" + avatarColor(m.author.id), onclick: toProfile, oncontextmenu: onUser }, m.author.name[0].toUpperCase()),
+      ...decosFor("user.avatar-overlay", m.author.id)),
+    h("div", { class: "body", style: "min-width:0;flex:1" },
+      m.reply_to ? h("div", { class: "mc-replyto" }, "↱ " + m.reply_to.author + ": " + (m.reply_to.content == null ? "(not loaded)" : m.reply_to.content)) : null,
+      h("div", {}, h("span", { class: "who", onclick: toProfile, oncontextmenu: onUser, style: rd.authorColor ? "color:" + rd.authorColor : null }, m.author.name),
+        ...rd.badges, ...decosFor("user.name-badge", m.author.id),
+        m.bot ? h("span", { class: "tag" }, "bot") : null, h("span", { class: "when" }, snowflakeTime(m.id) + (m.edited ? " (edited)" : ""))),
+      rd.content(h("div", { style: "white-space:pre-wrap;overflow-wrap:anywhere" }, ...rd.text, ...rd.append, ...decosFor("message.trailing", m.id))),
+      m.attachments && !rd.hideAttachments ? h("div", { class: "muted", style: "font-size:12px" }, "📎 " + m.attachments + " attachment(s)") : null,
+      rd.undrawn.length ? h("div", { class: "muted", style: "font-size:11px" }, "not drawn in the preview: " + rd.undrawn.join(", ")) : null,
+      m.reactions.length ? h("div", { class: "mc-reacts" }, ...m.reactions.map((x) => h("span", { class: "mc-react" + (x.me ? " me" : "") }, x.emoji + " " + x.count))) : null,
+      ...m.accessories.map((a) => h("div", { class: "mc-acc", "data-plugin": a.plugin }, h("div", { class: "by" }, pluginName(a.plugin)), h("div", { class: "pbody" })))),
+    hover.length ? h("div", { class: "mc-hover", onclick: (e) => e.stopPropagation() }, ...hover.map((x) => slotButton("message.hover-bar", x, m.t))) : null);
+}
+
+// What the plugins' renderers did to a message (the row's `render`, one
+// entry per plugin), as the pieces messageRow draws.
+function rendered(m) {
+  const rgba = (c) => "rgba(" + [c.r, c.g, c.b, c.a / 255].join(",") + ")";
+  const spanColor = (c) => !c ? null : c.Token ? "var(--t-" + c.Token + ")" : c.Rgba ? rgba(c.Rgba) : null;
+  const out = { badges: [], authorColor: null, background: null, text: linkify(m.content), append: [], hideAttachments: false, undrawn: [],
+    content: (node) => node };
+  let wrap = [];
+  for (const r of m.render || []) for (const t of r.transforms) {
+    const [kind, v] = typeof t === "string" ? [t, null] : Object.entries(t)[0];
+    const by = pluginName(r.plugin);
+    if (kind === "AuthorBadge") out.badges.push(h("span", { class: "mc-rbadge", title: v.tooltip + " (" + by + ")", style: v.color ? "background:" + rgba(v.color) : null }, v.text || "•"));
+    else if (kind === "AuthorColor") out.authorColor = rgba(v);
+    else if (kind === "Background") out.background = spanColor(v);
+    else if (kind === "Append") out.append.push(" ", ...spans(v));
+    else if (kind === "HideAttachment") out.hideAttachments = true;
+    else if (kind === "Highlight") out.text = highlighted(m.content, v, spanColor);
+    else if (kind === "ReplaceContent") wrap.push((node) => toggled(h("div", { style: "white-space:pre-wrap;overflow-wrap:anywhere" }, ...spans(v)), node, "show original", "show " + by + "'s version"));
+    else if (kind === "Blur") wrap.push((node) => { node.classList.add("mc-blur"); node.title = "blurred by " + by + "; click to show"; node.onclick = () => node.classList.remove("mc-blur"); return node; });
+    else if (kind === "Collapse") wrap.push((node) => toggled(h("div", { class: "mc-collapsed" }, "hidden by " + by + ": " + v), node, "show", "hide"));
+    else out.undrawn.push(kind);
+  }
+  out.content = (node) => wrap.reduce((n, f) => f(n), node);
+  return out;
+}
+
+// `content` with the byte ranges of `ranges` styled (WIT offsets are UTF-8 bytes).
+function highlighted(content, ranges, spanColor) {
+  const bytes = new TextEncoder().encode(content), dec = new TextDecoder();
+  const out = [];
+  let at = 0;
+  for (const r of [...ranges].sort((a, b) => a.start - b.start)) {
+    const s = Math.max(r.start, at), e = Math.min(r.end, bytes.length);
+    if (e <= s) continue;
+    if (s > at) out.push(dec.decode(bytes.slice(at, s)));
+    const c = spanColor(r.color);
+    out.push(h(r.bold ? "b" : "span", { class: "mc-hl", title: r.tooltip || null, style: c ? "background:color-mix(in srgb, " + c + " 35%, transparent)" : null }, dec.decode(bytes.slice(s, e))));
+    at = e;
+  }
+  if (at < bytes.length) out.push(dec.decode(bytes.slice(at)));
+  return out;
+}
+
+// `shown` with a link that swaps it for `other` and back.
+function toggled(shown, other, showOther, showFirst) {
+  const box = h("div", {});
+  const link = h("a", { href: "#", class: "mc-toggle" });
+  let first = true;
+  const draw = () => { box.replaceChildren(first ? shown : other, link); link.textContent = first ? showOther : showFirst; };
+  link.onclick = (e) => { e.preventDefault(); e.stopPropagation(); first = !first; draw(); };
+  draw();
+  return box;
+}
+
+function ghostRow(g) {
+  return h("div", { class: "mc-msg ghost " + g.style, title: "ghost message drawn by " + pluginName(g.plugin) },
+    h("span", { class: "mc-avwrap" }, h("span", { class: "mc-av", style: "background:" + avatarColor(g.author.id) }, g.author.name[0].toUpperCase())),
+    h("div", { class: "body", style: "min-width:0;flex:1" },
+      h("div", {}, h("span", { class: "who" }, g.author.name), h("span", { class: "tag" }, g.style + " · " + pluginName(g.plugin))),
+      h("div", { class: "el-rich", style: "white-space:pre-wrap;overflow-wrap:anywhere" }, ...spans(g.content))));
+}
+
+// The time in a message id (ms since 2015 in the top 42 bits).
+function snowflakeTime(id) {
+  try { return new Date(Number((BigInt(id) >> 22n) + 1420070400000n)).toLocaleString(); } catch (e) { return ""; }
+}
+
+function linkify(text) {
+  const out = [], re = /https?:\/\/[^\s<]+/g;
+  let last = 0, m;
+  while ((m = re.exec(text))) {
+    if (m.index > last) out.push(text.slice(last, m.index));
+    const url = m[0];
+    out.push(h("a", { href: "#", onclick: (e) => e.preventDefault(),
+      oncontextmenu: (e) => { e.preventDefault(); e.stopPropagation(); openMenu("link.context-menu", { target: JSON.stringify({ Link: url }), facts: [] }, e); } }, url));
+    last = m.index + url.length;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out;
+}
+
+// ---------- menus, profile, modals, toasts ----------
+let overlay = null; // { kind: "menu" | "profile", user? }
+function closeOverlay() { overlay = null; $("mcOverlay").replaceChildren(); }
+
+// Place a layer at the pointer, kept inside the mock client.
+function place(node, ev) {
+  const mc = $("mc"), r = mc.getBoundingClientRect();
+  $("mcOverlay").replaceChildren(node);
+  const x = Math.min(ev.clientX - r.left, r.width - node.offsetWidth - 8), y = Math.min(ev.clientY - r.top, r.height - node.offsetHeight - 8);
+  node.style.left = Math.max(8, x) + "px"; node.style.top = Math.max(8, y) + "px";
+}
+
+// The client's own items: dev simulations for the world, plus the profile.
+const messageBuiltins = (m) => [
+  { label: "Simulate: author edits…", run: () => { const content = prompt("New content", m.content); if (content != null && content.trim()) api("/api/message/edit", { channel: String(m.channel), id: String(m.id), content }); } },
+  { label: "Simulate: message deleted", danger: true, run: () => api("/api/message/delete", { channel: String(m.channel), id: String(m.id) }) },
+];
+const userBuiltins = (user) => [{ label: "Profile", run: (ev) => openProfile(user, ev) }];
+
+function openMenu(slot, desc, ev, builtins) {
+  if (!desc) return;
+  const kids = (builtins || []).map((b) => h("button", { class: "mi" + (b.danger ? " danger" : ""), onclick: () => { closeOverlay(); b.run(ev); } }, b.label));
+  const byPlugin = new Map();
+  for (const { plugin, item } of slotItems(slot)) {
+    // Host-evaluated predicates: hidden where they don't hold.
+    if (!(item.when || []).every((p) => desc.facts.includes(p))) continue;
+    if (!byPlugin.has(plugin)) byPlugin.set(plugin, []);
+    byPlugin.get(plugin).push(item);
+  }
+  for (const [plugin, items] of byPlugin) {
+    if (kids.length) kids.push(h("div", { class: "msep" }));
+    kids.push(h("div", { class: "mgroup", title: "added by plugin " + plugin }, pluginName(plugin)));
+    let group = null;
+    for (const item of items) {
+      if (item.group && item.group !== group) { group = item.group; kids.push(h("div", { class: "mgroup", style: "text-transform:none;font-weight:400" }, group)); }
+      kids.push(h("button", { class: "mi" + (item.danger ? " danger" : ""), title: plugin + " / " + item.id + ((item.when || []).length ? " (when " + item.when.join(", ") + ")" : ""),
+        onclick: (e) => { closeOverlay(); clickSlot(plugin, slot, item.id, desc, e); } },
+        item.checked == null ? "" : item.checked ? "✓ " : "  ", item.label));
+    }
+  }
+  if (!state.slots.available.includes(slot)) kids.push(h("div", { class: "msep" }), h("div", { class: "mgroup", style: "text-transform:none;font-weight:400" }, slot + " unavailable on this build"));
+  if (!kids.length) kids.push(h("div", { class: "mgroup", style: "text-transform:none;font-weight:400" }, "(" + slot + ": no items)"));
+  overlay = { kind: "menu" };
+  place(h("div", { class: "mc-layer mc-menu", role: "menu", onclick: (e) => e.stopPropagation(), oncontextmenu: (e) => e.preventDefault() }, kids), ev);
+  const first = $("mcOverlay").querySelector(".mi");
+  if (first) first.focus({ preventScroll: true });
+}
+
+async function openProfile(user, ev) {
+  overlay = { kind: "profile", user, at: { clientX: ev.clientX, clientY: ev.clientY } };
+  renderProfile();
+  await api("/api/profile", { user: { id: String(user.id), name: user.name } });
+}
+
+function renderProfile() {
+  if (!overlay || overlay.kind !== "profile") return;
+  const user = overlay.user;
+  const prof = state.slots.profile;
+  const fresh = prof && String(prof.user.id) === String(user.id);
+  const color = avatarColor(user.id);
+  let pop = $("mcOverlay").querySelector(".mc-pop");
+  if (!pop || pop.dataset.user !== String(user.id)) {
+    pop = h("div", { class: "mc-layer mc-pop", "data-user": String(user.id), onclick: (e) => e.stopPropagation() },
+      h("div", { class: "banner2", style: "background:" + color }),
+      h("div", { class: "who2" }, h("span", { class: "mc-av", style: "background:" + color }, user.name[0].toUpperCase()),
+        h("div", { class: "nm" }, user.name, h("span", { class: "badges" })), h("div", { class: "id" }, "id " + user.id)),
+      h("div", { class: "psecs" }));
+    place(pop, overlay.at);
+  }
+  pop.querySelector(".badges").replaceChildren(...decosFor("user.profile-badge", user.id));
+  const host = pop.querySelector(".psecs");
+  const sections = fresh ? prof.sections : [];
+  const keep = new Set();
+  for (const s of sections) {
+    const key = s.plugin + "/" + s.id;
+    keep.add(key);
+    let box = [...host.children].find((c) => c.dataset.key === key);
+    if (!box) { box = h("div", { class: "psec", "data-key": key }, h("h4"), h("div", { class: "pbody" })); host.append(box); }
+    box.querySelector("h4").replaceChildren(s.title, h("span", { title: "added by plugin " + s.plugin }, pluginName(s.plugin)));
+    const body = box.querySelector(".pbody");
+    // Profile sections are read-only: they have no interaction route.
+    if (s.elements == null) body.replaceChildren(h("div", { style: "color:var(--t-text-muted)" }, "…"));
+    else renderElements(body, s.elements, null);
+  }
+  for (const c of [...host.children]) if (!keep.has(c.dataset.key)) c.remove();
+}
+
+// Modals re-render in place (like panels) so typing in one isn't interrupted.
+function renderModals() {
+  const host = $("mcModals");
+  const keep = new Set();
+  for (const { plugin, panel } of state.slots.modals) {
+    keep.add(plugin);
+    let scrim = [...host.children].find((c) => c.dataset.plugin === plugin);
+    if (!scrim) {
+      scrim = h("div", { class: "mc-scrim", "data-plugin": plugin, onclick: (e) => { if (e.target === scrim) closeModal(plugin); } },
+        h("div", { class: "mc-modal", role: "dialog", "aria-modal": "true" },
+          h("div", { class: "mhead" }, h("b"), h("span", { class: "by" }), h("button", { title: "Close (Esc)", "aria-label": "Close", onclick: () => closeModal(plugin) }, "×")),
+          h("div", { class: "pbody" })));
+      host.append(scrim);
+    }
+    scrim.querySelector(".mhead b").textContent = panel.title;
+    scrim.querySelector(".mhead .by").textContent = pluginName(plugin);
+    scrim.querySelector(".mhead .by").title = "shown by plugin " + plugin;
+    renderElements(scrim.querySelector(".pbody"), panel.elements, uiSender(plugin, panel.id));
+  }
+  for (const c of [...host.children]) if (!keep.has(c.dataset.plugin)) c.remove();
+}
+const closeModal = (plugin) => api("/api/modal/close", { plugin });
+
+let lastToast = null; // null until the first state: don't replay old toasts on page load
+function renderToasts() {
+  const toasts = state.slots.toasts;
+  const max = toasts.length ? toasts[toasts.length - 1].seq : 0;
+  if (lastToast === null) { lastToast = max; return; }
+  for (const t of toasts) {
+    if (t.seq <= lastToast) continue;
+    const node = h("div", { class: "mc-toast " + t.kind, role: "status" }, h("div", { class: "from" }, pluginName(t.plugin)), h("div", {}, t.text));
+    $("mcToasts").append(node);
+    setTimeout(() => { node.classList.add("out"); setTimeout(() => node.remove(), 320); }, 4000);
+    while ($("mcToasts").children.length > 5) $("mcToasts").firstChild.remove();
+  }
+  lastToast = Math.max(lastToast, max);
+}
+
+// Every slot, with a switch for its hook point and a way to click items
+// the mock client has no natural place for (on a sample target).
+function renderSlotsCard() {
+  const s = state.slots;
+  $("slotSummary").textContent = "— switch one off to rehearse a build where its hook point wasn't found · " + state.features.length + " features resolved";
+  $("slotSummary").title = state.features.join("\n");
+  $("slotRows").replaceChildren(...s.all.map((slot) => {
+    const on = s.available.includes(slot);
+    const items = slotItems(slot);
+    const desc = s.targets[slot];
+    const input = h("input", { type: "checkbox", checked: on, "aria-label": slot + " available",
+      onchange: () => api("/api/slot-availability", { slot, available: input.checked }) });
+    const list = items.map(({ plugin, item }) => h("div", { class: "cmd" },
+      h("span", {}, item.label || item.tooltip || item.title, " ", h("span", { class: "mono muted" }, pluginName(plugin) + " / " + item.id)),
+      slot === "profile.section" ? h("span", { class: "muted", style: "font-size:12px" }, "open a profile") :
+        h("button", { class: "xs", disabled: !desc, title: desc ? "Click on a sample target: " + desc.target : "no target available", onclick: (ev) => clickSlot(plugin, slot, item.id, desc, ev) }, "Click")));
+    return h("div", { class: "slotrow", style: "flex-wrap:wrap" },
+      h("div", { class: "nm" }, h("div", { class: "mono" }, slot, h("span", { class: "muted" }, " · " + s.kinds[slot])),
+        h("div", { class: "muted" }, on ? (items.length ? items.length + " item" + (items.length === 1 ? "" : "s") : "no items")
+          : "unavailable — plugins get unavailable; reload them after switching back on")),
+      h("span", { class: "switch", title: on ? "Hook point found" : "Hook point missing" }, input, h("span")),
+      list.length ? h("div", { style: "flex-basis:100%" }, list) : null);
+  }));
+}
+
+function renderSlots() {
+  renderModals();
+  renderToasts();
+  renderSlotsCard();
+  renderProfile();
+}
+
+function renderDecorations() {
+  const kinds = state.decorations;
+  const total = kinds.reduce((n, k) => n + k.items.length, 0);
+  $("decoSummary").textContent = "— " + total + " from plugins, keyed by user / channel / guild / message";
+  $("decoRows").replaceChildren(...(total ? kinds.filter((k) => k.items.length).map((k) => h("div", {},
+    sub(k.kind, "by " + k.keyed_by + (k.available ? "" : " · unavailable on this build")),
+    ...k.items.map((it) => h("div", { class: "cmd" }, h("span", {}, it.label, " ", h("span", { class: "mono muted" }, pluginName(it.plugin))),
+      h("span", {}, decoNode(k.kind, it), it.decoration.tooltip ? h("span", { class: "muted", style: "font-size:12px;margin-left:6px" }, it.decoration.tooltip) : null)))))
+    : [h("div", { class: "muted" }, "none yet")]));
+}
+
+function renderActivity() {
+  const lines = (box, list, text) => {
+    const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 24;
+    box.replaceChildren(...(list.length ? list.map((x) => h("div", {}, text(x))) : [h("div", { class: "muted" }, "none yet")]));
+    if (atBottom) box.scrollTop = box.scrollHeight;
+  };
+  lines($("performed"), state.performed, ({ plugin, action }) => {
+    const { action: name, ...args } = action;
+    return pluginName(plugin) + ": " + name + " " + JSON.stringify(args);
+  });
+  lines($("notifications"), state.notifications, (n) => pluginName(n.plugin) + ": " + n.title + (n.body ? " — " + n.body : ""));
+  lines($("activity"), state.activity, (a) => a.text);
+  const s = state.last_send;
+  $("lastSend").replaceChildren(...(s ? [h("div", {}, h("span", { class: "muted" }, "Last send: "), h("span", { class: "mono" }, JSON.stringify(s.text)),
+    s.rewritten_by.length ? h("span", { class: "muted" }, " (rewritten by " + s.rewritten_by.join(", ") + ")") : null,
+    s.cancelled ? h("span", { style: "color:var(--bad)" }, " cancelled by " + pluginName(s.cancelled.plugin) + ": " + s.cancelled.reason) : null,
+    ...s.rejected.map((r) => h("div", { style: "color:var(--warn);font-size:12px" }, "refused " + pluginName(r.plugin) + "'s rewrite: " + r.reason)))] : []));
+}
+
+document.addEventListener("click", () => { if (overlay) closeOverlay(); });
+// Capture phase: close the old menu before a new one opens from the same event.
+document.addEventListener("contextmenu", (e) => { if (overlay && !$("mcOverlay").contains(e.target)) closeOverlay(); }, true);
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  if (overlay) { closeOverlay(); return; }
+  const modals = state && state.slots.modals;
+  if (modals && modals.length) closeModal(modals[modals.length - 1].plugin);
+});
+$("mcMsgs").addEventListener("scroll", () => { if (overlay) closeOverlay(); });
+$("mcPresence").addEventListener("change", (e) => api("/api/presence", { status: e.target.value }));
+$("mcCog").addEventListener("click", (ev) => { ev.stopPropagation(); openMenu("settings.cog-menu", NONE, ev); });
+$("mcAttach").addEventListener("click", (ev) => { ev.stopPropagation(); const ch = selChannel(); if (ch) openMenu("composer.attach-menu", ch.t, ev); });
+$("mcInput").addEventListener("keydown", (e) => {
+  const ch = selChannel();
+  if (e.key !== "Enter" || !ch || !e.target.value.trim()) return;
+  const text = e.target.value;
+  e.target.value = "";
+  // Sent the way the client sends: through plugins granted `compose` first;
+  // the server's copy then arrives as message-created.
+  api("/api/send", { channel: String(ch.id), text });
+});
+
+// ---------- event injector ----------
+function syncEventForm() {
+  const k = $("evKind").value;
+  for (const el of document.querySelectorAll("[data-for]")) el.style.display = el.dataset.for.split(" ").includes(k) ? "" : "none";
+}
+function fillEventForm() {
+  const sig = JSON.stringify([C().channels.map((c) => c.id), Object.keys(C().users)]);
+  if ($("evKind").dataset.sig === sig) return;
+  $("evKind").dataset.sig = sig;
+  $("evChannel").replaceChildren(...C().channels.filter((c) => c.kind !== 4).map((c) => h("option", { value: String(c.id) }, (c.guild != null ? "#" : "@") + c.name + (c.guild != null ? " (" + ((C().guilds.find((g) => String(g.id) === String(c.guild)) || {}).name || c.guild) + ")" : ""))));
+  $("evAuthor").replaceChildren(...Object.values(C().users).filter((u) => String(u.id) !== String(C().me.id)).map((u) => h("option", { value: String(u.id) }, u.name + " (" + u.id + ")")));
+  if (C().selection.channel != null) $("evChannel").value = String(C().selection.channel);
+}
+$("evKind").addEventListener("change", syncEventForm);
+$("evSend").addEventListener("click", () => {
+  const k = $("evKind").value, channel = $("evChannel").value;
+  if (k === "select") api("/api/select", { channel });
+  else if (k === "presence") api("/api/presence", { status: $("evPresence").value });
+  else if (k === "receive") api("/api/receive", { channel, author: $("evAuthor").value, content: $("evContent").value });
+  else if (k === "typing") {
+    const ids = $("evTyping").value.split(/[\s,]+/).filter(Boolean);
+    if (ids.some((x) => !/^\d{1,20}$/.test(x))) { toast("user ids are numbers, comma-separated"); return; }
+    api("/api/event", '{"Typing":[' + channel + ",[" + ids.join(",") + "]]}");
+  } else if (k === "hook") {
+    const payload = $("evPayload").value;
+    try { JSON.parse(payload); } catch (e) { toast("payload is not valid JSON: " + e.message); return; }
+    api("/api/event", { Hook: [$("evHook").value.trim(), payload] });
+  } else {
+    const text = $("evRaw").value;
+    try { JSON.parse(text); } catch (e) { toast("not valid JSON: " + e.message); return; }
+    // Sent verbatim, so 64-bit ids in it stay exact.
+    api("/api/event", text);
+  }
+});
+syncEventForm();
+
+// ---------- logs ----------
+let logsShown = -1;
+function renderLogs(force) {
+  const box = $("logs");
+  const min = LEVELS.indexOf($("logLevel").value);
+  const recs = state.logs.filter((l) => LEVELS.indexOf(l.record.level) >= min);
+  const lastSeq = state.logs.length ? state.logs[state.logs.length - 1].seq : -1;
+  if (!force && lastSeq === logsShown) return;
+  logsShown = lastSeq;
+  const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 24;
+  box.replaceChildren(...(recs.length ? recs.map((l) => h("div", { class: "lv-" + l.record.level },
+    (l.record.at_ms / 1000).toFixed(3).padStart(8) + "s " + l.record.level.toUpperCase().padStart(5) + " " + l.record.plugin + " " + l.record.message))
+    : [h("div", { class: "muted" }, "no log records at this level yet")]));
+  if (atBottom || force) box.scrollTop = box.scrollHeight;
+}
+$("logLevel").addEventListener("change", () => renderLogs(true));
+$("reloadAll").addEventListener("click", () => api("/api/reload", {}));
+
+// ---------- live updates (long-poll) ----------
+function setConn(ok) {
+  const c = $("conn");
+  c.className = "pill " + (ok ? "ok" : "bad");
+  c.lastChild.textContent = ok ? "live" : "disconnected — is rekindle dev running?";
+}
+
+async function loop() {
+  for (;;) {
+    try {
+      const r = await fetch("/api/wait?rev=" + Math.max(rev, 0));
+      const j = await r.json();
+      setConn(true);
+      if (j.rev !== rev) {
+        const s = await fetch("/api/state");
+        if (s.ok) apply(await s.json());
+      }
+    } catch (e) {
+      setConn(false);
+      await new Promise((res) => setTimeout(res, 1000));
+    }
+  }
+}
+
+(async () => {
+  try { await api("/api/state"); setConn(true); } catch (e) { setConn(false); }
+  loop();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+[package]
+name = "rekindle-test"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Drive a rekindle plugin in the simulated client from `cargo test`, under `rekindle test`."
+
+[dependencies]
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

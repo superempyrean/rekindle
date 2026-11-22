@@ -1,0 +1,21 @@
+[package]
+name = "typography"
+version = "0.1.0"
+edition = "2024"
+description = "Bundled fonts (IBM Plex Sans, Lilex) plus avatar size, corner radius and density controls."
+license = "GPL-3.0-or-later"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[package.metadata.rekindle]
+id = "dev.rekindle.typography"
+name = "Typography"
+capabilities = ["theming", "ui", "storage"]
+
+[dependencies]
+rekindle-sdk = { path = "../../../crates/sdk" }
+
+[lints]
+workspace = true

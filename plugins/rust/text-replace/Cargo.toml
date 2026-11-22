@@ -1,0 +1,23 @@
+[package]
+name = "text-replace"
+version = "0.1.0"
+edition = "2024"
+description = "Find-and-replace rules (plain or regex) applied to messages you send. A port of Vencord's TextReplace."
+license = "GPL-3.0-or-later"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[package.metadata.rekindle]
+id = "dev.rekindle.text-replace"
+name = "Text Replace"
+capabilities = ["ui", "storage", "compose"]
+
+[dependencies]
+rekindle-sdk = { path = "../../../crates/sdk" }
+# Small regex engine (no Unicode tables), so the wasm stays small.
+regex-lite = "0.1"
+
+[lints]
+workspace = true

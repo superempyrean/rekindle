@@ -1,0 +1,28 @@
+[package]
+name = "rekindle-analysis"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Binary-triage CLI: fingerprint Rust compiler + crate versions in a release binary."
+
+[lib]
+name = "rekindle_analysis"
+path = "src/lib.rs"
+
+[[bin]]
+name = "rekindle-analyze"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+object = { workspace = true }
+regex = { workspace = true }
+
+[lints]
+workspace = true

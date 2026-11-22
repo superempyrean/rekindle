@@ -1,0 +1,23 @@
+{
+  "name": "split-long-messages",
+  "version": "0.1.0",
+  "description": "Sends a message that's over the length limit as several, split at paragraphs, lines or words.",
+  "private": true,
+  "type": "module",
+  "rekindle": {
+    "id": "dev.rekindle.split-long-messages",
+    "name": "Split Long Messages",
+    "capabilities": ["compose"],
+    "settings": [
+      { "key": "limit", "type": "select", "label": "Message length limit", "options": ["2,000 characters", "4,000 characters (Nitro)"], "default": "2,000 characters" }
+    ]
+  },
+  "scripts": {
+    "build": "rekindle build",
+    "check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@bytecodealliance/jco": "1.41.0",
+    "typescript": "7.0.2"
+  }
+}

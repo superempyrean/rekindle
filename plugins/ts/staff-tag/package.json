@@ -1,0 +1,20 @@
+{
+  "name": "staff-tag",
+  "version": "0.1.0",
+  "description": "An Owner or Admin badge next to the names of a server's owner and administrators.",
+  "private": true,
+  "type": "module",
+  "rekindle": {
+    "id": "dev.rekindle.staff-tag",
+    "name": "Staff Tag",
+    "capabilities": ["read-client", "render-messages", "storage"]
+  },
+  "scripts": {
+    "build": "rekindle build",
+    "check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@bytecodealliance/jco": "1.41.0",
+    "typescript": "7.0.2"
+  }
+}

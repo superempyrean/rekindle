@@ -1,0 +1,30 @@
+[package]
+name = "rekindle-release"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "What a rekindle release is made of: Ed25519 signing, fetching from a release location, and the framework files the launcher installs, and updating an install from the channel. Small on purpose: the launcher uses it without the plugin runtime."
+
+[lib]
+name = "rekindle_release"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+url = { workspace = true }
+ureq = { workspace = true }
+sha2 = { workspace = true }
+ed25519-dalek = { workspace = true }
+base64 = { workspace = true }
+getrandom = { workspace = true }
+semver = { workspace = true }
+# Framework files are hosted zstd-compressed too (`FrameworkFile::zst`).
+zstd = { workspace = true }
+rekindle-install = { workspace = true }
+
+[lints]
+workspace = true

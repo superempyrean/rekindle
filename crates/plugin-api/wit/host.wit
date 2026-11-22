@@ -1,0 +1,142 @@
+/// Always available: logging, clocks, timers, what this client supports,
+/// and formatting that needs the user's locale and timezone without
+/// revealing them.
+interface host {
+    use types.{snowflake};
+
+    enum log-level { trace, debug, info, warn, error }
+    log: func(level: log-level, message: string);
+
+    // ---- Time ----
+    //
+    // Still no raw wall clock: the host formats times for display instead,
+    // so plugins can show "3 years ago" or "14:02" without learning the
+    // timezone. (Snowflakes do carry creation times, and a plugin that sees
+    // fresh message ids can estimate "now"; the rule is about precise time
+    // and timezone fingerprinting, not about hiding the date. Design doc
+    // §3.3.)
+
+    /// Monotonic milliseconds since host start.
+    now-millis: func() -> u64;
+    /// Milliseconds since the Unix epoch at which `id` was created.
+    snowflake-ms: func(id: snowflake) -> u64;
+
+    /// Discord's timestamp styles (`<t:...:R>` etc.).
+    enum time-style {
+        /// 14:02
+        short-time,
+        /// 14:02:31
+        long-time,
+        /// 07/11/2026
+        short-date,
+        /// 7 November 2026
+        long-date,
+        /// 7 November 2026 14:02
+        short-date-time,
+        /// Saturday, 7 November 2026 14:02
+        long-date-time,
+        /// "3 years ago", "in 5 minutes"
+        relative,
+    }
+    /// Format an epoch-milliseconds time in the user's locale and timezone.
+    format-time: func(epoch-ms: u64, style: time-style) -> string;
+    /// Format a duration ("1:02:03", "3 days").
+    format-duration: func(millis: u64) -> string;
+
+    // ---- Timers ----
+    //
+    // `on-timer(id)` after `delay-ms`, once or repeating. Re-using an id
+    // replaces the timer. Max 16 per plugin, 50 ms floor; cleared on unload.
+    // A timer callback is never a gesture (design doc §5).
+
+    enum timer-error { limit, too-fast }
+    set-timer: func(id: string, delay-ms: u64, repeat: bool) -> result<_, timer-error>;
+    clear-timer: func(id: string);
+
+    // ---- The client ----
+
+    record client-info {
+        /// rekindle host version, semver.
+        host-version: string,
+        /// "phoenix", "mock", ... and the client build string as the
+        /// client reports it.
+        client: string,
+        client-build: string,
+        /// "windows", "macos", "linux".
+        platform: string,
+        /// BCP 47 locale the client UI uses ("en-US").
+        locale: string,
+        /// "dark", "light", "midnight", ... (the user's base theme).
+        base-theme: string,
+        /// The client's reduced-motion setting.
+        reduced-motion: bool,
+        /// Streamer mode: plugins should hide personal info while on.
+        streamer-mode: bool,
+    }
+    client: func() -> client-info;
+
+    /// Which host features resolved on this client build: slot names
+    /// ("message.context-menu"), decoration kinds ("user.name-badge"),
+    /// surfaces as "surface:<name>", tweaks as "tweak:<id>", and the
+    /// backend's own ("state.client", "messages.resolve-link", ...).
+    /// Anything not listed fails cleanly with `unavailable` (or is never
+    /// delivered). Changes arrive via `lifecycle.on-features-changed`.
+    features: func() -> list<string>;
+    has-feature: func(name: string) -> bool;
+
+    /// Plugin-bundled string table lookup (`i18n/<locale>.toml` in the
+    /// plugin's project), falling back to the default locale, then `key`.
+    tr: func(key: string) -> string;
+}
+
+/// The plugin's own settings, declared as a schema in the manifest
+/// (`[package.metadata.rekindle.settings]`, `package.json#rekindle.settings`,
+/// `[tool.rekindle.settings]`). The host renders the settings page, keeps
+/// the values (separate from `storage` and its quota), validates them
+/// against the schema and shows them on the install screen, all without
+/// running plugin code. Always available when a schema exists.
+interface settings {
+    use types.{color};
+
+    variant setting-value {
+        boolean(bool),
+        number(f64),
+        text(string),
+        /// Index into a `select`'s options.
+        selected(u32),
+        color(color),
+        items(list<string>),
+        rows(list<list<string>>),
+        /// A keybind, in the host's notation ("Ctrl+Shift+K").
+        keybind(string),
+        /// A snowflake list (user, channel or guild pickers).
+        ids(list<u64>),
+    }
+
+    /// Current value (the schema default if the user never changed it).
+    get: func(key: string) -> option<setting-value>;
+    /// Set from code (e.g. a palette command flips a toggle). Validated
+    /// against the schema; the change also fires `on-settings-changed`.
+    set: func(key: string, value: setting-value) -> result<_, string>;
+    /// All keys in the schema.
+    keys: func() -> list<string>;
+}
+
+/// Durable per-plugin key/value storage (requires `storage`). Unchanged
+/// from 0.7.0 apart from `get-many`.
+/// Namespaced per plugin *and per account* (owner decision 2026-11-07):
+/// switching accounts swaps the namespace underneath the plugin, so one
+/// account's data never shows up under another. Settings are per plugin
+/// only. Data shared across accounts isn't offered, by design.
+interface storage {
+    enum storage-error { quota-exceeded, key-too-long, value-too-large }
+
+    get: func(key: string) -> option<string>;
+    get-many: func(keys: list<string>) -> list<option<string>>;
+    set: func(key: string, value: string) -> result<_, storage-error>;
+    delete: func(key: string);
+    /// All keys this plugin has stored, sorted, optionally by prefix.
+    keys: func(prefix: option<string>) -> list<string>;
+    /// Bytes used and allowed.
+    usage: func() -> tuple<u64, u64>;
+}

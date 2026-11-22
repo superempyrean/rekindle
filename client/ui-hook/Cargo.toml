@@ -1,0 +1,19 @@
+[package]
+name = "rekindle-ui-hook"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Type-free UI contributions driven by recovered layout: no dependency on the client or its types."
+publish.workspace = true
+
+[dependencies]
+rekindle-hook = { workspace = true }
+# rekindle's UI as real client elements (no gpui of its own); the draw_roots
+# hook below hands it the window.
+rekindle-native = { workspace = true }
+anyhow = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

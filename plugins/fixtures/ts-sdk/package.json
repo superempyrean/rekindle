@@ -1,0 +1,26 @@
+{
+  "name": "fixture-ts-sdk",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "rekindle": {
+    "id": "dev.fixture.ts-sdk",
+    "capabilities": [
+      "ui",
+      "storage",
+      "clipboard",
+      "act-local",
+      "read-client",
+      "read-messages",
+      "render-messages"
+    ],
+    "settings": [
+      {
+        "key": "loud",
+        "type": "toggle",
+        "label": "Mention when replying",
+        "default": false
+      }
+    ]
+  }
+}

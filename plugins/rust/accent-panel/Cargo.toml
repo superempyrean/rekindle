@@ -1,0 +1,21 @@
+[package]
+name = "accent-panel"
+version = "0.1.0"
+edition = "2024"
+description = "A settings panel: pick an accent color and optionally tint the backgrounds with it."
+license = "GPL-3.0-or-later"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[package.metadata.rekindle]
+id = "dev.rekindle.accent-panel"
+name = "Accent"
+capabilities = ["theming", "ui", "storage"]
+
+[dependencies]
+rekindle-sdk = { path = "../../../crates/sdk" }
+
+[lints]
+workspace = true

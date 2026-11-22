@@ -1,0 +1,20 @@
+[package]
+name = "misbehave"
+version = "0.0.0"
+edition = "2024"
+description = "Test fixture: a plugin that misbehaves on command, to prove the sandbox contains it."
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[package.metadata.rekindle]
+id = "test.rekindle.misbehave"
+name = "Misbehave"
+capabilities = ["ui", "read-client", "compose", "storage", "theming", "clipboard", "act-local", "react", "render-messages", "presence"]
+
+[dependencies]
+rekindle-sdk = { path = "../../../../sdk" }
+
+[lints]
+workspace = true

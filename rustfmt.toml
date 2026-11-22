@@ -1,0 +1,3 @@
+# rustfmt defaults, with the 2024 style edition (import sorting and
+# formatting rules match the 2024 edition the crates move to).
+style_edition = "2024"

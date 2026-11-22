@@ -1,0 +1,6 @@
+{
+  "name": "rekindle-example-plugins",
+  "private": true,
+  "description": "npm workspace for the TypeScript example plugins and the fixtures' toolchain: `npm install` here once, then `rekindle build <plugin dir>`.",
+  "workspaces": ["ts/*"]
+}

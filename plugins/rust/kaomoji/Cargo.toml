@@ -1,0 +1,21 @@
+[package]
+name = "kaomoji"
+version = "0.1.0"
+edition = "2024"
+description = "A kaomoji picker next to the emoji button: search or browse by category, click to put one in the composer. Also /kaomoji."
+license = "GPL-3.0-or-later"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[package.metadata.rekindle]
+id = "dev.rekindle.kaomoji"
+name = "Kaomoji"
+capabilities = ["ui", "storage", "act-local"]
+
+[dependencies]
+rekindle-sdk = { path = "../../../crates/sdk" }
+
+[lints]
+workspace = true

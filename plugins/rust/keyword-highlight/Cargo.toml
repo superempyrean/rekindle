@@ -1,0 +1,33 @@
+[package]
+name = "keyword-highlight"
+version = "0.1.0"
+edition = "2024"
+description = "Highlights words you choose in messages and tints the rows they appear in (the render isolate + settings schema)."
+license = "GPL-3.0-or-later"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[package.metadata.rekindle]
+id = "dev.rekindle.keyword-highlight"
+name = "Keyword Highlight"
+capabilities = ["render-messages"]
+
+[[package.metadata.rekindle.settings]]
+key = "keywords"
+type = "string-list"
+label = "Words to highlight"
+default = ["rekindle"]
+
+[[package.metadata.rekindle.settings]]
+key = "tint-rows"
+type = "toggle"
+label = "Tint the whole message"
+default = false
+
+[dependencies]
+rekindle-sdk = { path = "../../../crates/sdk" }
+
+[lints]
+workspace = true

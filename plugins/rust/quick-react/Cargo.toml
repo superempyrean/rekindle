@@ -1,0 +1,21 @@
+[package]
+name = "quick-react"
+version = "0.1.0"
+edition = "2024"
+description = "Your three most-used emoji as buttons in the message hover bar (reactions only)."
+license = "GPL-3.0-or-later"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[package.metadata.rekindle]
+id = "dev.rekindle.quick-react"
+name = "Quick React"
+capabilities = ["read-client", "ui", "react"]
+
+[dependencies]
+rekindle-sdk = { path = "../../../crates/sdk" }
+
+[lints]
+workspace = true

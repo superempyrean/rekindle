@@ -1,0 +1,21 @@
+[package]
+name = "view-raw"
+version = "0.1.0"
+edition = "2024"
+description = "Right-click a message, user or server to see what the client holds about it as JSON, secrets stripped (inspect + modal + clipboard)."
+license = "GPL-3.0-or-later"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[package.metadata.rekindle]
+id = "dev.rekindle.view-raw"
+name = "View Raw"
+capabilities = ["read-client", "read-users", "read-messages", "ui", "clipboard"]
+
+[dependencies]
+rekindle-sdk = { path = "../../../crates/sdk" }
+
+[lints]
+workspace = true

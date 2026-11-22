@@ -1,0 +1,27 @@
+[package]
+name = "rekindle-extension"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "rekindle's plugin runtime inside the client, driven by recovered layout: no dependency on the client or its types."
+publish.workspace = true
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+rekindle-plugin-host = { workspace = true }
+# The reversible x64 detour, for the theme function.
+rekindle-hook = { workspace = true }
+# Type-free UI contributions from recovered layout.
+rekindle-ui-hook = { workspace = true }
+# Colour conversions as gpui does them (no gpui dependency).
+rekindle-native = { workspace = true }
+anyhow = { workspace = true }
+url = { workspace = true }
+# Decode overlay atlases (PNG/GIF).
+image = { workspace = true }
+
+[lints]
+workspace = true

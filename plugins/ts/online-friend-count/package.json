@@ -1,0 +1,24 @@
+{
+  "name": "online-friend-count",
+  "version": "0.1.0",
+  "description": "A server-list button showing how many friends are online; a click lists them.",
+  "private": true,
+  "type": "module",
+  "rekindle": {
+    "id": "dev.rekindle.online-friend-count",
+    "name": "Online Friend Count",
+    "capabilities": [
+      "ui",
+      "read-client",
+      "read-users"
+    ]
+  },
+  "scripts": {
+    "build": "rekindle build",
+    "check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@bytecodealliance/jco": "1.41.0",
+    "typescript": "7.0.2"
+  }
+}

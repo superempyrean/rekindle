@@ -1,0 +1,2 @@
+{ "name": "fixture-js-runtime-sm", "version": "0.1.0", "private": true, "type": "module",
+  "rekindle": { "id": "dev.fixture.js-runtime-sm", "capabilities": ["storage", "ui"], "engine": "starlingmonkey", "entry": "../js-runtime/src/index.js" } }

@@ -1,0 +1,13 @@
+[package]
+name = "rekindle-plugin-api"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Stable WIT contract between the rekindle host and plugins."
+
+[dependencies]
+wit-bindgen = { workspace = true }
+
+[lints]
+workspace = true

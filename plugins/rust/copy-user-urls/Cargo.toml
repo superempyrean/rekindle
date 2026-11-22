@@ -1,0 +1,21 @@
+[package]
+name = "copy-user-urls"
+version = "0.1.0"
+edition = "2024"
+description = "Adds \"Copy User URL\" to user right-click menus. A port of Vencord's CopyUserURLs."
+license = "GPL-3.0-or-later"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[package.metadata.rekindle]
+id = "dev.rekindle.copy-user-urls"
+name = "Copy User URLs"
+capabilities = ["ui", "clipboard"]
+
+[dependencies]
+rekindle-sdk = { path = "../../../crates/sdk" }
+
+[lints]
+workspace = true

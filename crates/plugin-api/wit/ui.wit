@@ -1,0 +1,303 @@
+// UI (requires `ui`; design doc §8). Plugins never draw: they hand the
+// host data for named, host-rendered places. Three kinds:
+//
+//   * Slots: items in the client's own menus, bars and lists, each with a
+//     narrow schema (a menu item is a label + icon; a toolbar button is an
+//     icon + tooltip). `ui.add-item`.
+//   * Keyed decorations: small host-drawn badges/text attached to a user,
+//     channel, guild or message, pushed ahead of time so the host never
+//     calls into wasm while it paints a list. `ui.set-decoration`.
+//   * Surfaces the plugin owns: panels, its settings page, modals, notices,
+//     toasts, profile sections, message accessories, ghost messages.
+//
+// Every slot/decoration/surface name may be unavailable on a client build
+// (its hook point didn't resolve); `host.features()` lists what works, and
+// calls fail with `unavailable` rather than trapping.
+
+interface ui {
+    use types.{snowflake, color, icon, element, span, target, message-ref, user-ref, modifiers};
+    use command-types.{slash-command};
+
+    enum ui-error {
+        /// The slot/surface isn't available on this client build.
+        unavailable,
+        /// Empty/too-long label, bad id, wrong item kind for the slot.
+        invalid,
+        /// Too many items from this plugin here.
+        limit,
+        /// Navigation/clipboard-style call outside a user gesture.
+        no-gesture,
+        /// The target isn't loaded.
+        not-found,
+        /// Needs a capability this plugin wasn't granted (e.g. a ghost
+        /// message without `read-messages`).
+        not-granted,
+    }
+
+    // ---- Assets ----
+
+    /// Register a PNG (max 256 KiB, 256x256) for icons, badges, images in
+    /// panels and rich-presence assets. Plugin-bundled; never fetched.
+    register-image: func(id: string, png: list<u8>) -> result<_, ui-error>;
+
+    // ---- Panels, modals, settings page ----
+
+    record panel { id: string, title: string, elements: list<element> }
+    show-panel: func(panel: panel);
+    remove-panel: func(id: string);
+    /// One modal per plugin; the user can always dismiss it.
+    show-modal: func(panel: panel);
+    close-modal: func();
+    /// Extra elements under the plugin's generated settings page (for
+    /// things a schema can't express: a preview, a "test" button).
+    /// Interactions arrive via `on-ui` with surface `settings-page`.
+    set-settings-extra: func(elements: list<element>);
+
+    // ---- Commands ----
+
+    /// Command palette (Ctrl+K / quick switcher) entry.
+    register-command: func(id: string, title: string);
+    unregister-command: func(id: string);
+    /// A local slash command, listed alongside built-in ones.
+    register-slash-command: func(command: slash-command) -> result<_, ui-error>;
+    unregister-slash-command: func(name: string);
+
+    /// A client keybind (Settings > Keybinds), user-rebindable, active only
+    /// while the client window is focused, never a global hook.
+    /// `default` in the host's notation ("Ctrl+Shift+T"), or none.
+    register-keybind: func(id: string, label: string, default: option<string>) -> result<_, ui-error>;
+    unregister-keybind: func(id: string);
+
+    // ---- Slots ----
+    //
+    // Slot names (design doc §8.2 has where each sits in today's client and
+    // what it maps to there):
+    //
+    //   menus (item: menu-item; target type in brackets)
+    //     "message.context-menu"      [message]   right-click a message
+    //     "message.hover-bar"         [message]   the hover action bar (icon-button)
+    //     "user.context-menu"         [user]      user/member/DM user menus
+    //     "channel.context-menu"      [channel]   channel and DM rows
+    //     "thread.context-menu"       [channel]
+    //     "guild.context-menu"        [guild]     server icon menu + header popout
+    //     "role.context-menu"         [role]      role pills
+    //     "media.context-menu"        [media]     images, videos, avatars
+    //     "media-viewer.menu"         [media]     the full-size viewer's "More" menu
+    //     "link.context-menu"         [link]
+    //     "selection.context-menu"    [selection] the composer/text menu
+    //     "composer.attach-menu"      [channel]   the "+" upload menu
+    //     "settings.cog-menu"         [none]      right-click the settings cog
+    //   bars and buttons (item: icon-button)
+    //     "chat-bar.button"           [channel]   next to the composer's emoji/GIF buttons
+    //     "channel.toolbar"           [channel]   channel header (threads, pins, members ...)
+    //     "user-area.button"          [none]      bottom-left mute/deafen/settings row
+    //     "voice-panel.button"        [channel]   the voice connection panel
+    //     "guild-list.button"         [none]      top of the server list (ReadAll)
+    //     "dm-list.button"            [none]      above the DM list
+    //   lists (item: list-item)
+    //     "voice-panel.status"        [channel]   one line of text in the voice panel
+    //     "profile.section"           [user]      a section in profiles (content via set-profile-section)
+
+    record menu-item {
+        id: string,
+        label: string,
+        icon: option<icon>,
+        /// Destructive style.
+        danger: bool,
+        /// Which of the menu's groups to join, by rekindle's group names
+        /// for that menu ("copy", "reply", "moderation", "developer", ...;
+        /// listed per menu in the design doc). Default: a plugin group at
+        /// the end. The host maps these to the client's own item ids
+        /// (`copy-link`, `pin`, ...), which are stable strings today.
+        group: option<string>,
+        /// A check mark; clicking toggles it (on-slot `clicked` reports).
+        checked: option<bool>,
+        /// Only show when the target is a bot / your own message / in a
+        /// guild ...: simple host-evaluated predicates so items gate like
+        /// native ones without a round trip into wasm when a menu opens.
+        when: list<menu-predicate>,
+    }
+
+    enum menu-predicate {
+        own-message, others-message, has-attachments, has-embeds,
+        in-guild, in-dm, target-is-bot, target-is-self, target-is-friend,
+        has-content, can-manage-messages,
+        // The hover bar's own permission checks (canPin, canEdit, ...).
+        can-pin, can-edit, can-reply, can-react, can-delete,
+    }
+
+    record icon-button {
+        id: string,
+        icon: icon,
+        /// Or a registered plugin image.
+        image: option<string>,
+        tooltip: string,
+        /// Highlighted (a toggle that is on).
+        active: bool,
+    }
+
+    record list-item { id: string, title: string }
+
+    variant slot-item {
+        menu-item(menu-item),
+        icon-button(icon-button),
+        list-item(list-item),
+    }
+
+    /// Slot names that resolved on this client build.
+    available-slots: func() -> list<string>;
+    /// Add or replace (by id) an item in a slot.
+    add-item: func(slot: string, item: slot-item) -> result<_, ui-error>;
+    remove-item: func(slot: string, id: string);
+    /// Flip an icon button's `active` state without re-adding it.
+    set-active: func(slot: string, id: string, active: bool) -> result<_, ui-error>;
+
+    /// Content of a profile section for one user (answer to
+    /// `slot-event.profile-opened`).
+    set-profile-section: func(section-id: string, user: snowflake, elements: list<element>);
+    /// One line in the voice panel ("Call 1:02:33"). With `since-ms`, the
+    /// host renders a live elapsed time after `text` (no 1 s timer needed).
+    set-voice-status: func(id: string, text: string, since-ms: option<u64>) -> result<_, ui-error>;
+
+    // ---- Message clicks ----
+    //
+    // Click bindings on messages (MessageClickActions: double-click to edit,
+    // Shift+double-click to reply ...). Each fired binding is a gesture: it
+    // reaches `on-slot` as `message-clicked` and may spend the gesture's
+    // action budget. Rules (owner decision 2026-11-07):
+    //   * A binding may claim a click the client doesn't already use,
+    //     including a plain double-click, which then replaces word
+    //     selection on that area. Single clicks need a modifier.
+    //   * When two bindings claim the same click, the user picks the owner
+    //     in rekindle's settings (Message clicks), where every binding can
+    //     also be rebound or turned off. Until the user picks, the plugin
+    //     enabled first wins.
+    //   * If a client update starts using a click itself, the client wins;
+    //     the plugin hears `on-features-changed` and `register-click`
+    //     reports `unavailable`.
+    // `click-area` and the record are where this grows (more areas,
+    // long-press, middle click) without a new slot.
+
+    enum click-area {
+        /// The message body (not its links, buttons or media).
+        content,
+        avatar,
+        author-name,
+        timestamp,
+    }
+
+    record click-binding {
+        id: string,
+        /// Shown in rekindle's Message clicks settings ("Edit on double-click").
+        label: string,
+        area: click-area,
+        /// 1 or 2.
+        clicks: u8,
+        modifiers: modifiers,
+        /// Same predicates as menu items: own messages only, guilds only ...
+        when: list<menu-predicate>,
+    }
+
+    register-click: func(binding: click-binding) -> result<_, ui-error>;
+    unregister-click: func(id: string);
+
+    // ---- Keyed decorations ----
+    //
+    // Pushed, not pulled: the host keeps them and draws them while it paints
+    // lists, with no call into wasm. Kinds:
+    //   "user.name-badge"        after a user's name in messages + member list
+    //   "user.profile-badge"     in the profile badge row
+    //   "user.avatar-overlay"    a small corner icon on the avatar (status-like)
+    //   "member-list.trailing"   end of a member-list row (its `decorators` slot)
+    //   "member-list.subtext"    the row's second line (its `subText` slot)
+    //   "dm-list.trailing"       end of a DM row
+    //   "channel-list.trailing"  end of a channel row (TypingIndicator, counts)
+    //   "channel-list.subtitle"  a channel row's second line
+    //   "guild-list.overlay"     a corner badge on a server icon
+    //   "message.trailing"       after a specific message's timestamp
+    // Keys: a user id for user.*, member-list.*, dm-list.*; a channel id for
+    // channel-list.*; a guild id for guild-list.*; a message id for
+    // message.*. A plugin may hold up to 5000 decorations.
+
+    record decoration {
+        icon: option<icon>,
+        image: option<string>,
+        text: option<string>,
+        tooltip: option<string>,
+        color: option<color>,
+        /// Clicking it reaches `on-slot` as `decoration-clicked`.
+        clickable: bool,
+    }
+
+    available-decorations: func() -> list<string>;
+    set-decoration: func(kind: string, key: snowflake, decoration: option<decoration>) -> result<_, ui-error>;
+    /// Replace all of this plugin's decorations of a kind at once.
+    set-decorations: func(kind: string, items: list<tuple<snowflake, decoration>>) -> result<_, ui-error>;
+    clear-decorations: func(kind: string);
+
+    // ---- Message-attached content (pushed, keyed by message) ----
+
+    /// Elements under a message (Translate's translation, an edit history,
+    /// a link preview the plugin built). Shown until removed or the
+    /// message leaves the client's cache.
+    set-message-accessory: func(message: message-ref, elements: option<list<element>>) -> result<_, ui-error>;
+
+    /// A plugin-drawn "ghost" row in a channel, positioned by id: how a
+    /// logging plugin shows a deleted message where it was. Styled as the
+    /// client's own deleted/system message, always labelled with the
+    /// plugin's name, never mistakable for a live message. Requires
+    /// `read-messages`.
+    record ghost-message {
+        channel: snowflake,
+        /// Positioned as if it had this id (the deleted message's).
+        id: snowflake,
+        author: user-ref,
+        content: list<span>,
+        /// "deleted", "edited", "note": picks the host style.
+        style: string,
+    }
+    set-ghost-message: func(ghost: ghost-message) -> result<_, ui-error>;
+    remove-ghost-message: func(channel: snowflake, id: snowflake);
+
+    // ---- Lists the plugin arranges (data only; the host draws rows) ----
+
+    /// Pinned DM sections at the top of the DM list (PinDMs).
+    record dm-section { id: string, name: string, color: option<color>, channels: list<snowflake>, collapsed: bool }
+    set-dm-sections: func(sections: list<dm-section>) -> result<_, ui-error>;
+
+    // ---- Local looks (only this client shows them; nothing is sent) ----
+
+    /// Another avatar or banner for a user, as registered image ids.
+    record profile-art { avatar: option<string>, banner: option<string> }
+    /// Show `art` for `user` on this client; `none` shows theirs again.
+    set-profile-art: func(user: snowflake, art: option<profile-art>) -> result<_, ui-error>;
+
+    /// Keep the client window above other windows. Reset when the plugin
+    /// unloads.
+    set-window-on-top: func(on-top: bool) -> result<_, ui-error>;
+    /// The client window's opacity, from 0.3 to 1. Reset when the plugin
+    /// unloads.
+    set-window-opacity: func(opacity: f32) -> result<_, ui-error>;
+
+    // ---- Transient ----
+
+    enum toast-kind { info, success, warning, error }
+    /// Rate-limited.
+    show-toast: func(text: string, kind: toast-kind);
+
+    /// A banner across the top of the client (one per plugin), with an
+    /// optional button (on-ui surface "notice") and always a dismiss.
+    record notice { text: string, kind: toast-kind, button: option<string> }
+    show-notice: func(notice: notice);
+    dismiss-notice: func();
+
+    // ---- Navigation (gesture-bound) ----
+
+    /// Go to a channel / message / guild / user profile, like clicking it.
+    navigate: func(to: target) -> result<_, ui-error>;
+    /// Open an https URL in the browser, after the client's own "leaving
+    /// Discord" confirmation for hosts the user hasn't trusted.
+    open-url: func(url: string) -> result<_, ui-error>;
+    /// Open the client's media viewer on an image the client has.
+    open-media: func(url: string) -> result<_, ui-error>;
+}

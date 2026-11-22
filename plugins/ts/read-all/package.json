@@ -1,0 +1,20 @@
+{
+  "name": "read-all-ts",
+  "version": "0.1.0",
+  "description": "A server-list button that marks everything read (TypeScript port of read-all).",
+  "private": true,
+  "type": "module",
+  "rekindle": {
+    "id": "dev.rekindle.read-all-ts",
+    "name": "Read All (TypeScript)",
+    "capabilities": ["ui", "act-local", "read-client"]
+  },
+  "scripts": {
+    "build": "rekindle build",
+    "check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@bytecodealliance/jco": "1.41.0",
+    "typescript": "7.0.2"
+  }
+}

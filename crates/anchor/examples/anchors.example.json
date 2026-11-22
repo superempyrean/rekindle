@@ -1,0 +1,28 @@
+{
+  "target": "example: a GPUI client build",
+  "anchors": [
+    {
+      "name": "theme.set_color",
+      "note": "function we hook to apply theme overrides; byte signature primary, nearby panic string as backup",
+      "locators": [
+        { "kind": "bytes", "pattern": "48 89 5c 24 ?? 57 48 83 ec ?? 48 8b ?? ?? e8 ?? ?? ?? ??" },
+        { "kind": "string", "text": "theme color token out of range" }
+      ]
+    },
+    {
+      "name": "settings.registry",
+      "note": "symbol present in dev builds; string fallback for stripped release builds",
+      "locators": [
+        { "kind": "symbol", "name": "_ZN11chat_client8registry15SettingsRegistry8register17h0000000000000000E" },
+        { "kind": "string", "text": "settings.section.register" }
+      ]
+    },
+    {
+      "name": "gateway.dispatch",
+      "note": "decoded-event entry point, located by a distinctive assertion string",
+      "locators": [
+        { "kind": "string", "text": "unhandled gateway opcode" }
+      ]
+    }
+  ]
+}

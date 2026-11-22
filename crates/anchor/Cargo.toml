@@ -1,0 +1,29 @@
+[package]
+name = "rekindle-anchor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Durable anchor descriptors for integration points, resolved per build to report which anchors broke."
+
+[lib]
+name = "rekindle_anchor"
+path = "src/lib.rs"
+
+[[bin]]
+name = "rekindle-anchor"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+object = { workspace = true }
+rekindle-analysis = { workspace = true }
+rekindle-sigmatch = { workspace = true }
+# Decoding RIP-relative references for `string-ref` locators.
+iced-x86 = { workspace = true }
+
+[lints]
+workspace = true

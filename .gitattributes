@@ -1,0 +1,8 @@
+# Text is stored in the repository with LF line endings, whatever a
+# contributor's git settings. Checkouts follow core.autocrlf.
+* text=auto
+
+*.ttf binary
+*.gif binary
+*.png binary
+*.wasm binary

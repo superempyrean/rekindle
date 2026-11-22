@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "lib": ["ES2023"],
+    "types": [],
+    "paths": {
+      "rekindle": ["./target/rekindle/sdk/index.ts"],
+      "rekindle/*": ["./target/rekindle/sdk/*.ts"]
+    }
+  },
+  "include": ["src", "target/rekindle/types", "target/rekindle/sdk/globals.d.ts"]
+}

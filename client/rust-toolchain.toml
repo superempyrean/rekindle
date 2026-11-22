@@ -1,0 +1,5 @@
+[toolchain]
+# Matches Zed v1.27.0 (the gpui pin), so the GPUI code we compile is what Zed shipped.
+channel = "1.98.1"
+profile = "minimal"
+components = ["rustfmt", "clippy"]

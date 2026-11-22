@@ -1,0 +1,2 @@
+{ "name": "fixture-ts-type-error", "version": "0.1.0", "private": true, "type": "module",
+  "rekindle": { "id": "dev.fixture.ts-type-error" } }

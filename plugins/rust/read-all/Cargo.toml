@@ -1,0 +1,21 @@
+[package]
+name = "read-all"
+version = "0.1.0"
+edition = "2024"
+description = "A button on top of the server list that marks everything read (a gesture-bound local action)."
+license = "GPL-3.0-or-later"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[package.metadata.rekindle]
+id = "dev.rekindle.read-all"
+name = "Read All"
+capabilities = ["ui", "act-local", "read-client"]
+
+[dependencies]
+rekindle-sdk = { path = "../../../crates/sdk" }
+
+[lints]
+workspace = true

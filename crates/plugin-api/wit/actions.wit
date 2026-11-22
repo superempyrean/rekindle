@@ -1,0 +1,172 @@
+// Acting as the user. Every function here is gesture-bound (design doc §5):
+// it succeeds only while the host is delivering one of the user's own
+// gestures to this plugin (a slot click, a menu item, a palette or slash
+// command, a keybind, a panel interaction), and each gesture carries a
+// small budget of actions. Timers, events, renders and `activate` are never
+// gestures. That is what makes "no account automation" technical rather
+// than a policy line: a plugin can make a button do a thing, it can't do
+// the thing on its own.
+//
+// Risk classes from the research (L local, S self-state, P presence others
+// see, O outward content). Moderation over others (M) and account/security
+// (X) are not offered yet.
+
+/// Shared result type for actions.
+interface action-types {
+    enum action-error {
+        /// Not inside a user gesture, or the gesture's budget is spent.
+        no-gesture,
+        /// You lack the Discord permission (the host checks first).
+        forbidden,
+        /// The target isn't loaded / doesn't exist.
+        not-found,
+        /// The host's per-plugin rate limit.
+        rate-limited,
+        /// This action isn't available on this client build.
+        unavailable,
+        /// The user declined the host's confirmation.
+        declined,
+        /// Bad argument (empty, too long, wrong channel type).
+        invalid,
+        /// Discord refused it; the client showed its own error.
+        failed,
+    }
+
+    /// A file a plugin made, to send (`actions.send-message`).
+    record outgoing-file {
+        filename: string,
+        content-type: option<string>,
+        data: list<u8>,
+        spoiler: bool,
+    }
+}
+
+/// The user's own local and self-only state (requires `act-local`).
+/// Classes L and S: nothing here is visible to other users. (Navigation
+/// is `ui.navigate`, which needs only `ui`.)
+interface local-actions {
+    use types.{snowflake, message-ref};
+    use action-types.{action-error};
+
+    /// Mark a channel read (CHANNEL_ACK), a guild read, or everything read
+    /// (BULK_ACK: ReadAllNotificationsButton).
+    mark-read: func(channel: snowflake) -> result<_, action-error>;
+    mark-guild-read: func(guild: snowflake) -> result<_, action-error>;
+    mark-all-read: func() -> result<_, action-error>;
+    /// Mark unread from a message (the Alt+click behaviour).
+    mark-unread: func(message: message-ref) -> result<_, action-error>;
+
+    /// Open a reply to `message` in the composer (CREATE_PENDING_REPLY).
+    /// The user still writes and sends it.
+    start-reply: func(message: message-ref, mention: bool) -> result<_, action-error>;
+    /// Open your own message for editing (MESSAGE_START_EDIT).
+    start-edit: func(message: message-ref) -> result<_, action-error>;
+    /// Put text into the composer at the cursor, for the user to send.
+    insert-text: func(text: string) -> result<_, action-error>;
+
+    /// Per-user local voice settings (MediaEngineStore; synced to your
+    /// own audio settings, invisible to others).
+    set-user-volume: func(user: snowflake, percent: f32) -> result<_, action-error>;
+    set-user-local-mute: func(user: snowflake, muted: bool) -> result<_, action-error>;
+
+    /// Your private note on a user.
+    set-note: func(user: snowflake, note: string) -> result<_, action-error>;
+    /// Save a message for later (bookmark) / remove it.
+    save-message: func(message: message-ref, saved: bool) -> result<_, action-error>;
+    /// Collapse/expand a category in your channel list.
+    set-category-collapsed: func(category: snowflake, collapsed: bool) -> result<_, action-error>;
+    /// Mute/unmute a channel or guild's notifications for you.
+    set-muted: func(channel-or-guild: snowflake, muted: bool) -> result<_, action-error>;
+}
+
+/// Your own reactions (requires `react`; `act` implies it). Up to 3 per
+/// gesture, host-rate-limited. Split from `actions` so a quick-react plugin
+/// can say it does only this: a reaction is visible but small, undoable,
+/// and still only happens on the user's click.
+interface reactions {
+    use types.{message-ref};
+    use action-types.{action-error};
+
+    /// Add/remove your own reaction. `emoji` is Unicode or `name:id`.
+    react: func(message: message-ref, emoji: string, burst: bool) -> result<_, action-error>;
+    unreact: func(message: message-ref, emoji: string, burst: bool) -> result<_, action-error>;
+}
+
+/// Visible actions others can see (requires `act`). Class O and the
+/// low-impact P ones. Each is budgeted to one per gesture, and
+/// host-rate-limited.
+interface actions {
+    use types.{snowflake, message-ref};
+    use action-types.{action-error, outgoing-file};
+
+    /// Send a message as the user to `channel`: text, files the plugin made
+    /// (petpet's GIF, a quote image), or both. `channel` is any channel the
+    /// user can send in (the host checks SEND_MESSAGES, and ATTACH_FILES
+    /// for files). Up to 10 files of up to 25 MiB in all; the text is
+    /// checked like a compose rewrite and may be empty when there are files.
+    send-message: func(channel: snowflake, content: string, files: list<outgoing-file>) -> result<_, action-error>;
+
+    /// Pin/unpin (needs PIN_MESSAGES; the host checks).
+    set-pinned: func(message: message-ref, pinned: bool) -> result<_, action-error>;
+    /// Delete your own message, or another's with MANAGE_MESSAGES. The
+    /// host shows the client's own confirm unless the gesture held Shift
+    /// (the client's own rule).
+    delete-message: func(message: message-ref) -> result<_, action-error>;
+    /// Replace the text of your own message. Shown to the user as a
+    /// preview first unless the gesture was the user's own edit-submit.
+    edit-message: func(message: message-ref, content: string) -> result<_, action-error>;
+    /// Hide embeds on your own message.
+    suppress-embeds: func(message: message-ref) -> result<_, action-error>;
+
+    /// Vote in a poll.
+    vote: func(message: message-ref, answers: list<u32>) -> result<_, action-error>;
+
+    /// Join/leave a voice channel (`none` leaves); toggle self mute/deafen.
+    join-voice: func(channel: option<snowflake>) -> result<_, action-error>;
+    set-self-mute: func(muted: bool) -> result<_, action-error>;
+    set-self-deaf: func(deafened: bool) -> result<_, action-error>;
+
+    /// Join/leave a thread.
+    set-thread-joined: func(thread: snowflake, joined: bool) -> result<_, action-error>;
+
+    // Not offered yet: forwarding, typing indicators, friend requests,
+    // invites, joining guilds, calling, anything over other members (kick,
+    // ban, timeout, server mute, move), and account/security settings.
+}
+
+/// Your presence (requires `presence`). Class P: others see these.
+/// Status and nickname are gesture-bound like every action; custom status
+/// and rich presence are your own activity and may be set at any time, at
+/// most 5 changes per 20 s (owner decision 2026-11-07).
+interface presence {
+    use types.{snowflake};
+    use action-types.{action-error};
+
+    /// "online", "idle", "dnd", "invisible".
+    set-status: func(status: string) -> result<_, action-error>;
+    set-custom-status: func(text: option<string>, emoji: option<string>, expires-ms: option<u64>) -> result<_, action-error>;
+    /// Your nickname in a guild (needs CHANGE_NICKNAME).
+    set-nickname: func(guild: snowflake, nick: option<string>) -> result<_, action-error>;
+
+    /// A rich-presence activity of your own (CustomRPC). Persistent until
+    /// cleared or the plugin unloads; may be updated from a timer or an
+    /// event (rate-limited, see above). Assets are the plugin's own images.
+    record rich-presence {
+        /// 0 playing, 2 listening, 3 watching, 5 competing.
+        kind: u8,
+        name: string,
+        details: option<string>,
+        state: option<string>,
+        started-ms: option<u64>,
+        ends-ms: option<u64>,
+        /// Plugin image ids (see `ui.register-image`), uploaded by the host
+        /// as the activity's assets.
+        large-image: option<string>,
+        large-text: option<string>,
+        small-image: option<string>,
+        small-text: option<string>,
+        /// Up to two (label, https URL) buttons others can click.
+        buttons: list<tuple<string, string>>,
+    }
+    set-rich-presence: func(activity: option<rich-presence>) -> result<_, action-error>;
+}

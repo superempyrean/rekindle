@@ -1,0 +1,13 @@
+[package]
+name = "rekindle-sdk"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Ergonomic SDK for writing sandboxed rekindle plugins."
+
+[dependencies]
+rekindle-plugin-api = { workspace = true }
+
+[lints]
+workspace = true

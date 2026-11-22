@@ -1,0 +1,21 @@
+[package]
+name = "silent-typing"
+version = "0.1.0"
+edition = "2024"
+description = "Toggle sending typing indicators from a chat-bar button or /silenttyping (host tweak + slash command)."
+license = "GPL-3.0-or-later"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[package.metadata.rekindle]
+id = "dev.rekindle.silent-typing"
+name = "Silent Typing"
+capabilities = ["ui", "tweaks"]
+
+[dependencies]
+rekindle-sdk = { path = "../../../crates/sdk" }
+
+[lints]
+workspace = true

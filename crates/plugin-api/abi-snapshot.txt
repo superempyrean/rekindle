@@ -1,0 +1,259 @@
+version 0.8.0
+wit-sha256 115abd7d8e1741ef40c4a70e6e0de269b5377fc4407518a3cb22364c87a1a4e9
+func actions.delete-message
+func actions.edit-message
+func actions.join-voice
+func actions.send-message
+func actions.set-pinned
+func actions.set-self-deaf
+func actions.set-self-mute
+func actions.set-thread-joined
+func actions.suppress-embeds
+func actions.vote
+func audio.client-sounds
+func audio.override-sound
+func audio.play
+func audio.register-sound
+func audio.speak
+func audio.stop
+func client-state.can
+func client-state.channels
+func client-state.dm-channel
+func client-state.frequent-emoji
+func client-state.get-channel
+func client-state.get-guild
+func client-state.get-guild-read-state
+func client-state.get-my-voice
+func client-state.get-read-state
+func client-state.get-role
+func client-state.get-selection
+func client-state.get-user
+func client-state.guild-emoji
+func client-state.guild-folders
+func client-state.guild-ids
+func client-state.guild-stickers
+func client-state.me
+func client-state.my-custom-status
+func client-state.my-member
+func client-state.my-permissions
+func client-state.my-setting
+func client-state.my-setting-keys
+func client-state.my-status
+func client-state.permission-overwrites
+func client-state.private-channels
+func client-state.roles
+func client-state.threads
+func client-state.unread-channels
+func clipboard.write-png
+func clipboard.write-text
+func compose-control.split
+func compose-handler.on-compose
+func compose-handler.on-upload
+func event-filter.on-intercept
+func event-handler.on-events
+func files.open
+func files.save
+func host-events.intercept
+func host-events.subscribe
+func host.clear-timer
+func host.client
+func host.features
+func host.format-duration
+func host.format-time
+func host.has-feature
+func host.log
+func host.now-millis
+func host.set-timer
+func host.snowflake-ms
+func host.tr
+func http.fetch
+func inspect.raw-json
+func lifecycle.activate
+func lifecycle.deactivate
+func lifecycle.on-features-changed
+func lifecycle.on-settings-changed
+func local-actions.insert-text
+func local-actions.mark-all-read
+func local-actions.mark-guild-read
+func local-actions.mark-read
+func local-actions.mark-unread
+func local-actions.save-message
+func local-actions.set-category-collapsed
+func local-actions.set-muted
+func local-actions.set-note
+func local-actions.set-user-local-mute
+func local-actions.set-user-volume
+func local-actions.start-edit
+func local-actions.start-reply
+func messages.get-message
+func messages.loaded-messages
+func messages.pins
+func messages.resolve-message-link
+func messages.visible-messages
+func notification-filter.on-notification
+func notify.post
+func overlay.clear
+func overlay.draw
+func overlay.register-image
+func overlay.remove-image
+func overlay.viewport
+func presence.set-custom-status
+func presence.set-nickname
+func presence.set-rich-presence
+func presence.set-status
+func reactions.react
+func reactions.unreact
+func render-control.declare-actions
+func render-control.invalidate
+func renderer.on-render
+func settings.get
+func settings.keys
+func settings.set
+func storage.delete
+func storage.get
+func storage.get-many
+func storage.keys
+func storage.set
+func storage.usage
+func theming.get
+func theming.get-color
+func theming.register-font
+func theming.reset
+func theming.reset-surface
+func theming.set
+func theming.set-background
+func theming.set-color
+func theming.set-string
+func theming.set-surface
+func theming.set-tint
+func theming.strings
+func theming.surfaces
+func theming.tokens
+func timer-handler.on-timer
+func tweaks.all
+func tweaks.reset
+func tweaks.set
+func ui-handler.on-autocomplete
+func ui-handler.on-command
+func ui-handler.on-keybind
+func ui-handler.on-slash-command
+func ui-handler.on-slot
+func ui-handler.on-ui
+func ui.add-item
+func ui.available-decorations
+func ui.available-slots
+func ui.clear-decorations
+func ui.close-modal
+func ui.dismiss-notice
+func ui.navigate
+func ui.open-media
+func ui.open-url
+func ui.register-click
+func ui.register-command
+func ui.register-image
+func ui.register-keybind
+func ui.register-slash-command
+func ui.remove-ghost-message
+func ui.remove-item
+func ui.remove-panel
+func ui.set-active
+func ui.set-decoration
+func ui.set-decorations
+func ui.set-dm-sections
+func ui.set-ghost-message
+func ui.set-message-accessory
+func ui.set-profile-art
+func ui.set-profile-section
+func ui.set-settings-extra
+func ui.set-voice-status
+func ui.set-window-on-top
+func ui.set-window-opacity
+func ui.show-modal
+func ui.show-notice
+func ui.show-panel
+func ui.show-toast
+func ui.unregister-click
+func ui.unregister-command
+func ui.unregister-keybind
+func ui.unregister-slash-command
+func users.get-member
+func users.get-presence
+func users.get-relationship
+func users.get-voice-state
+func users.loaded-members
+func users.member-color
+func users.member-permissions
+func users.mutual-guilds
+func users.note
+func users.relationships
+func users.speaking
+func users.typing
+func users.voice-states
+capability read-client
+capability read-users
+capability read-messages
+capability render-messages
+capability pointer
+capability ui
+capability theming
+capability overlay
+capability audio
+capability notifications
+capability storage
+capability network
+capability clipboard
+capability compose
+capability act-local
+capability react
+capability act
+capability presence
+capability tweaks
+capability files
+capability intercept
+slot message.context-menu Menu
+slot message.hover-bar Button
+slot user.context-menu Menu
+slot channel.context-menu Menu
+slot thread.context-menu Menu
+slot guild.context-menu Menu
+slot role.context-menu Menu
+slot media.context-menu Menu
+slot link.context-menu Menu
+slot selection.context-menu Menu
+slot composer.attach-menu Menu
+slot settings.cog-menu Menu
+slot chat-bar.button Button
+slot channel.toolbar Button
+slot user-area.button Button
+slot voice-panel.button Button
+slot guild-list.button Button
+slot dm-list.button Button
+slot voice-panel.status List
+slot profile.section List
+slot media-viewer.menu Menu
+decoration user.name-badge User
+decoration user.profile-badge User
+decoration user.avatar-overlay User
+decoration member-list.trailing User
+decoration member-list.subtext User
+decoration dm-list.trailing User
+decoration channel-list.trailing Channel
+decoration channel-list.subtitle Channel
+decoration guild-list.overlay Guild
+decoration message.trailing Message
+surface guild-list
+surface channel-list
+surface member-list
+surface user-area
+surface title-bar
+surface title-bar.help
+surface title-bar.inbox
+surface chat.gift-button
+surface chat.gif-button
+surface chat.sticker-button
+surface chat.emoji-button
+surface chat.app-launcher
+surface channel.header
+surface voice-panel
+surface activity-panel
+surface nitro-upsell
