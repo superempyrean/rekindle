@@ -183,3 +183,17 @@ fn tag12_patches_an_earlier_words_list() {
     ]);
     assert_eq!(decode(&past_end.to_bytes()), Err(DecodeError::BadWordsRef));
 }
+
+/// A hostile deeply-nested buffer is rejected before it can overflow the
+/// stack, while a wide-but-shallow one still decodes.
+#[test]
+fn deeply_nested_values_are_rejected() {
+    let mut deep = Value::I32(1);
+    for _ in 0..200 {
+        deep = Value::Array(vec![deep]);
+    }
+    assert_eq!(decode(&deep.to_bytes()), Err(DecodeError::TooDeep));
+
+    let wide = Value::Array((0..500).map(Value::I32).collect());
+    assert!(decode(&wide.to_bytes()).is_ok());
+}

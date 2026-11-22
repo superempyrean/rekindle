@@ -21,6 +21,10 @@
 
 use crate::PropId;
 
+/// The host caps value nesting; a buffer past this is hostile, not real.
+/// Matches the limit seen in an independent reading of the same build.
+const MAX_DEPTH: usize = 128;
+
 /// A decoded wire value. One variant per recovered tag (bool folds tags 1/2).
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
@@ -95,6 +99,9 @@ pub enum DecodeError {
     /// property set that was not a tag-8 object. (Turn framing is modelled; see
     /// `turn.rs`.)
     BadFraming,
+    /// Value nesting exceeded the decoder's depth limit, so the buffer is
+    /// treated as hostile rather than recursed into.
+    TooDeep,
 }
 
 impl core::fmt::Display for DecodeError {
@@ -106,6 +113,7 @@ impl core::fmt::Display for DecodeError {
             DecodeError::BadWordsRef => f.write_str("tag 12 named a missing words list or index"),
             DecodeError::LengthOverflow => f.write_str("length exceeds remaining bytes"),
             DecodeError::BadFraming => f.write_str("malformed turn framing"),
+            DecodeError::TooDeep => f.write_str("value nesting exceeded the depth limit"),
         }
     }
 }
@@ -187,6 +195,9 @@ pub struct Cursor<'a> {
     /// The words lists this buffer has defined so far, one per tag-11 or
     /// tag-12 value, in order.
     words: Vec<Vec<u32>>,
+    /// Current value-nesting depth, so a hostile deeply-nested buffer is
+    /// rejected before it can overflow the stack.
+    depth: usize,
 }
 
 impl<'a> Cursor<'a> {
@@ -196,6 +207,7 @@ impl<'a> Cursor<'a> {
             buf,
             pos: 0,
             words: Vec::new(),
+            depth: 0,
         }
     }
 
@@ -245,8 +257,20 @@ impl<'a> Cursor<'a> {
         Ok(len)
     }
 
-    /// Decode one value at the head, advancing past it.
+    /// Decode one value at the head, advancing past it. Nesting is capped at
+    /// [`MAX_DEPTH`]; a buffer deeper than that is rejected as hostile.
     pub fn value(&mut self) -> Result<Value, DecodeError> {
+        self.depth += 1;
+        if self.depth > MAX_DEPTH {
+            self.depth -= 1;
+            return Err(DecodeError::TooDeep);
+        }
+        let result = self.value_inner();
+        self.depth -= 1;
+        result
+    }
+
+    fn value_inner(&mut self) -> Result<Value, DecodeError> {
         let tag = self.u8()?;
         Ok(match tag {
             0 => Value::Null,
