@@ -1,6 +1,6 @@
 # rekindle
 
-[rekindle.dev](https://rekindle.dev)
+[rekindle.dev](https://rekindle.dev) · [![Discord](https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white)](https://discord.gg/BHus4dw7g7)
 
 rekindle is a client mod and plugin toolkit for Discord's upcoming rewrite
 in Rust/GPUI (codename Phoenix). Our goal is to restore themes, plugins, UI
