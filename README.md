@@ -61,14 +61,8 @@ cargo build                            # the shim and the host DLL
 ## Scope
 
 rekindle is customization tooling: themes, UI additions and quality-of-life
-plugins. The plugin capability model makes these hard rather than easy, and
-the community index refuses them:
-
-- Account automation and selfbot behaviour.
-- Harvesting other users' data at scale, or sending it off the device.
-  Logging the user's own received view locally, deleted and edited messages
-  included, is in scope.
-- Defeating integrity or anti-tamper measures Discord may add.
+plugins. For now, the community index refuses only plugins that are actively
+malicious. The rest of its policy will be decided as plugins are submitted.
 
 Modifying the client is against Discord's Terms of Service, and using any
 client mod carries account risk.
