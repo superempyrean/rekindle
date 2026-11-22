@@ -1,9 +1,11 @@
 # rekindle-wire
 
 The wire a split GPUI client speaks between its sandboxed wasm guest and its
-native host. The guest describes its views as one op buffer per turn, and the
-host decodes it, reconciles it against a retained element tree and paints.
-rekindle's host links this crate to read and rewrite those turns.
+native host. The guest's runtime reconciles its views against a retained
+element tree and encodes them as one op buffer per turn. On Phoenix's Android
+build the platform's views apply those ops and paint. Whether a desktop build
+paints them in the guest's runtime instead is not known yet. rekindle's host
+links this crate to read and rewrite those turns.
 
 The recovered parts are read out of Phoenix's Android host library
 (`liblibdiscord_wasm_host.so`, build 356207) and copied byte for byte. The
@@ -14,7 +16,7 @@ recoverable from that binary rather than only over the air.
 
 | Piece | Status | Where |
 |---|---|---|
-| The 13-tag value codec, fixed-width little-endian (decoder at VA `0x172bc4c`) | recovered | `Value`, `decode` |
+| The 13-tag value codec, fixed-width little-endian (read from the host-to-guest event decoder at VA `0x172bc4c`) | recovered | `Value`, `decode` |
 | The 855 PropIds, 0 to 854, by name (tables at VA `0x5d9fcf0` and `0x5da3260`) | recovered | `PropId`, `propid-names.tsv` |
 | The element set (`div`, `text`, `input`, `list`, `canvas`, `navigator`, `motion_events`), kinds as name strings | recovered | `ElementKind` |
 | `view_props` keyed by node and PropId, and the keyed diff of two `u32` child lists | recovered in shape | `ViewProps`, `diff_children` |

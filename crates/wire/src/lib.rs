@@ -1,10 +1,12 @@
 //! `rekindle-wire`: Phoenix's recovered gpui-native wire shape, so the mock can
 //! speak the real bytes.
 //!
-//! Phoenix is GPUI cut in two across a wasm boundary: a sandboxed wasm guest
-//! builds a UI description and hands the native host one op buffer per turn,
-//! which the host decodes, reconciles against a retained element tree, and
-//! paints. This crate is the portion of that seam that was recovered
+//! Phoenix is GPUI cut in two across a wasm boundary. A sandboxed wasm guest's
+//! runtime reconciles its views against a retained element tree and hands the
+//! native host one op buffer per turn. On the Android build the platform's
+//! views apply the ops and paint; whether a desktop build paints them in the
+//! guest's runtime is not known yet. This crate is the portion of that seam
+//! that was recovered
 //! byte-for-byte from the shipped Android host library
 //! (`liblibdiscord_wasm_host.so`, build 356207), with the parts no binary has
 //! shown yet modelled around it. The host links it to read and rewrite turns,
@@ -20,7 +22,8 @@
 //! Two layers are copied faithfully from the binary and must stay byte-exact:
 //!
 //! - the **13-tag value codec** ([`Value`], [`decode`]) — fixed-width
-//!   little-endian, read from the decode function at VA `0x172bc4c`;
+//!   little-endian, read from the decode function at VA `0x172bc4c`, which
+//!   decodes host-to-guest events with it;
 //! - the **855-entry `PropId` table** ([`PropId`]) — the id->name and name->id
 //!   tables at VA `0x5d9fcf0` / `0x5da3260`, generated from `propid-names.tsv`.
 //!
