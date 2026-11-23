@@ -41,8 +41,9 @@
 //! `rekindle_wire::event`, both read from Phoenix's Android host. A
 //! `ChildEdits` op of the guest's is read as the Children op it amounts to,
 //! and a turn the engine rewrites carries whole child lists. Host frames and
-//! UI events other than an event on a node pass unchanged, and so does a
-//! BATCH frame, so a press inside a batch isn't filtered.
+//! UI events other than an event on a node pass unchanged. A BATCH frame's
+//! UI events are filtered one by one as a bare event would be, and the
+//! frames beside them in the batch pass.
 //!
 //! # Modelled
 //!
@@ -58,6 +59,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use rekindle_wire::a11y::ids as a11y;
 use rekindle_wire::event::{self, Event, UiEvent};
+use rekindle_wire::frame::{self, Frame};
 use rekindle_wire::turn::{ON, create_props};
 use rekindle_wire::{DecodeError, NodeId, NodeOp, PropId, Tree, Turn, Value};
 
@@ -105,6 +107,11 @@ pub enum Verdict {
     /// The guest never receives it. If the event pressed one of rekindle's
     /// nodes with a handler, the value is the handler's reply.
     Consume(Option<Value>),
+    /// The guest receives this BATCH frame instead: the one it was sent,
+    /// with each UI event in it dropped or replaced. A handler's reply to
+    /// an event inside a batch isn't sent, since a dispatch has one reply
+    /// slot and the batch's other entries still reach the guest.
+    Batch(Vec<u8>),
 }
 
 /// Rewrites a guest's turns and the host's events, as its [`Work`] says.
@@ -274,12 +281,46 @@ impl Engine {
         }
     }
 
-    /// Decide what happens to one event before the guest sees it. A host
-    /// frame and a UI event that isn't on a node pass.
+    /// Decide what happens to one event before the guest sees it. A UI
+    /// event that isn't on a node passes, and so does a host frame other
+    /// than a BATCH. In a BATCH, each UI event is decided as it would be on
+    /// its own, and a batch left with no entries is consumed.
     pub fn event(&mut self, bytes: &[u8]) -> Result<Verdict, DecodeError> {
-        if !event::is_ui(bytes) {
+        if event::is_ui(bytes) {
+            return self.ui_event(bytes);
+        }
+        if bytes.first() != Some(&frame::BATCH) {
             return Ok(Verdict::Pass);
         }
+        let batch = Frame::from_bytes(bytes)?;
+        let mut entries: Vec<Vec<u8>> = Vec::new();
+        let mut changed = false;
+        for entry in batch.batch()? {
+            match self.event(entry)? {
+                Verdict::Pass => entries.push(entry.to_vec()),
+                Verdict::Replace(ev) => {
+                    entries.push(ev.to_bytes());
+                    changed = true;
+                }
+                Verdict::Batch(inner) => {
+                    entries.push(inner);
+                    changed = true;
+                }
+                Verdict::Consume(_) => changed = true,
+            }
+        }
+        if !changed {
+            return Ok(Verdict::Pass);
+        }
+        if entries.is_empty() {
+            return Ok(Verdict::Consume(None));
+        }
+        let body = frame::batch_body(entries.iter().map(Vec::as_slice));
+        Ok(Verdict::Batch(Frame { body, ..batch }.to_bytes()))
+    }
+
+    /// [`Engine::event`] for one UI event.
+    fn ui_event(&mut self, bytes: &[u8]) -> Result<Verdict, DecodeError> {
         let UiEvent::Node(ev) = UiEvent::from_bytes(bytes)? else {
             return Ok(Verdict::Pass);
         };

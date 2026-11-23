@@ -562,27 +562,30 @@ fn a_press_on_a_counting_button_is_consumed_and_the_next_turn_shows_it() {
     );
 }
 
+/// [`first`] with three buttons the press rules of [`everything`] match:
+/// 80 is dropped, 81 retargeted at 80, and 82 passes.
+fn with_buttons() -> Turn {
+    let mut t = first();
+    for (node, label) in [(80, "Stop"), (81, "Swap"), (82, "Other")] {
+        t.push(NodeOp::Create {
+            node,
+            kind: ElementKind::VIEW,
+            props: vec![],
+        });
+        t.push(NodeOp::Update {
+            node,
+            props: vec![(a11y::LABEL, str(label))],
+        });
+    }
+    t.push(NodeOp::Children {
+        node: PAGE,
+        children: vec![FEED, 80, 81, 82],
+    });
+    t
+}
+
 #[test]
 fn presses_on_the_guests_nodes_are_dropped_retargeted_or_passed() {
-    let with_buttons = || {
-        let mut t = first();
-        for (node, label) in [(80, "Stop"), (81, "Swap"), (82, "Other")] {
-            t.push(NodeOp::Create {
-                node,
-                kind: ElementKind::VIEW,
-                props: vec![],
-            });
-            t.push(NodeOp::Update {
-                node,
-                props: vec![(a11y::LABEL, str(label))],
-            });
-        }
-        t.push(NodeOp::Children {
-            node: PAGE,
-            children: vec![FEED, 80, 81, 82],
-        });
-        t
-    };
     let (mut e, mut host) = engine(everything());
     send(&mut e, &mut host, &with_buttons());
     assert_eq!(
@@ -610,6 +613,130 @@ fn presses_on_the_guests_nodes_are_dropped_retargeted_or_passed() {
     for n in [80, 81, 82] {
         assert_eq!(e.event(&Event::press(n).to_bytes()), Ok(Verdict::Pass));
     }
+}
+
+/// A BATCH of `entries`, with a record the engine has to keep.
+fn batch(entries: &[&[u8]]) -> Vec<u8> {
+    frame::Frame {
+        kind: frame::BATCH,
+        module: 2,
+        method: 5,
+        call: 9,
+        record: Value::Bool(true).to_bytes(),
+        body: frame::batch_body(entries.iter().copied()),
+    }
+    .to_bytes()
+}
+
+/// A host module's EVENT frame.
+fn module_event() -> Vec<u8> {
+    frame::Frame {
+        kind: frame::EVENT,
+        module: 3,
+        method: 1,
+        call: 0,
+        record: Value::I32(4).to_bytes(),
+        body: vec![0xaa, 0xbb],
+    }
+    .to_bytes()
+}
+
+#[test]
+fn presses_inside_a_batch_are_filtered_and_its_frames_pass() {
+    let (mut e, mut host) = engine(everything());
+    send(&mut e, &mut host, &with_buttons());
+    let press = |n| Event::press(n).to_bytes();
+    let event = module_event();
+
+    // 80 is dropped, 81 becomes a press on 80, and 82 and the EVENT frame
+    // stay where they were.
+    let sent = batch(&[&press(80), &event, &press(81), &press(82)]);
+    let Ok(Verdict::Batch(out)) = e.event(&sent) else {
+        panic!("the batch wasn't rewritten");
+    };
+    let out = frame::Frame::from_bytes(&out).unwrap();
+    let want = frame::Frame::from_bytes(&batch(&[&event, &press(80), &press(82)])).unwrap();
+    assert_eq!(out, want, "the header and record are kept");
+    assert_eq!(
+        out.batch().unwrap(),
+        vec![&event[..], &press(80)[..], &press(82)[..]]
+    );
+
+    // Nothing to filter: the batch goes through as sent.
+    assert_eq!(e.event(&batch(&[&press(82), &event])), Ok(Verdict::Pass));
+    assert_eq!(e.event(&batch(&[])), Ok(Verdict::Pass));
+    // Every entry dropped: the guest receives nothing.
+    assert_eq!(
+        e.event(&batch(&[&press(80), &press(80)])),
+        Ok(Verdict::Consume(None))
+    );
+    // A batch inside a batch goes back through the same entry.
+    let inner = batch(&[&press(81)]);
+    let Ok(Verdict::Batch(out)) = e.event(&batch(&[&inner, &event])) else {
+        panic!("the nested batch wasn't rewritten");
+    };
+    let out = frame::Frame::from_bytes(&out).unwrap();
+    let entries = out.batch().unwrap();
+    assert_eq!(entries[1], &event[..]);
+    assert_eq!(
+        frame::Frame::from_bytes(entries[0])
+            .unwrap()
+            .batch()
+            .unwrap(),
+        vec![&press(80)[..]]
+    );
+    // An entry that runs past the end, and an event in it that doesn't
+    // decode, are errors.
+    let mut cut = batch(&[&press(82)]);
+    cut.pop();
+    assert!(e.event(&cut).is_err());
+    assert!(e.event(&batch(&[&[0, 0, 0, 0, 1]])).is_err());
+}
+
+#[test]
+fn a_counting_press_inside_a_batch_counts_without_a_reply() {
+    let (mut e, mut host) = engine(mounts());
+    send(&mut e, &mut host, &first());
+    let event = module_event();
+    let press = Event::press(BUTTON).to_bytes();
+    let Ok(Verdict::Batch(out)) = e.event(&batch(&[&press, &event])) else {
+        panic!("the batch wasn't rewritten");
+    };
+    assert_eq!(
+        frame::Frame::from_bytes(&out).unwrap().batch().unwrap(),
+        vec![&event[..]]
+    );
+    assert_eq!(e.count(BUTTON), 1);
+    let (applied, _) = send(&mut e, &mut host, &Turn::new());
+    assert_eq!(
+        applied.ops,
+        vec![NodeOp::Update {
+            node: BUTTON_TEXT,
+            props: vec![(TEXT, str("1 press"))]
+        }]
+    );
+}
+
+#[test]
+fn a_frame_request_carries_what_the_engine_changed() {
+    let (mut e, mut host) = engine(mounts());
+    send(&mut e, &mut host, &first());
+    let request = Turn {
+        ops: vec![NodeOp::RequestFrame],
+    };
+    assert_eq!(e.filter(&request.to_bytes()), Ok(None));
+    e.event(&Event::press(BUTTON).to_bytes()).unwrap();
+    let (applied, _) = send(&mut e, &mut host, &request);
+    assert_eq!(
+        applied.ops,
+        vec![
+            NodeOp::RequestFrame,
+            NodeOp::Update {
+                node: BUTTON_TEXT,
+                props: vec![(TEXT, str("1 press"))]
+            }
+        ]
+    );
 }
 
 #[test]

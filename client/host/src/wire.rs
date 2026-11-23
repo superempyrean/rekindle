@@ -11,9 +11,10 @@
 //!
 //! Input crosses the other way, one event buffer at a time, through the
 //! function the `wire_event_dispatch` anchor finds. Its detour passes each
-//! event through the engine before the guest receives it. A reply the
-//! engine makes for an event it consumed goes back through the client's
-//! own reply function, found by `wire_event_reply`.
+//! event through the engine before the guest receives it, and the UI
+//! events inside a BATCH frame one by one. A reply the engine makes for
+//! an event it consumed goes back through the client's own reply
+//! function, found by `wire_event_reply`.
 //!
 //! The engine is `rekindle_wire_inject::Engine`, configured by a `Work`
 //! value. [`follow`] makes it from the plugins' contributions every tick:
@@ -799,6 +800,12 @@ unsafe extern "C" fn hooked_dispatch(
             // SAFETY: the client's handle and reply slot, with the event the
             // engine made. The guest reads the buffer within the call.
             return unsafe { original(handle, replaced.as_ptr(), replaced.len(), reply_ctx) };
+        }
+        Some(Ok(Verdict::Batch(batch))) => {
+            EVENTS_REPLACED.fetch_add(1, Ordering::Relaxed);
+            // SAFETY: as for a replaced event, with the batch the engine
+            // filtered.
+            return unsafe { original(handle, batch.as_ptr(), batch.len(), reply_ctx) };
         }
         Some(Ok(Verdict::Consume(value))) => {
             EVENTS_CONSUMED.fetch_add(1, Ordering::Relaxed);
