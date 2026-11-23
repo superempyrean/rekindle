@@ -265,6 +265,7 @@ fn a_newer_framework_downloads_from_a_signed_channel_and_nothing_else_does() {
 
 /// A release channel in `dist` offering `exe` as launcher `version`, at
 /// `dist/launcher/<version>/rekindle.exe`.
+#[cfg(windows)]
 fn publish_launcher(
     dist: &Path,
     key: &Keypair,
@@ -300,6 +301,7 @@ fn framework_update(
     update::framework(install, state, loc, &head)
 }
 
+#[cfg(windows)]
 fn launcher_update(
     install: &Install,
     state: &mut rekindle_launcher::state::State,
