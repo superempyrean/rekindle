@@ -68,43 +68,58 @@ pub(crate) fn image_path() -> anyhow::Result<std::path::PathBuf> {
     if let Some(p) = std::env::var_os(IMAGE_ENV) {
         return Ok(p.into());
     }
-    let p = crate::android::config_file("liblibdiscord_wasm_host.so");
+    let p = crate::android::config_file(DEFAULT_IMAGE);
     if p.exists() {
         return Ok(p);
     }
     anyhow::bail!("{IMAGE_ENV} is not set and {} is missing", p.display())
 }
 
+/// The file name of the client's library: [`IMAGE_ENV`]'s, or the default
+/// copy's. The loaded library is found by it, without reading the copy.
+#[cfg(target_os = "android")]
+fn image_name() -> std::ffi::OsString {
+    std::env::var_os(IMAGE_ENV)
+        .and_then(|p| std::path::Path::new(&p).file_name().map(ToOwned::to_owned))
+        .unwrap_or_else(|| DEFAULT_IMAGE.into())
+}
+
+/// The client's library, as the app names it.
+#[cfg(target_os = "android")]
+const DEFAULT_IMAGE: &str = "liblibdiscord_wasm_host.so";
+
 /// The client image's load bias: the address its `p_vaddr` 0 is mapped at,
-/// which an anchor's virtual address is added to. A library the app maps
-/// straight out of the APK (`extractNativeLibs=false`) has no mapping at
-/// file offset 0, so this reads the load bias the dynamic linker recorded
-/// (`dl_iterate_phdr`'s `dlpi_addr`) rather than a `/proc/self/maps` line,
-/// matching the loaded object by the file name [`IMAGE_ENV`] gives.
+/// which an anchor's virtual address is added to. See [`loaded_image`].
 #[cfg(target_os = "android")]
 pub(crate) fn image_base() -> Option<usize> {
-    let image = image_path().ok()?;
-    let want = image.file_name()?.to_owned();
-    load_bias_of(&want)
+    loaded_image().map(|l| l.bias)
 }
 
-/// Whether the client's image is mapped into this process yet: its library
-/// shows up in `dl_iterate_phdr`. The app loads it with `System.loadLibrary`
-/// after the host's initializer runs, so the worker waits on this.
+/// The client's library as the dynamic linker loaded it.
 #[cfg(target_os = "android")]
-pub(crate) fn image_mapped() -> bool {
-    image_base().is_some()
+pub(crate) struct Loaded {
+    /// The load bias (`dlpi_addr`).
+    pub(crate) bias: usize,
+    /// Its GNU build ID, read from its mapped `PT_NOTE`, if it has one.
+    pub(crate) build_id: Option<Vec<u8>>,
 }
 
-/// The load bias of the loaded object whose path ends in `name`, from
-/// `dl_iterate_phdr`. `None` if no such object is loaded.
+/// The client's library, once the dynamic linker has loaded it.
+///
+/// A library the app maps straight out of the APK (`extractNativeLibs=false`)
+/// has no mapping at file offset 0, so this reads what the dynamic linker
+/// recorded (`dl_iterate_phdr`) rather than a `/proc/self/maps` line,
+/// matching the loaded object by [`image_name`]. The linker holds its lock
+/// from mapping a library through running its initializers, and
+/// `dl_iterate_phdr` takes the same lock, so a library this returns is
+/// relocated and its `PT_GNU_RELRO` already read-only.
 #[cfg(target_os = "android")]
-fn load_bias_of(name: &std::ffi::OsStr) -> Option<usize> {
+pub(crate) fn loaded_image() -> Option<Loaded> {
     use std::os::unix::ffi::OsStrExt;
 
     struct Search<'a> {
         name: &'a [u8],
-        found: Option<usize>,
+        found: Option<Loaded>,
     }
 
     extern "C" fn visit(
@@ -114,19 +129,41 @@ fn load_bias_of(name: &std::ffi::OsStr) -> Option<usize> {
     ) -> libc::c_int {
         // SAFETY: `dl_iterate_phdr` passes a live `dl_phdr_info` and the
         // `data` pointer this call handed it, a `&mut Search`.
-        let (info, search) = unsafe { (&*info, &mut *(data as *mut Search)) };
+        let (info, search) = unsafe { (&*info, &mut *data.cast::<Search>()) };
         if info.dlpi_name.is_null() {
             return 0;
         }
         // SAFETY: `dlpi_name` is a C string owned by the loader.
         let path = unsafe { std::ffi::CStr::from_ptr(info.dlpi_name) }.to_bytes();
-        if path.ends_with(search.name) {
-            search.found = Some(info.dlpi_addr as usize);
-            return 1;
+        if !path.ends_with(search.name) {
+            return 0;
         }
-        0
+        let bias = info.dlpi_addr as usize;
+        let mut build_id = None;
+        for i in 0..usize::from(info.dlpi_phnum) {
+            // SAFETY: `dlpi_phdr` points at `dlpi_phnum` program headers.
+            let ph = unsafe { &*info.dlpi_phdr.add(i) };
+            if ph.p_type != libc::PT_NOTE {
+                continue;
+            }
+            // SAFETY: a `PT_NOTE` lies in a loaded, readable segment, at the
+            // load bias plus its `p_vaddr`, for `p_memsz` bytes.
+            let notes = unsafe {
+                std::slice::from_raw_parts(
+                    (bias + ph.p_vaddr as usize) as *const u8,
+                    ph.p_memsz as usize,
+                )
+            };
+            if let Some(id) = rekindle_hook::elf::gnu_build_id(notes) {
+                build_id = Some(id.to_vec());
+                break;
+            }
+        }
+        search.found = Some(Loaded { bias, build_id });
+        1
     }
 
+    let name = image_name();
     let mut search = Search {
         name: name.as_bytes(),
         found: None,
