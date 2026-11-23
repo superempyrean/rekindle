@@ -1,4 +1,4 @@
-// Run with `rekindle test`, which starts the simulated client first. Each
+// Run with `rekindle test` or `cargo test`. Either starts the simulated client. Each
 // test starts with `Preview::reset()`: a fresh client and empty storage.
 use rekindle_test::Preview;
 

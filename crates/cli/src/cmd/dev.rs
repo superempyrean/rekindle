@@ -22,7 +22,7 @@ mod session;
 mod term;
 mod watch;
 
-use server::{ServeOptions, serve, serve_for};
+use server::{ServeOptions, serve, serve_for, serve_until_closed};
 use session::{DEV_TRUST, Session, compile};
 
 #[derive(Subcommand)]
@@ -57,6 +57,16 @@ pub(crate) enum Commands {
         #[arg(last = true)]
         args: Vec<String>,
     },
+    /// Build a plugin, run it in the simulated client, print `READY <port> <plugin id>` and serve the
+    /// preview's API until stdin closes. `rekindle-test` starts this when the tests weren't run by
+    /// `rekindle test`.
+    #[command(hide = true)]
+    TestServer {
+        #[arg(default_value = ".")]
+        path: PathBuf,
+        #[arg(long)]
+        debug: bool,
+    },
     /// Run all installed plugins that are on in the simulated client preview.
     Run {
         /// Port for the preview server (loopback only).
@@ -78,6 +88,7 @@ pub(crate) fn run(c: Commands) -> Result<()> {
             open,
         } => dev(path, port, debug, fresh, open),
         Commands::Test { path, debug, args } => test(path, debug, &args),
+        Commands::TestServer { path, debug } => test_server(path, debug),
         Commands::Run { port, open } => run_installed(port, open),
     }
 }
@@ -87,7 +98,39 @@ fn test(path: PathBuf, debug: bool, args: &[String]) -> Result<()> {
         .with_context(|| format!("reading the plugin project at {}", path.display()))?;
     let m = &project.manifest;
     let mut runner = test_runner(&project, args)?;
+    let mut session = test_session(&project, path, debug)?;
 
+    let status = serve_for(&mut session, |port| {
+        runner
+            .env("REKINDLE_TEST_URL", format!("http://127.0.0.1:{port}"))
+            .env("REKINDLE_TEST_PLUGIN", &m.id);
+        runner.spawn().context("starting the test runner")
+    })?;
+    if status.success() {
+        return Ok(());
+    }
+    let logs = session.recent_logs(40);
+    if !logs.is_empty() {
+        term::line("");
+        term::warn("the plugin's last log lines:");
+        for r in &logs {
+            term::log(r);
+        }
+    }
+    std::process::exit(status.code().unwrap_or(1));
+}
+
+fn test_server(path: PathBuf, debug: bool) -> Result<()> {
+    let project = builder::read_project(&path)
+        .with_context(|| format!("reading the plugin project at {}", path.display()))?;
+    let mut session = test_session(&project, path, debug)?;
+    serve_until_closed(&mut session, &project.manifest.id)
+}
+
+/// Build the plugin and load it into a fresh simulated client with
+/// in-memory storage, for its tests.
+fn test_session(project: &builder::Project, path: PathBuf, debug: bool) -> Result<Session> {
+    let m = &project.manifest;
     term::note(&format!("building {}…", m.id));
     let built = compile(&BuildOptions {
         path,
@@ -109,25 +152,7 @@ fn test(path: PathBuf, debug: bool, args: &[String]) -> Result<()> {
     if let Err(e) = session.add(&m.id, DEV_TRUST, Ok(built.bytes), None) {
         bail!("the plugin didn't load, so there's nothing to test: {e}");
     }
-
-    let status = serve_for(&mut session, |port| {
-        runner
-            .env("REKINDLE_TEST_URL", format!("http://127.0.0.1:{port}"))
-            .env("REKINDLE_TEST_PLUGIN", &m.id);
-        runner.spawn().context("starting the test runner")
-    })?;
-    if status.success() {
-        return Ok(());
-    }
-    let logs = session.recent_logs(40);
-    if !logs.is_empty() {
-        term::line("");
-        term::warn("the plugin's last log lines:");
-        for r in &logs {
-            term::log(r);
-        }
-    }
-    std::process::exit(status.code().unwrap_or(1));
+    Ok(session)
 }
 
 /// The project's test runner: `cargo test`, or Node's (for

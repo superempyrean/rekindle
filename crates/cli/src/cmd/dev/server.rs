@@ -122,6 +122,40 @@ pub(super) fn serve_for(
     status
 }
 
+/// Serve `session` on a free loopback port until stdin closes. The first
+/// line on stdout is `READY <port> <plugin>`, for the process that started
+/// this one (`rekindle test-server`, which `rekindle-test` starts).
+pub(super) fn serve_until_closed(session: &mut Session, plugin: &str) -> Result<()> {
+    use std::io::{Read as _, Write as _};
+    use std::sync::atomic::AtomicBool;
+
+    let server = Server::http(("127.0.0.1", 0))
+        .map_err(|e| anyhow::anyhow!("could not listen on loopback: {e}"))?;
+    let port = server
+        .server_addr()
+        .to_ip()
+        .map(|a| a.port())
+        .ok_or_else(|| anyhow::anyhow!("the server has no port"))?;
+    let closed = Arc::new(AtomicBool::new(false));
+    {
+        let closed = closed.clone();
+        std::thread::Builder::new()
+            .name("rekindle-stdin".into())
+            .spawn(move || {
+                let mut sink = [0u8; 256];
+                let mut stdin = std::io::stdin();
+                while matches!(stdin.read(&mut sink), Ok(n) if n > 0) {}
+                closed.store(true, Ordering::Relaxed);
+            })?;
+    }
+    let mut out = std::io::stdout();
+    writeln!(out, "READY {port} {plugin}")?;
+    out.flush()?;
+    run(session, server, port, || {
+        closed.load(Ordering::Relaxed).then_some(())
+    })
+}
+
 /// The session loop: API jobs and ticks until `done` returns something.
 fn run<T>(
     session: &mut Session,

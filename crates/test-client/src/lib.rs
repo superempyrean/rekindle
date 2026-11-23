@@ -17,23 +17,40 @@
 //! }
 //! ```
 //!
-//! Tests share one simulated client, so `rekindle test` runs them one at a
-//! time. [`Preview::reset`] starts each from a clean client and storage.
+//! Tests share one simulated client. [`Preview::reset`] starts each from a
+//! clean client and storage, and holds a lock until the test ends, so tests
+//! that start with it run one at a time even under a plain `cargo test`.
 //!
-//! This crate only talks to the preview over loopback HTTP, so it builds in
-//! seconds. For tests that load the plugin in-process, see
-//! `rekindle_plugin_host::testing::Harness`.
+//! Plain `cargo test` works too: with no preview from `rekindle test` in the
+//! environment, the first [`Preview`] starts `rekindle test-server` for the
+//! crate (the `rekindle` on `PATH`, or `REKINDLE_BIN`). The simulated client
+//! runs in that process, so this crate only talks to it over loopback HTTP
+//! and builds in seconds.
 
 /// For building interaction values: `json!({ "kind": "toggled", "value": true })`.
 pub use serde_json::{Value, json};
-use std::io::{Read, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
+use std::process::{Child, Command, Stdio};
+use std::sync::{Mutex, MutexGuard, OnceLock};
 
 /// The plugin under test, in the simulated client `rekindle test` runs.
 pub struct Preview {
     addr: String,
     plugin: String,
+    /// Held from [`Preview::reset`] to the end of the test.
+    _turn: Option<MutexGuard<'static, ()>>,
 }
+
+/// One test at a time against the shared simulated client.
+static TURN: Mutex<()> = Mutex::new(());
+
+/// The `rekindle test-server` this process started: (address, plugin id).
+static SERVER: OnceLock<(String, String)> = OnceLock::new();
+
+/// Keeps the server's stdin open while this process runs. The server stops
+/// when it closes, which happens when this process exits.
+static SERVER_CHILD: OnceLock<Mutex<Child>> = OnceLock::new();
 
 /// The preview refused an action, or couldn't be reached.
 #[derive(Debug)]
@@ -53,28 +70,42 @@ impl std::fmt::Display for PreviewError {
 impl std::error::Error for PreviewError {}
 
 impl Preview {
-    /// Connect to the preview `rekindle test` started.
+    /// Connect to the preview `rekindle test` started, or start one.
     ///
     /// # Panics
-    /// If the tests weren't started by `rekindle test`.
+    /// If there is no preview and `rekindle test-server` can't be started,
+    /// or the plugin doesn't build or load.
     pub fn connect() -> Self {
-        let (Ok(url), Ok(plugin)) = (
+        let (addr, plugin) = match (
             std::env::var("REKINDLE_TEST_URL"),
             std::env::var("REKINDLE_TEST_PLUGIN"),
-        ) else {
-            panic!("nothing to test against: run these tests with `rekindle test`");
+        ) {
+            (Ok(url), Ok(plugin)) => (
+                url.trim_start_matches("http://")
+                    .trim_end_matches('/')
+                    .to_string(),
+                plugin,
+            ),
+            _ => SERVER.get_or_init(start_server).clone(),
         };
-        let addr = url
-            .trim_start_matches("http://")
-            .trim_end_matches('/')
-            .to_string();
-        Self { addr, plugin }
+        Self {
+            addr,
+            plugin,
+            _turn: None,
+        }
     }
 
     /// Connect, and start from a fresh simulated client and empty storage,
-    /// with the plugin loaded again.
+    /// with the plugin loaded again. The returned preview holds the shared
+    /// client until it is dropped.
     pub fn reset() -> Self {
-        let p = Self::connect();
+        let turn = TURN
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let p = Self {
+            _turn: Some(turn),
+            ..Self::connect()
+        };
         p.post("/api/reset", json!({}));
         p
     }
@@ -419,6 +450,42 @@ fn dechunk(mut s: &[u8]) -> Vec<u8> {
 
 fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     haystack.windows(needle.len()).position(|w| w == needle)
+}
+
+/// Start `rekindle test-server` for the crate under test and wait for its
+/// `READY <port> <plugin>` line.
+fn start_server() -> (String, String) {
+    let bin = std::env::var("REKINDLE_BIN").unwrap_or_else(|_| "rekindle".into());
+    let dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".into());
+    let mut child = Command::new(&bin)
+        .args(["test-server", &dir])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .unwrap_or_else(|e| {
+            panic!(
+                "couldn't start `{bin} test-server`: {e}. Run the tests with `rekindle test`, \
+                 or put `rekindle` on PATH or set REKINDLE_BIN."
+            )
+        });
+    let stdout = child.stdout.take().expect("piped stdout");
+    let mut lines = BufReader::new(stdout).lines();
+    let ready = loop {
+        match lines.next() {
+            Some(Ok(line)) => {
+                if let Some(rest) = line.strip_prefix("READY ") {
+                    break rest.to_string();
+                }
+            }
+            _ => panic!("`{bin} test-server` exited before it was ready (its errors are above)"),
+        }
+    };
+    let (port, plugin) = ready
+        .split_once(' ')
+        .unwrap_or_else(|| panic!("unexpected line from the test server: READY {ready}"));
+    let _ = SERVER_CHILD.set(Mutex::new(child));
+    (format!("127.0.0.1:{port}"), plugin.to_string())
 }
 
 #[cfg(test)]

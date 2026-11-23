@@ -1,4 +1,4 @@
-// Run with `rekindle test`, which starts the simulated client first.
+// Run with `rekindle test` or `cargo test`. Either starts the simulated client.
 use rekindle_test::{Preview, json};
 
 #[test]
