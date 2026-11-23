@@ -29,9 +29,15 @@
 //! The guest sends `ChildEdits` instead of Children when its diff of the old
 //! and new lists is smaller ([`child_edits`]). The platform applies the edits
 //! to the parent's previous list: per edit it copies `keep` children, skips
-//! `del` and appends the `m` ids. What happens to the rest of the previous
-//! list after the last edit isn't read. [`apply_edits`] keeps it, which is
-//! what the guest's size test implies.
+//! `del` and appends the `m` ids, and after the last edit it copies the rest
+//! of the previous list ([`apply_edits`]).
+//!
+//! The values of a turn share one words table (tags 11 and 12), which starts
+//! empty for every buffer. A tag-12 value names a list by its index among the
+//! tag-11 and tag-12 values before it in the same buffer, so dropping, adding
+//! or moving ops can break the references after them.
+//! [`Turn::own_words`] replaces each tag 12 with the list it stands for,
+//! after which the ops can be rewritten freely.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -310,6 +316,26 @@ impl Turn {
         out
     }
 
+    /// Replace each tag-12 value in the turn's ops with the tag-11 list it
+    /// stands for, against the turn's own words table. Afterwards no value
+    /// refers to another, so ops can be dropped, added or reordered. A
+    /// reference to a list the turn doesn't hold is an error.
+    pub fn own_words(&mut self) -> Result<(), DecodeError> {
+        let mut table = Vec::new();
+        for op in &mut self.ops {
+            match op {
+                NodeOp::Create { props, .. } | NodeOp::Update { props, .. } => {
+                    for (_, v) in props {
+                        v.own_words(&mut table)?;
+                    }
+                }
+                NodeOp::ScrollTo { value, .. } => value.own_words(&mut table)?,
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
     /// Decode a turn's buffer. An empty buffer is a turn with no ops.
     /// Malformed input is an error, not a panic.
     pub fn from_bytes(buf: &[u8]) -> Result<Turn, DecodeError> {
@@ -408,6 +434,26 @@ fn read_op(cur: &mut Cursor<'_>) -> Result<NodeOp, DecodeError> {
         }
         other => return Err(DecodeError::BadTag(other)),
     })
+}
+
+/// Whether an op carries a tag-12 value.
+fn has_patch(op: &NodeOp) -> bool {
+    fn patch(v: &Value) -> bool {
+        match v {
+            Value::Sparse { .. } => true,
+            Value::Array(items) => items.iter().any(patch),
+            Value::Object(props) => props.iter().any(|(_, v)| patch(v)),
+            Value::Map(entries) => entries.iter().any(|(_, v)| patch(v)),
+            _ => false,
+        }
+    }
+    match op {
+        NodeOp::Create { props, .. } | NodeOp::Update { props, .. } => {
+            props.iter().any(|(_, v)| patch(v))
+        }
+        NodeOp::ScrollTo { value, .. } => patch(value),
+        _ => false,
+    }
 }
 
 /// The platform's retained element tree plus its `view_props` store.
@@ -516,8 +562,19 @@ impl Tree {
     /// child lists are reconciled against the retained ones with
     /// [`diff_children`], so a node kept across turns keeps its identity.
     /// A Create replaces any node with its id. A `ChildEdits` op that runs
-    /// past its parent's list leaves the list as it was.
+    /// past its parent's list leaves the list as it was. A tag-12 value is
+    /// stored as the list it stands for ([`Turn::own_words`]), since the
+    /// next buffer starts a new words table.
     pub fn apply(&mut self, turn: &Turn) -> TurnReport {
+        let mut owned;
+        let turn = if turn.ops.iter().any(has_patch) {
+            owned = turn.clone();
+            // A reference the turn can't resolve stays as it was sent.
+            let _ = owned.own_words();
+            &owned
+        } else {
+            turn
+        };
         let mut report = TurnReport::default();
         for op in &turn.ops {
             match op {
@@ -608,6 +665,54 @@ mod tests {
                 }]
             ),
             None
+        );
+    }
+
+    #[test]
+    fn a_patch_names_a_list_of_its_own_buffer() {
+        let words = PropId(740);
+        let mut turn = Turn {
+            ops: vec![
+                NodeOp::Update {
+                    node: 1,
+                    props: vec![(words, Value::U32Array(vec![1, 2, 3, 4]))],
+                },
+                NodeOp::Update {
+                    node: 2,
+                    props: vec![(
+                        words,
+                        Value::Sparse {
+                            list: 0,
+                            pairs: vec![(3, 9)],
+                        },
+                    )],
+                },
+            ],
+        };
+        let bytes = turn.to_bytes();
+        // On its own the second op names a list its buffer doesn't hold.
+        let second = Turn {
+            ops: vec![turn.ops[1].clone()],
+        };
+        assert_eq!(
+            Turn::from_bytes(&second.to_bytes()),
+            Err(DecodeError::BadWordsRef)
+        );
+        let mut tree = Tree::new();
+        tree.apply_bytes(&bytes).unwrap();
+        assert_eq!(
+            tree.props().get(2, words),
+            Some(&Value::U32Array(vec![1, 2, 3, 9]))
+        );
+        turn.own_words().unwrap();
+        turn.ops.remove(0);
+        let alone = Turn::from_bytes(&turn.to_bytes()).unwrap();
+        assert_eq!(
+            alone.ops[0],
+            NodeOp::Update {
+                node: 2,
+                props: vec![(words, Value::U32Array(vec![1, 2, 3, 9]))],
+            }
         );
     }
 

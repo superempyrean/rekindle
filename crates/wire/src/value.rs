@@ -15,18 +15,32 @@
 //! and as tag 4 otherwise ([`Value::int`]). Colours are integers,
 //! `0xAARRGGBB` ([`Value::color`]), so an opaque colour is a tag 4.
 //!
-//! Tags 11 and 12 share a words table that lives with the decoder, one per
-//! buffer. Each tag-11 value appends its `u32`s to it as a new list. A tag-12
-//! value names an earlier list by index, copies it, overwrites the words at
-//! its indices and appends the result as the next list. A list id past the
-//! table or an index past the list's end fails the decode. [`Cursor`] keeps
-//! the same table ([`Cursor::words`]).
+//! Tags 11 and 12 share a words table, one per buffer. The guest's turn
+//! driver drops the writer's table at the start of every turn (`0x17023a0`),
+//! and the Android platform starts an empty one for every buffer it decodes.
+//! Each tag-11 value appends its `u32`s to it as a new list. A tag-12 value
+//! names an earlier list of the same buffer by index, copies it, overwrites
+//! the words at its indices and appends the result as the next list. A list
+//! id past the table or an index past the list's end fails the decode.
+//! [`Cursor`] keeps the table for the one buffer it reads
+//! ([`Cursor::words`]), so a list index never reaches into another buffer.
+//!
+//! The encoder sends an array as tag 11 or 12 only when the writer has a
+//! words table and the array holds 4 to 65535 integers in `u32` range. Tag
+//! 12 is chosen when patching one of the last 64 same-length lists is
+//! smaller than sending the list. [`Value::words`] writes tag 11 under the
+//! same rule and never chooses tag 12.
 
 use crate::PropId;
 
 /// The host caps value nesting; a buffer past this is hostile, not real.
 /// Matches the limit seen in an independent reading of the same build.
 const MAX_DEPTH: usize = 128;
+
+/// The fewest words the encoder sends as tag 11.
+pub(crate) const WORDS_MIN: usize = 4;
+/// The most words the encoder sends as tag 11.
+pub(crate) const WORDS_MAX: usize = 65535;
 
 /// A decoded wire value. One variant per recovered tag (bool folds tags 1/2).
 #[derive(Clone, Debug, PartialEq)]
@@ -147,6 +161,72 @@ impl Value {
             Value::I32(v) => Some(i64::from(*v)),
             Value::I64(v) => Some(*v),
             _ => None,
+        }
+    }
+
+    /// A list of `u32` words as the guest's encoder writes it with a words
+    /// table: tag 11 for 4 to 65535 words, otherwise an array of integers.
+    #[must_use]
+    pub fn words(words: &[u32]) -> Value {
+        if (WORDS_MIN..=WORDS_MAX).contains(&words.len()) {
+            Value::U32Array(words.to_vec())
+        } else {
+            Value::Array(words.iter().map(|w| Value::int(i64::from(*w))).collect())
+        }
+    }
+
+    /// The words in a tag-11 value or an array, as the Android platform
+    /// reads an `int[]` from one: a number is cut to 32 bits, and any other
+    /// element is 0. `None` for any other value, a tag 12 included, since
+    /// its words depend on the buffer it came in.
+    #[must_use]
+    pub fn as_words(&self) -> Option<Vec<u32>> {
+        match self {
+            Value::U32Array(words) => Some(words.clone()),
+            Value::Array(items) => Some(
+                items
+                    .iter()
+                    .map(|v| match v {
+                        Value::I32(n) => *n as u32,
+                        Value::I64(n) => *n as u32,
+                        Value::F64(f) => *f as i64 as u32,
+                        _ => 0,
+                    })
+                    .collect(),
+            ),
+            _ => None,
+        }
+    }
+
+    /// Replace each tag-12 value inside this one with the tag-11 list it
+    /// stands for, given the lists `table` holds before it, in the order the
+    /// values are encoded. Each tag 11 or 12 appends its list to `table`, as
+    /// on decode. Afterwards the value refers to no other list, so it can be
+    /// moved within its buffer or into another one.
+    pub fn own_words(&mut self, table: &mut Vec<Vec<u32>>) -> Result<(), DecodeError> {
+        match self {
+            Value::Array(items) => items.iter_mut().try_for_each(|v| v.own_words(table)),
+            Value::Object(props) => props.iter_mut().try_for_each(|(_, v)| v.own_words(table)),
+            Value::Map(entries) => entries.iter_mut().try_for_each(|(_, v)| v.own_words(table)),
+            Value::U32Array(words) => {
+                table.push(words.clone());
+                Ok(())
+            }
+            Value::Sparse { list, pairs } => {
+                let mut words = table
+                    .get(*list as usize)
+                    .cloned()
+                    .ok_or(DecodeError::BadWordsRef)?;
+                for (index, word) in pairs.iter() {
+                    *words
+                        .get_mut(usize::from(*index))
+                        .ok_or(DecodeError::BadWordsRef)? = *word;
+                }
+                table.push(words.clone());
+                *self = Value::U32Array(words);
+                Ok(())
+            }
+            _ => Ok(()),
         }
     }
 

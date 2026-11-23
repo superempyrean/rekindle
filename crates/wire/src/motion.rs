@@ -19,8 +19,12 @@
 //! - `declare(view, channel, value)` sets a resting value. A value equal to
 //!   the default removes the entry, NaN is ignored, an id outside 1..26 is
 //!   rejected, and channels 8 to 26 are accepted and ignored ([`Motion::declare`]);
-//! - a per-view spec reaches `view_motion(view, &[u32])` as `u32` words, from
-//!   `PropId` `viewMotion` (740);
+//! - a per-view spec reaches `view_motion(view, &[u32])` as `u32` words,
+//!   from `PropId` `viewMotion` (740). The cell is an array of integers, one
+//!   per word, and the Android platform cuts each to 32 bits (anything that
+//!   isn't a number is 0) before it calls `nativeViewMotion`. Since every
+//!   element fits a `u32`, the encoder sends 4 or more words as tag 11 or 12
+//!   ([`Value::words`]);
 //! - the per-frame loop: `wants_frame`, then `frame(dt)` returning a `u32`
 //!   word stream, with `dt` in milliseconds;
 //! - `set_reduced(bool)` is the only reduced-motion entry, and a change
@@ -31,10 +35,9 @@
 //!
 //! # Modelled
 //!
-//! - What a `viewMotion` array holds, and the words made from it
-//!   ([`Spec`]). The cell is an array, and `view_motion` takes the same
-//!   32-opcode stream as `apply`, but which elements the guest writes isn't
-//!   read.
+//! - Which words a spec is ([`Spec::to_words`]). `view_motion` takes the
+//!   same 32-opcode stream as `apply`, and rekindle's words stand in for
+//!   those ops.
 //! - The interpolation: an eased duration and a damped spring
 //!   ([`Curve`]), and when a transition counts as settled.
 //! - What a resting-value change does under a spec (it animates from the
@@ -65,8 +68,6 @@ pub mod ids {
 
     /// A view's motion spec, the cell the platform passes to `view_motion`.
     pub const VIEW_MOTION: PropId = PropId(740);
-    /// Which channel an element of a `viewMotion` array is for. Modelled.
-    pub const PROPERTY: PropId = PropId(386);
     /// The value a channel animates in from.
     pub const ENTER_FROM: PropId = PropId(180);
     pub const SPRING: PropId = PropId(470);
@@ -313,15 +314,10 @@ pub struct Entry {
 
 /// Modelled. A view's motion spec: which channels animate, and how.
 ///
-/// On the wire it is the `viewMotion` (740) cell. `gpui-native` writes that
-/// cell as an array (six setter calls, all `Array`), and the platform passes
-/// it to `view_motion`, which takes the engine's op stream. What each
-/// element holds isn't read, so the rest is rekindle's: each element is a
-/// tag-8 object holding `property` (386, the channel's `PropId` as an int),
-/// `enterFrom` (180, `F64`) when it animates in, and either `timing` (521)
-/// with `ms`, `delay` and `easing`, or `spring` (470) with `stiffness`,
-/// `damping` and `mass`. The platform turns it into the `u32` words
-/// `view_motion` takes ([`Spec::to_words`]).
+/// On the wire it is the `viewMotion` (740) cell: the `u32` words
+/// `view_motion` takes, one integer each ([`Spec::to_value`]). That carriage
+/// is recovered. The words are rekindle's ([`Spec::to_words`]), where
+/// Phoenix's are ops of the engine's 32-opcode stream.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Spec {
     pub entries: Vec<Entry>,
@@ -366,104 +362,17 @@ impl Spec {
         self.entries.iter().find(|e| e.channel == channel)
     }
 
-    /// The `viewMotion` cell. Entries for channels without a `PropId` are left
-    /// out.
+    /// The `viewMotion` cell: [`Spec::to_words`] as the guest's encoder
+    /// writes words, tag 11 when a words table is open ([`Value::words`]).
     pub fn to_value(&self) -> Value {
-        let f = |v: f32| Value::F64(f64::from(v));
-        let entries = self.entries.iter().filter_map(|e| {
-            let mut fields = vec![(ids::PROPERTY, Value::int(i64::from(e.channel.prop()?.0)))];
-            if let Some(from) = e.enter_from {
-                fields.push((ids::ENTER_FROM, f(from)));
-            }
-            fields.push(match e.curve {
-                Curve::Timing { ms, delay, easing } => (
-                    ids::TIMING,
-                    Value::Object(vec![
-                        (ids::MS, f(ms)),
-                        (ids::DELAY, f(delay)),
-                        (ids::EASING, Value::Str(easing.name().into())),
-                    ]),
-                ),
-                Curve::Spring {
-                    stiffness,
-                    damping,
-                    mass,
-                } => (
-                    ids::SPRING,
-                    Value::Object(vec![
-                        (ids::STIFFNESS, f(stiffness)),
-                        (ids::DAMPING, f(damping)),
-                        (ids::MASS, f(mass)),
-                    ]),
-                ),
-            });
-            Some(Value::Object(fields))
-        });
-        Value::Array(entries.collect())
+        Value::words(&self.to_words())
     }
 
-    /// Read a `viewMotion` cell. Entries whose `property` names no channel,
-    /// or that carry neither curve, are skipped. `None` if the cell isn't an
-    /// array.
+    /// Read a `viewMotion` cell: its words ([`Value::as_words`]) through
+    /// [`Spec::from_words`]. `None` if the cell holds no words or they don't
+    /// make a spec.
     pub fn from_value(value: &Value) -> Option<Spec> {
-        let Value::Array(entries) = value else {
-            return None;
-        };
-        let num = |fields: &[(PropId, Value)], id: PropId, default: f32| match fields
-            .iter()
-            .find(|(p, _)| *p == id)
-        {
-            Some((_, Value::F64(v))) => *v as f32,
-            Some((_, Value::I32(v))) => *v as f32,
-            _ => default,
-        };
-        let mut spec = Spec::new();
-        for entry in entries {
-            let Value::Object(fields) = entry else {
-                continue;
-            };
-            let prop = fields.iter().find_map(|(p, v)| match v {
-                Value::I32(n) if *p == ids::PROPERTY => u16::try_from(*n).ok().map(PropId),
-                _ => None,
-            });
-            let Some(channel) = Channel::ALL
-                .into_iter()
-                .find(|c| prop.is_some() && c.prop() == prop)
-            else {
-                continue;
-            };
-            let enter_from = match fields.iter().find(|(p, _)| *p == ids::ENTER_FROM) {
-                Some((_, Value::F64(v))) => Some(*v as f32),
-                _ => None,
-            };
-            let curve = fields.iter().find_map(|(p, v)| match (*p, v) {
-                (ids::TIMING, Value::Object(t)) => Some(Curve::Timing {
-                    ms: num(t, ids::MS, 0.0),
-                    delay: num(t, ids::DELAY, 0.0),
-                    easing: t
-                        .iter()
-                        .find_map(|(p, v)| match v {
-                            Value::Str(s) if *p == ids::EASING => Easing::from_name(s),
-                            _ => None,
-                        })
-                        .unwrap_or(Easing::Linear),
-                }),
-                (ids::SPRING, Value::Object(s)) => Some(Curve::Spring {
-                    stiffness: num(s, ids::STIFFNESS, 170.0),
-                    damping: num(s, ids::DAMPING, 26.0),
-                    mass: num(s, ids::MASS, 1.0),
-                }),
-                _ => None,
-            });
-            if let Some(curve) = curve {
-                spec.set(Entry {
-                    channel,
-                    enter_from,
-                    curve,
-                });
-            }
-        }
-        Some(spec)
+        Spec::from_words(&value.as_words()?)
     }
 
     /// The words `view_motion` takes: a count, then per entry the channel id,
@@ -939,7 +848,10 @@ mod tests {
             crate::decode(&bytes).map(|v| Spec::from_value(&v)),
             Ok(Some(spec.clone()))
         );
+        assert_eq!(bytes[0], 11, "four or more words go as tag 11");
         let words = spec.to_words();
+        let ints = Value::Array(words.iter().map(|w| Value::int(i64::from(*w))).collect());
+        assert_eq!(Spec::from_value(&ints), Some(spec.clone()));
         assert_eq!(Spec::from_words(&words[..words.len() - 1]), None);
     }
 

@@ -19,19 +19,20 @@ allow.
 | Integers as tag 3 when they fit an `i32`, colours as integers `0xAARRGGBB`, tag 9 as the insets of `padding`, `margin` and `hitSlopEdges` | recovered | `Value::int`, `Value::color`, `Value::Quad` |
 | The 855 PropIds, 0 to 854, by name (tables at VA `0x5d9fcf0` and `0x5da3260`) | recovered | `PropId`, `propid-names.tsv` |
 | The turn: the version byte `0x01` and ten ops, Create to ChildEdits, with `u16` property counts, Null for a removed property, `text` first and `on` last in a Create, and when the guest sends ChildEdits | recovered | `turn` |
-| Kinds as `u16`-length strings, the platform's view names (`view`, `flow`, `text`, `ring`, `stack`, `image`, `spinner`, `list`) | recovered, the full set open | `ElementKind` |
-| What the rest of a child list does after the last ChildEdits edit | modelled, kept | `turn::apply_edits` |
-| UI events: the leading `u32` 0, the version byte, ten op widths, and op 1 as node, event-name PropId and value | recovered | `event` |
-| What event ops 2 to 9 mean | open, kept as bytes | `event::UiEvent::Other` |
-| The reply to an event, as one value | modelled | `event` |
-| Host frames: the 16-byte header, CALL, EVENT and BATCH | recovered | `frame` |
-| `ldh_dispatch`'s shape: one event as a byte buffer from host to guest, an optional reply back as bytes | recovered | `event` |
+| Kinds as `u16`-length strings: the Android platform's 29 interned view names, in its table's order, and any other kind as a plain string | recovered | `ElementKind::PLATFORM` |
+| The rest of a child list after the last ChildEdits edit, which the platform copies | recovered | `turn::apply_edits` |
+| The words table of tags 11 and 12: one per buffer, a tag 12 naming a list by its place in the same buffer | recovered | `Cursor`, `Turn::own_words` |
+| UI events: the leading `u32` 0, the version byte, and ops 1 to 9 (`ui`, `back`, `keyCommand`, `insets`, `window`, `frameInterval`, `frame`, `motion`, `navSides`), with what the guest's app drops or clamps | recovered | `event::UiEvent` |
+| What the pairs of event op 8 (`motion`) mean | open, kept as words | `event::UiEvent::Motion` |
+| A reply to a consumed event, as one value (Phoenix's dispatch returns no data for an event) | modelled | `event::FILTER_CONSUME` |
+| Host frames: the 16-byte header, CALL, REPLY, EVENT and BATCH, a REPLY echoing its CALL, an EVENT with module and call id 0, and a BATCH with an all-zero header | recovered | `frame` |
+| `ldh_dispatch`'s shape: one event as a byte buffer from host to guest, null back when the guest took it and an error object otherwise | recovered | `event` |
 | `view_props` keyed by node and PropId, and the guest's diff of two `u32` child lists | recovered in shape | `ViewProps`, `diff_children` |
 | How `view_props` stores a cell | modelled | `ViewProps` |
 | The accessibility PropIds, the 22 roles, the two `liveRegion` values and the value each is written with | recovered | `a11y` |
 | How a platform turns accessibility cells into a tree | modelled | `a11y::semantics` |
-| The motion engine's 26 channels, `declare`'s resting values and defaults, a per-view spec through `view_motion`, the per-frame tick, `set_reduced`, `viewMotion` as an array | recovered | `motion` |
-| What a `viewMotion` element holds, the eased and spring curves, and the frame word stream's layout | modelled | `motion::Spec`, `motion::Curve`, `motion::FrameOut` |
+| The motion engine's 26 channels, `declare`'s resting values and defaults, a per-view spec through `view_motion`, the per-frame tick, `set_reduced`, `viewMotion` as the `u32` words `view_motion` takes (tag 11 from 4 words) | recovered | `motion` |
+| Which words a spec is, the eased and spring curves, and the frame word stream's layout | modelled | `motion::Spec`, `motion::Curve`, `motion::FrameOut` |
 | The filter verdicts (pass, replace, consume) | rekindle's own | `event::FILTER_PASS` and the rest |
 | The capture format | rekindle's own | `capture` |
 

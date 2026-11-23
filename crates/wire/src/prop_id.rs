@@ -6,12 +6,15 @@
 //! and names here are copied from `propid-names.tsv`; the generated tables live
 //! in `prop_id_table.rs` (see `build.rs`).
 //!
-//! NOT recovered (and not claimed here): each id's value *type* (which [`Value`]
-//! tag it carries) and which element kind honours it. The id space is untyped
-//! at this layer. That pairing lives in the guest `gpui` crate, which the
-//! Android build (356207) does not ship.
-//!
-//! [`Value`]: crate::Value
+//! The id space is untyped at this layer. The value each id is written with
+//! is read from `gpui-native`'s setter calls (486 calls), and the modules
+//! that name ids say it: the colours in [`ids`] are integers, the
+//! accessibility ids in [`crate::a11y::ids`] bools, strings and objects,
+//! and `viewMotion` in [`crate::motion::ids`] an array of `u32` words. Some
+//! setters copy a whole value from elsewhere, so the variant is set at run
+//! time: `gap`, `gapX`, `gapY`, `start`, `end`, `activePadding` and
+//! `panWorkletConfig`, and `width` and `height`, which hold a float or a
+//! string. Which element kind honours which id isn't read.
 
 include!(concat!(env!("OUT_DIR"), "/prop_id_table.rs"));
 
