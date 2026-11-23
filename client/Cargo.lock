@@ -1553,6 +1553,7 @@ name = "rekindle-host"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "libc",
  "rekindle-anchor",
  "rekindle-extension",
  "rekindle-hook",

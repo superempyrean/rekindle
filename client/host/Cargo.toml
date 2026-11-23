@@ -38,5 +38,10 @@ serde_json = { workspace = true }
 serde = { workspace = true }
 sha2 = { workspace = true }
 
+# On Android the client's image is loaded by `System.loadLibrary`, so the host
+# reads the load bias and logs to logcat through libc.
+[target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
+libc = "0.2"
+
 [lints]
 workspace = true

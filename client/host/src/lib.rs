@@ -73,6 +73,10 @@ static HOST_CTOR: extern "C" fn() = host_ctor;
 /// is fine; the thread must not touch the loader until the loader lock is
 /// released, which the sleep in [`worker`] ensures.
 extern "C" fn host_ctor() {
+    // The initializer runs when the app maps this library. The first log
+    // line proves the loader reached rekindle, before any other work.
+    #[cfg(target_os = "android")]
+    android::log(&format!("host .init_array: pid={}", std::process::id()));
     // SAFETY: the initializer runs before the client's `main`, on its only
     // thread.
     #[cfg(target_os = "linux")]
@@ -101,6 +105,23 @@ extern "C" fn host_ctor() {
 /// initializer (which runs under the Windows loader lock) is what makes it safe
 /// to scan, hook and call into the client here.
 fn worker() {
+    // Android: the host is loaded into the app, resolves its anchors against
+    // the client's library once that library is mapped, swaps the emit slot
+    // and runs the engine on the turns. The desktop `run` path (gpui frame
+    // hook, native theming, the client's own registries) doesn't apply.
+    #[cfg(target_os = "android")]
+    {
+        android_worker();
+        return;
+    }
+    #[cfg(not(target_os = "android"))]
+    desktop_worker();
+}
+
+/// The desktop worker: the shared [`run`], then the report to the install and
+/// the handshake, and the client kept alive if a driver came back.
+#[cfg(not(target_os = "android"))]
+fn desktop_worker() {
     // Let `DllMain`/the loader finish before doing anything non-trivial.
     #[cfg(windows)]
     std::thread::sleep(std::time::Duration::from_millis(150));
@@ -127,6 +148,26 @@ fn worker() {
     }
     if let Some(driver) = kept {
         live::keep_alive(driver);
+    }
+}
+
+/// The Android worker: resolve the anchors and install the emit hook
+/// ([`android::run_worker`]), write the report to logcat and the handshake
+/// file, then log the running counts while the app runs.
+#[cfg(target_os = "android")]
+fn android_worker() {
+    let report = std::panic::catch_unwind(android::run_worker)
+        .unwrap_or_else(|_| format!("{} error=panic", report_head()));
+    android::log(&report);
+    // logcat is the primary channel; a copy goes to the config dir (or the
+    // handshake path, if a test run set one) to be pulled off the device.
+    let handshake = std::env::var_os(env::HANDSHAKE)
+        .map_or_else(|| android::config_file("handshake.txt"), Into::into);
+    let _ = std::fs::write(handshake, format!("{report}\n"));
+    READY.store(1, Ordering::Release);
+    loop {
+        std::thread::sleep(std::time::Duration::from_secs(5));
+        android::log(&android::counts());
     }
 }
 
@@ -159,11 +200,6 @@ fn run() -> (String, Option<Driver>) {
         Err(e) => return (format!("{out} error=anchors:{e}"), None),
     };
     report_anchors(&hooks, &mut out);
-    #[cfg(target_os = "android")]
-    match android::install(&hooks) {
-        Ok(slot) => field(&mut out, "transport_hook", format_args!("{slot:#x}")),
-        Err(e) => field(&mut out, "transport_hook", err(&e)),
-    }
     let wire = wire::install(&hooks);
     field(&mut out, "wire_detour", wire.turns);
     field(&mut out, "wire_event_detour", wire.events);

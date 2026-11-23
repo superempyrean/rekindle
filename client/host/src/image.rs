@@ -58,20 +58,85 @@ pub(crate) fn image_path() -> anyhow::Result<std::path::PathBuf> {
     Ok(std::env::current_exe()?)
 }
 
-/// The client's image file: what the anchors resolve against.
+/// The client's image file: what the anchors resolve against. A copy of the
+/// client's library, placed in the config dir; the loader can't name the
+/// library's own APK-relative path for `open`, and with
+/// `extractNativeLibs=false` there is no extracted file to read. Named by
+/// [`IMAGE_ENV`], or the default copy in rekindle's config dir.
 #[cfg(target_os = "android")]
 pub(crate) fn image_path() -> anyhow::Result<std::path::PathBuf> {
-    std::env::var_os(IMAGE_ENV)
-        .map(Into::into)
-        .ok_or_else(|| anyhow::anyhow!("{IMAGE_ENV} is not set"))
+    if let Some(p) = std::env::var_os(IMAGE_ENV) {
+        return Ok(p.into());
+    }
+    let p = crate::android::config_file("liblibdiscord_wasm_host.so");
+    if p.exists() {
+        return Ok(p);
+    }
+    anyhow::bail!("{IMAGE_ENV} is not set and {} is missing", p.display())
 }
 
-/// The client image's load address: where its first mapping, at file
-/// offset 0, starts. A library mapped straight out of the APK has none.
+/// The client image's load bias: the address its `p_vaddr` 0 is mapped at,
+/// which an anchor's virtual address is added to. A library the app maps
+/// straight out of the APK (`extractNativeLibs=false`) has no mapping at
+/// file offset 0, so this reads the load bias the dynamic linker recorded
+/// (`dl_iterate_phdr`'s `dlpi_addr`) rather than a `/proc/self/maps` line,
+/// matching the loaded object by the file name [`IMAGE_ENV`] gives.
 #[cfg(target_os = "android")]
 pub(crate) fn image_base() -> Option<usize> {
     let image = image_path().ok()?;
-    mapped_base(|path| std::path::Path::new(path) == image)
+    let want = image.file_name()?.to_owned();
+    load_bias_of(&want)
+}
+
+/// Whether the client's image is mapped into this process yet: its library
+/// shows up in `dl_iterate_phdr`. The app loads it with `System.loadLibrary`
+/// after the host's initializer runs, so the worker waits on this.
+#[cfg(target_os = "android")]
+pub(crate) fn image_mapped() -> bool {
+    image_base().is_some()
+}
+
+/// The load bias of the loaded object whose path ends in `name`, from
+/// `dl_iterate_phdr`. `None` if no such object is loaded.
+#[cfg(target_os = "android")]
+fn load_bias_of(name: &std::ffi::OsStr) -> Option<usize> {
+    use std::os::unix::ffi::OsStrExt;
+
+    struct Search<'a> {
+        name: &'a [u8],
+        found: Option<usize>,
+    }
+
+    extern "C" fn visit(
+        info: *mut libc::dl_phdr_info,
+        _size: libc::size_t,
+        data: *mut std::ffi::c_void,
+    ) -> libc::c_int {
+        // SAFETY: `dl_iterate_phdr` passes a live `dl_phdr_info` and the
+        // `data` pointer this call handed it, a `&mut Search`.
+        let (info, search) = unsafe { (&*info, &mut *(data as *mut Search)) };
+        if info.dlpi_name.is_null() {
+            return 0;
+        }
+        // SAFETY: `dlpi_name` is a C string owned by the loader.
+        let path = unsafe { std::ffi::CStr::from_ptr(info.dlpi_name) }.to_bytes();
+        if path.ends_with(search.name) {
+            search.found = Some(info.dlpi_addr as usize);
+            return 1;
+        }
+        0
+    }
+
+    let mut search = Search {
+        name: name.as_bytes(),
+        found: None,
+    };
+    // SAFETY: `visit` has the callback's signature and reads only through the
+    // pointers the loader passes; `search` outlives the call.
+    unsafe {
+        libc::dl_iterate_phdr(Some(visit), (&raw mut search).cast());
+    }
+    search.found
 }
 
 /// This library's load address, or 0 if it can't be found.

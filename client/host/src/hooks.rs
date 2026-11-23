@@ -106,8 +106,27 @@ impl Hooks {
         };
         let exe = std::fs::read(crate::image::image_path()?)?;
         let report = set.resolve(&exe);
-        let pe = rekindle_sigmatch::short::PeImage::parse(&exe)?;
         let base = image_base().ok_or_else(|| anyhow::anyhow!("no image base"))?;
+        // The client's image is a PE on Windows and Linux (its exe) and an
+        // ELF shared object on Android. An anchor's file offset maps to a
+        // live address through the PE's section table, or the ELF's program
+        // headers plus the load bias.
+        #[cfg(not(target_os = "android"))]
+        let pe = rekindle_sigmatch::short::PeImage::parse(&exe)?;
+        let to_addr = |off: usize| -> Result<usize, String> {
+            #[cfg(not(target_os = "android"))]
+            {
+                pe.offset_to_rva(off)
+                    .map(|r| base + r as usize)
+                    .ok_or_else(|| "offset outside sections".to_string())
+            }
+            #[cfg(target_os = "android")]
+            {
+                rekindle_hook::elf::offset_to_vaddr(&exe, off as u64)
+                    .and_then(|v| rekindle_hook::elf::slot_address(base, v))
+                    .ok_or_else(|| "offset outside segments".to_string())
+            }
+        };
         let operand: std::collections::BTreeSet<&str> = set
             .anchors
             .iter()
@@ -126,10 +145,7 @@ impl Hooks {
                 continue;
             }
             let addr = match a.offset() {
-                Some(off) => pe
-                    .offset_to_rva(off)
-                    .map(|r| base + r as usize)
-                    .ok_or_else(|| "offset outside sections".to_string()),
+                Some(off) => to_addr(off),
                 None => Err(format!("{:?}", a.verdict).to_lowercase()),
             };
             addrs.insert(a.name.clone(), addr);

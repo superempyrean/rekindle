@@ -43,11 +43,19 @@ and holds the client's `main` until the host is ready, as the shim's
 `OleInitialize` gate does on Windows.
 
 On Android the client is an app, and its image is the shared object it runs
-from, named by `REKINDLE_HOST_IMAGE`. Nothing loads the host into the app
-yet. Once loaded, the host swaps the pointer in the vtable slot of the
-guest's transport `emit` method (`wire_transport_emit_slot`), so every turn
-of render ops and every host call reaches rekindle first. Slot swaps patch
-no code, so they work on AArch64 as they do on x86-64.
+from. The app's own loader brings the host in: a `DT_NEEDED` added to a
+library the app loads early names `librekindle_host.so`, and the host's
+`.init_array` starts its worker. The worker waits for the client's library
+to map, resolves its anchors against a copy of it, and swaps the pointer in
+the vtable slot of the guest's transport `emit` method
+(`wire_transport_emit_slot`), so every turn of render ops and every host call
+reaches rekindle's wire engine first. Slot swaps patch no code, so they work
+on AArch64 as they do on x86-64. The client's library has no path `open` can
+use (the app maps it from the APK), so the host reads its copy, its anchors
+and a `Work` from a config dir (`REKINDLE_HOST_IMAGE` names the library, or
+`/data/local/tmp/rekindle` by default), and takes the load bias from
+`dl_iterate_phdr`. It logs its report and counts to logcat under the
+`rekindle` tag.
 
 ## Build
 
@@ -78,8 +86,10 @@ OS input.
 
 ## Limitations
 
-Built and tested on x86-64 Windows and Linux. The Android build compiles for
-AArch64 and x86-64 and hasn't run in an app yet. The x64 inline detours the
-desktop surfaces use return an error on AArch64. On Linux the clipboard and the
+Built and tested on x86-64 Windows and Linux. The x86-64 Android build has run
+in the app: the host loaded, resolved its anchors, swapped the emit slot and
+logged render turns and host calls crossing it. The x64 inline detours the
+desktop surfaces use return an error on AArch64, so the emit hook is a slot
+swap and the engine runs from it. On Linux the clipboard and the
 file picker are not implemented yet, and the native layer's check against the
 window reads X11, so a client running on Wayland has to use XWayland.
