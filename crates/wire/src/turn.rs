@@ -1,5 +1,5 @@
 //! Modelled. The node / turn framing above the value codec, which a
-//! recovered guest module or a desktop build's decode entry would replace.
+//! recovered guest module or a desktop build's encoder would replace.
 //!
 //! The APK ships no guest module, so how a turn groups node create / remove /
 //! move and property-set ops above the value layer is NOT recovered. What IS

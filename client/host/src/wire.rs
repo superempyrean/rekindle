@@ -1,9 +1,13 @@
-//! The client's turn decoder and event dispatch, detoured.
+//! The guest's emit call and the client's event dispatch, detoured.
 //!
-//! A client that splits its UI across a wire decodes each turn's op buffer
-//! in one function before its tree applies it. rekindle finds that function
-//! by the `wire_turn_decode` anchor and detours it, so each turn's bytes
-//! pass through rekindle's wire engine before the client decodes them.
+//! A client that splits its UI across a wire sends each turn's op buffer
+//! out of its guest through one call, the emit method of the guest's
+//! transport. The same call carries the guest's host calls. A buffer whose
+//! leading `u32` is 0 holds a turn's op stream after it, and any other
+//! value marks a host call. rekindle finds the emit method by the
+//! `wire_turn_emit` anchor and detours it. Each turn's op stream passes
+//! through rekindle's wire engine before the host receives it, and host
+//! calls pass through unchanged.
 //!
 //! Input crosses the other way, one event buffer at a time, through the
 //! function the `wire_event_dispatch` anchor finds. Its detour passes each
@@ -18,7 +22,7 @@
 //!   client's own value for it, from the palettes framework theming uses.
 //!   Which palette the client shows is read from the colours the guest
 //!   sends. On a real launch the theme goes on the wire whenever
-//!   `wire_turn_decode` resolves, and framework theming stops recolouring
+//!   `wire_turn_emit` resolves, and framework theming stops recolouring
 //!   the scene, so no colour is recoloured twice. A test run puts it there
 //!   only with `REKINDLE_HOST_WIRE_THEME` set.
 //! - **Chat-bar buttons.** With a wire map (`wire.json` beside
@@ -73,19 +77,21 @@ use crate::install::installed_mode;
 const WORK_ENV: &str = "REKINDLE_HOST_WIRE_WORK";
 /// Set in a test run to put the plugins' theme on the wire.
 const THEME_ENV: &str = "REKINDLE_HOST_WIRE_THEME";
-/// The anchor of the client's turn decoder.
-const ANCHOR: &str = "wire_turn_decode";
+/// The anchor of the guest's emit call.
+const ANCHOR: &str = "wire_turn_emit";
 /// The anchor of the client's event dispatch.
 const EVENT_ANCHOR: &str = "wire_event_dispatch";
 /// The anchor of the function the client delivers a guest's reply through.
 const REPLY_ANCHOR: &str = "wire_event_reply";
 
-/// `fn(buf: &[u8]) -> Result<Turn, DecodeError>`: the result by pointer,
-/// then the slice as its pointer and length. This is a Rust decoder that
-/// takes the whole turn's buffer. A client whose decode entry takes the
-/// buffer another way, or one value at a time, needs this signature and
-/// the point it hooks recovered from its own build.
-type DecodeFn = unsafe extern "C" fn(*mut u8, *const u8, usize) -> *mut u8;
+/// `(transport, ptr, len) -> reply`: the transport's data pointer, then
+/// one buffer as its pointer and length. The vtable's shape and the
+/// leading `u32` are recovered from Phoenix's Android host, where the
+/// reply is a handle. A client whose emit method passes the buffer or the
+/// reply another way needs this signature recovered from its own build.
+type EmitFn = unsafe extern "C" fn(*mut c_void, *const u8, usize) -> i64;
+/// The leading `u32` of a buffer that holds a turn's op stream.
+const OPS: u32 = 0;
 /// `(handle, ptr, len, reply_ctx) -> bool`: one event's buffer to the
 /// guest `handle` names, and the slot its reply goes to. True when the
 /// guest made no reply. A client whose dispatch takes the event another
@@ -159,6 +165,8 @@ static TRAMPOLINE: AtomicUsize = AtomicUsize::new(0);
 static TURNS: AtomicU64 = AtomicU64::new(0);
 static REWRITTEN: AtomicU64 = AtomicU64::new(0);
 static FAILED: AtomicU64 = AtomicU64::new(0);
+/// Host calls the emit detour passed through.
+static CALLS: AtomicU64 = AtomicU64::new(0);
 
 static EVENT_TRAMPOLINE: AtomicUsize = AtomicUsize::new(0);
 static REPLY: AtomicUsize = AtomicUsize::new(0);
@@ -183,7 +191,7 @@ pub(crate) struct Installed {
     pub(crate) surfaces: String,
 }
 
-/// Detour the turn decoder and the event dispatch if there is wire work.
+/// Detour the emit call and the event dispatch if there is wire work.
 pub(crate) fn install(hooks: &Hooks) -> Installed {
     let off = |theme, ui: String| Installed {
         turns: "off".into(),
@@ -208,7 +216,7 @@ pub(crate) fn install(hooks: &Hooks) -> Installed {
         Err(e) => (None, crate::err(&e)),
     };
     // On a real launch the anchor decides. A client whose UI isn't split
-    // across a wire has no turn decoder to find, and keeps both on the
+    // across a wire has no emit call to find, and keeps both on the
     // framework layer.
     let split = hooks.addr(ANCHOR).is_ok();
     let theme = if installed_mode() {
@@ -258,7 +266,7 @@ pub(crate) fn install(hooks: &Hooks) -> Installed {
         Err(e) => crate::err(&e),
     };
     let turns = verdict(install_turns(hooks));
-    // Without the decoder's detour nothing reaches the wire: the theme and
+    // Without the emit call's detour nothing reaches the wire: the theme and
     // the buttons stay on the framework layer and the client's registry,
     // and the build has no named surfaces.
     if turns != "on" {
@@ -638,9 +646,9 @@ fn install_turns(hooks: &Hooks) -> anyhow::Result<()> {
     use rekindle_hook::{Detour, InlineDetour};
     let target = hooks.addr(ANCHOR)?;
     // SAFETY: the anchor resolved against this process's own image to the
-    // decoder's entry, whose signature is `DecodeFn`, and the client hasn't
-    // started its UI: the shim holds it until the host is ready.
-    let detour = unsafe { InlineDetour.install(target, hooked_decode as *const () as usize)? };
+    // emit method's entry, whose signature is `EmitFn`, and the client
+    // hasn't started its UI: the shim holds it until the host is ready.
+    let detour = unsafe { InlineDetour.install(target, hooked_emit as *const () as usize)? };
     TRAMPOLINE.store(detour.trampoline(), Ordering::SeqCst);
     // The detour stays for the life of the process.
     std::mem::forget(detour);
@@ -651,7 +659,7 @@ fn install_events(hooks: &Hooks) -> anyhow::Result<()> {
     use rekindle_hook::{Detour, InlineDetour};
     let target = hooks.addr(EVENT_ANCHOR)?;
     REPLY.store(hooks.addr(REPLY_ANCHOR)?, Ordering::SeqCst);
-    // SAFETY: as for the decoder, the dispatch's entry, whose signature is
+    // SAFETY: as for the emit method, the dispatch's entry, whose signature is
     // `DispatchFn`, before the client's UI starts.
     let detour = unsafe { InlineDetour.install(target, hooked_dispatch as *const () as usize)? };
     EVENT_TRAMPOLINE.store(detour.trampoline(), Ordering::SeqCst);
@@ -660,17 +668,18 @@ fn install_events(hooks: &Hooks) -> anyhow::Result<()> {
 }
 
 /// The counts each installed detour adds to the drive result and the
-/// status line: turns decoded, rewritten and failed on, and events
-/// dispatched, replaced, consumed and failed on.
+/// status line: turns emitted, rewritten and failed on, host calls passed
+/// through, and events dispatched, replaced, consumed and failed on.
 pub(crate) fn counts() -> Option<String> {
     let n = |c: &AtomicU64| c.load(Ordering::SeqCst);
     let mut out = Vec::new();
     if TRAMPOLINE.load(Ordering::SeqCst) != 0 {
         out.push(format!(
-            "wire_detour_turns={} wire_detour_rewritten={} wire_detour_failed={}",
+            "wire_detour_turns={} wire_detour_rewritten={} wire_detour_failed={} wire_detour_calls={}",
             n(&TURNS),
             n(&REWRITTEN),
             n(&FAILED),
+            n(&CALLS),
         ));
     }
     if let Some(r) = routes().as_ref() {
@@ -723,28 +732,43 @@ fn with_engine<T>(f: impl FnOnce(&mut Engine) -> T) -> Option<T> {
         .flatten()
 }
 
-/// Called by the client in place of its decoder, with its arguments.
-unsafe extern "C" fn hooked_decode(out: *mut u8, bytes: *const u8, len: usize) -> *mut u8 {
+/// The op stream `buf` carries, or `None` for a host call.
+fn op_stream(buf: &[u8]) -> Option<&[u8]> {
+    let (head, ops) = buf.split_first_chunk::<4>()?;
+    (u32::from_le_bytes(*head) == OPS).then_some(ops)
+}
+
+/// Called by the guest in place of its transport's emit method, with its
+/// arguments.
+unsafe extern "C" fn hooked_emit(transport: *mut c_void, bytes: *const u8, len: usize) -> i64 {
     // SAFETY: TRAMPOLINE was stored before the detour went live, and has
     // this signature.
     let original =
-        unsafe { std::mem::transmute::<usize, DecodeFn>(TRAMPOLINE.load(Ordering::SeqCst)) };
+        unsafe { std::mem::transmute::<usize, EmitFn>(TRAMPOLINE.load(Ordering::SeqCst)) };
+    // SAFETY: the guest passes `len` readable bytes.
+    let buf = unsafe { std::slice::from_raw_parts(bytes, len) };
+    let Some(ops) = op_stream(buf) else {
+        CALLS.fetch_add(1, Ordering::Relaxed);
+        // SAFETY: the guest's own arguments.
+        return unsafe { original(transport, bytes, len) };
+    };
     TURNS.fetch_add(1, Ordering::Relaxed);
-    // SAFETY: the client passes `len` readable bytes.
-    let guest = unsafe { std::slice::from_raw_parts(bytes, len) };
-    match with_engine(|e| e.filter(guest)) {
-        // SAFETY: the client's result slot, with the rewritten turn. The
-        // decoded turn owns its data, so `rewritten` can go after.
-        Some(Ok(Some(rewritten))) => unsafe {
+    match with_engine(|e| e.filter(ops)) {
+        Some(Ok(Some(rewritten))) => {
             REWRITTEN.fetch_add(1, Ordering::Relaxed);
-            original(out, rewritten.as_ptr(), rewritten.len())
-        },
+            let mut framed = Vec::with_capacity(4 + rewritten.len());
+            framed.extend_from_slice(&OPS.to_le_bytes());
+            framed.extend_from_slice(&rewritten);
+            // SAFETY: the guest's transport, with the rewritten turn. The
+            // host reads the buffer within the call.
+            unsafe { original(transport, framed.as_ptr(), framed.len()) }
+        }
         r => {
             if !matches!(r, Some(Ok(None))) {
                 FAILED.fetch_add(1, Ordering::Relaxed);
             }
-            // SAFETY: the client's own arguments.
-            unsafe { original(out, bytes, len) }
+            // SAFETY: the guest's own arguments.
+            unsafe { original(transport, bytes, len) }
         }
     }
 }
@@ -821,6 +845,14 @@ mod tests {
         )
         .unwrap();
         map.slots.into_values().next().unwrap()
+    }
+
+    #[test]
+    fn only_a_buffer_led_by_a_zero_u32_is_a_turn() {
+        assert_eq!(op_stream(&[0, 0, 0, 0, 7, 8]), Some(&[7, 8][..]));
+        assert_eq!(op_stream(&[0, 0, 0, 0]), Some(&[][..]));
+        assert_eq!(op_stream(&[13, 0, 0, 0, b'@']), None);
+        assert_eq!(op_stream(&[0, 0, 0]), None);
     }
 
     #[test]
