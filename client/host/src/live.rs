@@ -21,7 +21,7 @@ pub(crate) fn stays() -> bool {
 /// the mode for the report: `installed`, `drive` or `show`.
 /// `client_surfaces` is false when rekindle runs the framework layer only.
 #[cfg_attr(
-    windows,
+    not(target_os = "linux"),
     expect(
         clippy::unnecessary_wraps,
         reason = "drive mode fails to start on Linux under Wayland"
@@ -159,6 +159,8 @@ fn write_status(driver: &Driver) {
     let wire = crate::wire::counts()
         .map(|c| format!(" {c}"))
         .unwrap_or_default();
+    #[cfg(target_os = "android")]
+    let wire = format!("{wire} {}", crate::android::counts());
     let _ = std::fs::write(
         std::env::temp_dir().join("rekindle-host-status.txt"),
         format!(

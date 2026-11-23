@@ -42,12 +42,34 @@ itself out of `LD_PRELOAD`, so the processes the client starts don't load it,
 and holds the client's `main` until the host is ready, as the shim's
 `OleInitialize` gate does on Windows.
 
+On Android the client is an app, and its image is the shared object it runs
+from, named by `REKINDLE_HOST_IMAGE`. Nothing loads the host into the app
+yet. Once loaded, the host swaps the pointer in the vtable slot of the
+guest's transport `emit` method (`wire_transport_emit_slot`), so every turn
+of render ops and every host call reaches rekindle first. Slot swaps patch
+no code, so they work on AArch64 as they do on x86-64.
+
 ## Build
 
 ```sh
 cargo build                 # dwmapi.dll and rekindle_host.dll, in target/debug
 cargo clippy --workspace
 ```
+
+For Android, the host builds as `librekindle_host.so` with the NDK's clang as
+the linker and C compiler. With `$NDK` set to the NDK's
+`toolchains/llvm/prebuilt/<host>/bin`:
+
+```sh
+rustup target add aarch64-linux-android x86_64-linux-android
+export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$NDK/aarch64-linux-android26-clang
+export CC_aarch64_linux_android=$NDK/aarch64-linux-android26-clang
+export AR_aarch64_linux_android=$NDK/llvm-ar
+cargo build --release -p rekindle-host --target aarch64-linux-android
+```
+
+The same variables with `x86_64` build it for x86-64 Android, which the
+emulator runs. On Windows the NDK's compilers end in `.cmd`.
 
 The live tests run against a mock GPUI client outside this repository. The
 self-test places the shim and the host beside the mock, runs it off the
@@ -56,6 +78,8 @@ OS input.
 
 ## Limitations
 
-Built and tested on x86-64 Windows and Linux. On Linux the clipboard and the
+Built and tested on x86-64 Windows and Linux. The Android build compiles for
+AArch64 and x86-64 and hasn't run in an app yet. The x64 inline detours the
+desktop surfaces use return an error on AArch64. On Linux the clipboard and the
 file picker are not implemented yet, and the native layer's check against the
 window reads X11, so a client running on Wayland has to use XWayland.

@@ -73,7 +73,7 @@ pub(crate) fn heal_for_next_build(
     base: String,
     out: &std::path::Path,
 ) -> anyhow::Result<usize> {
-    let exe = std::fs::read(std::env::current_exe()?)?;
+    let exe = std::fs::read(crate::image::image_path()?)?;
     let h = rekindle_anchor::heal(set, report, &exe);
     if h.healed.is_empty() {
         return Ok(0);
@@ -104,7 +104,7 @@ impl Hooks {
             Some(h) => h.set,
             None => rekindle_anchor::AnchorSet::from_json(&shipped)?,
         };
-        let exe = std::fs::read(std::env::current_exe()?)?;
+        let exe = std::fs::read(crate::image::image_path()?)?;
         let report = set.resolve(&exe);
         let pe = rekindle_sigmatch::short::PeImage::parse(&exe)?;
         let base = image_base().ok_or_else(|| anyhow::anyhow!("no image base"))?;

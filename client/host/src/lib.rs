@@ -27,6 +27,8 @@ mod drive {
         Ok(0)
     }
 }
+#[cfg(target_os = "android")]
+mod android;
 mod hooks;
 mod image;
 mod install;
@@ -62,7 +64,7 @@ pub extern "system" fn rekindle_host_ready() -> u32 {
 #[unsafe(link_section = ".CRT$XCU")]
 static HOST_CTOR: extern "C" fn() = host_ctor;
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 #[used]
 #[unsafe(link_section = ".init_array")]
 static HOST_CTOR: extern "C" fn() = host_ctor;
@@ -157,6 +159,11 @@ fn run() -> (String, Option<Driver>) {
         Err(e) => return (format!("{out} error=anchors:{e}"), None),
     };
     report_anchors(&hooks, &mut out);
+    #[cfg(target_os = "android")]
+    match android::install(&hooks) {
+        Ok(slot) => field(&mut out, "transport_hook", format_args!("{slot:#x}")),
+        Err(e) => field(&mut out, "transport_hook", err(&e)),
+    }
     let wire = wire::install(&hooks);
     field(&mut out, "wire_detour", wire.turns);
     field(&mut out, "wire_event_detour", wire.events);
