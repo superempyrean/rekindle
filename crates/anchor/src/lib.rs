@@ -10,6 +10,8 @@
 //! reports which anchors **broke**.
 //!
 //! It reads files and reports locations. It never modifies a binary.
+//! Binaries are PE (x64) or ELF (x86-64 and AArch64). Shapes and operand
+//! anchors read x64 code only.
 //!
 //! - [`descriptor`]: anchors and locators, as `anchors.json` holds them.
 //! - [`resolve`]: an anchor set resolved against a binary, with a verdict
@@ -19,6 +21,7 @@
 //! - [`heal`]: new locators for the anchors a build weakened.
 //! - [`diff`]: what changed between two resolutions.
 
+mod a64;
 pub mod descriptor;
 pub mod diff;
 pub mod heal;

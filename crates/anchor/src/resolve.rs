@@ -282,6 +282,7 @@ pub(crate) fn resolve_locator(
     let hits = match loc {
         Locator::String { text } => find_all(index.bytes, text.as_bytes()),
         Locator::Symbol { name } => index.symbols.get(name).cloned().unwrap_or_default(),
+        Locator::Export { name } => index.exports.get(name).cloned().unwrap_or_default(),
         Locator::Bytes { pattern } => pattern_hits(pattern, index, scope),
         Locator::StringRef { text } => index.string_refs(text.as_bytes()),
         Locator::CallTarget { pattern } => {
@@ -302,6 +303,15 @@ pub(crate) fn resolve_locator(
             .unwrap_or_default(),
         Locator::Shape { insns, at } => index.shape_hits(insns, *at, scope),
         Locator::PanicLocation { file, line, col } => index.panic_refs(file, *line, *col),
+        Locator::VtableSlot {
+            function,
+            method,
+            size,
+            align,
+        } => found
+            .get(function)
+            .map(|&off| index.vtable_slots(off, *method, *size, *align))
+            .unwrap_or_default(),
     };
     index.status_from(hits)
 }

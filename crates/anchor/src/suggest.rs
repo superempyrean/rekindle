@@ -7,12 +7,13 @@ use std::collections::{BTreeSet, HashMap};
 use anyhow::{Context, Result, bail};
 use iced_x86::{Decoder, DecoderOptions, Instruction};
 
-use rekindle_sigmatch::short::PeImage;
+use rekindle_sigmatch::short::{Machine, PeImage};
 use rekindle_sigmatch::short::{
     OperandKinds, ShortOptions, interior_signature, signature_among, trim_unique,
 };
 use rekindle_sigmatch::sig::Signature;
 
+use crate::a64;
 use crate::descriptor::{Anchor, Locator, Operand};
 use crate::index::{BinaryIndex, operand_of};
 use crate::resolve::{Status, resolve_anchor, resolve_locator};
@@ -46,6 +47,9 @@ pub fn suggest_operand(
     max_locators: usize,
 ) -> Result<Anchor> {
     let pe = PeImage::parse(binary)?;
+    if pe.machine != Machine::X86_64 {
+        bail!("operand anchors are built from x64 code only");
+    }
     let rva = pe.to_rva(insn)?;
     let off = pe
         .rva_to_offset(rva)
@@ -155,6 +159,9 @@ pub fn suggest_operand_by_value(
     max_locators: usize,
 ) -> Result<Anchor> {
     let pe = PeImage::parse(binary)?;
+    if pe.machine != Machine::X86_64 {
+        bail!("operand anchors are built from x64 code only");
+    }
     let (begin, (start, stop)) = function_at(&pe, pe.to_rva(function)?)?;
     let mut d = Decoder::with_ip(
         64,
@@ -177,6 +184,9 @@ pub fn suggest_operand_by_value(
 /// unique inside the function another anchor, `within`, finds.
 pub fn suggest_call(binary: &[u8], name: &str, insn: u64, within: &str) -> Result<Anchor> {
     let pe = PeImage::parse(binary)?;
+    if pe.machine != Machine::X86_64 {
+        bail!("call-target locators are built from x64 code only");
+    }
     let rva = pe.to_rva(insn)?;
     let off = pe
         .rva_to_offset(rva)
@@ -257,6 +267,9 @@ pub fn suggest_call(binary: &[u8], name: &str, insn: u64, within: &str) -> Resul
 /// instruction's immediates as `*`, for an operand anchor that reads one.
 pub fn suggest_shape(binary: &[u8], insn: u64, scoped: bool, wild_imm: bool) -> Result<Locator> {
     let pe = PeImage::parse(binary)?;
+    if pe.machine != Machine::X86_64 {
+        bail!("shapes are x64 instructions only");
+    }
     let rva = pe.to_rva(insn)?;
     let off = pe
         .rva_to_offset(rva)
@@ -346,6 +359,12 @@ pub fn suggest(
     let unique_signature =
         |pe: &PeImage, a: u64, o: &ShortOptions| signature_among(pe, a, equivalent, o);
     let pe = PeImage::parse(binary)?;
+    if pe.machine == Machine::Aarch64 {
+        if !equivalent.is_empty() || source.is_some() {
+            bail!("{name}: equivalent functions and source patterns are x64 only");
+        }
+        return suggest_a64(binary, name, addr, max_strings);
+    }
     let rva = pe.to_rva(addr)?;
     let (begin, _) = pe
         .function_containing(rva)
@@ -517,4 +536,119 @@ fn literal_len(code: &[u8], ip: u64, max: usize) -> Option<usize> {
             .then(|| n.immediate(1) as usize)
             .filter(|&l| l >= 4 && l <= max)
     })
+}
+
+/// The fewest fixed bytes an AArch64 signature carries, so it stays unique
+/// in a build that adds code like it.
+const A64_MIN_FIXED: usize = 12;
+/// The longest AArch64 signature tried, in bytes.
+const A64_MAX_LEN: usize = 96;
+
+/// [`suggest`] for AArch64: masked byte signatures at the function's entry
+/// and inside it, the exports at its entry, and the strings and panic
+/// locations it loads, each checked to resolve back to it alone.
+fn suggest_a64(binary: &[u8], name: &str, addr: u64, max_strings: usize) -> Result<Anchor> {
+    let index = BinaryIndex::new(binary);
+    let off = index
+        .offset_of_va(addr)
+        .with_context(|| format!("{addr:#x} is not in the file"))?;
+    let (start, end) = index
+        .function_range(off)
+        .with_context(|| format!("{addr:#x} is in no .eh_frame function"))?;
+    let want = index.status_from(vec![start]);
+    let mut locators = Vec::new();
+    let mut names: Vec<&String> = index
+        .exports
+        .iter()
+        .filter(|(_, offs)| offs.contains(&start))
+        .map(|(n, _)| n)
+        .collect();
+    names.sort();
+    locators.extend(names.into_iter().map(|n| Locator::Export { name: n.clone() }));
+    let entry = a64_signature(&index, start, end);
+    let entry_len = entry.as_ref().map_or(0, Signature::len);
+    if let Some(sig) = entry {
+        locators.push(Locator::Bytes {
+            pattern: sig.to_pattern(),
+        });
+    } else {
+        eprintln!("{name}: no unique entry signature");
+    }
+    match (start + entry_len..end)
+        .step_by(16)
+        .take(16)
+        .find_map(|at| a64_signature(&index, at, end))
+    {
+        Some(sig) => locators.push(Locator::Bytes {
+            pattern: sig.to_pattern(),
+        }),
+        None => eprintln!("{name}: no unique interior signature"),
+    }
+    let va = index.va_of(start).context("function not in a section")?;
+    let code = &binary[start..end];
+    let mut seen = BTreeSet::new();
+    let mut strings = 0;
+    for (target, len) in a64::str_loads(code, va, 48) {
+        if strings >= max_strings {
+            break;
+        }
+        let (Some(len), Some(at)) = (len, index.offset_of_va(target)) else {
+            continue;
+        };
+        let Some(text) = binary
+            .get(at..at + len as usize)
+            .and_then(|b| std::str::from_utf8(b).ok())
+            .filter(|t| t.chars().all(|c| !c.is_control()))
+        else {
+            continue;
+        };
+        let loc = Locator::StringRef { text: text.into() };
+        if seen.insert(text.to_string())
+            && resolve_locator(&loc, &index, None, &HashMap::new()) == want
+        {
+            locators.push(loc);
+            strings += 1;
+        }
+    }
+    for (_, r) in a64::refs(code, va) {
+        let a64::Ref::Data(target) = r else { continue };
+        let Some((file, line, col)) = index.panic_location_at(target) else {
+            continue;
+        };
+        let loc = Locator::PanicLocation { file, line, col };
+        if !locators.contains(&loc)
+            && resolve_locator(&loc, &index, None, &HashMap::new()) == want
+        {
+            locators.push(loc);
+        }
+    }
+    if locators.is_empty() {
+        bail!("{name}: no locator resolves uniquely to {addr:#x}");
+    }
+    Ok(Anchor {
+        name: name.to_string(),
+        function: true,
+        locators,
+        ..Anchor::default()
+    })
+}
+
+/// The shortest masked signature starting at file offset `at`, inside the
+/// function ending at `end`, that matches only there in the binary's code.
+fn a64_signature(index: &BinaryIndex, at: usize, end: usize) -> Option<Signature> {
+    let va = index.va_of(at)?;
+    let code_end = end.min(at + A64_MAX_LEN);
+    (16..=code_end.saturating_sub(at))
+        .step_by(4)
+        .map(|len| a64::masked(&index.bytes[at..at + len], va))
+        .filter(|sig| a64::fixed(sig) >= A64_MIN_FIXED)
+        .find(|sig| {
+            let hits: Vec<usize> = index
+                .exec
+                .iter()
+                .flat_map(|&(s, e)| sig.scan(&index.bytes[s..e]).into_iter().map(move |o| s + o))
+                .take(2)
+                .collect();
+            hits == [at]
+        })
 }

@@ -16,12 +16,17 @@ pub enum Locator {
     /// A symbol defined in the binary's symbol table, which release builds
     /// usually strip. Exports alone don't count.
     Symbol { name: String },
+    /// A symbol an ELF image exports: a definition in its dynamic symbol
+    /// table. Stripping keeps these, and other libraries link against them
+    /// by name, so an export outlives any rebuild that doesn't remove it.
+    Export { name: String },
     /// A masked byte signature over code, IDA-style: `48 8b ?? ?? e8 ?? ?? ?? ??`.
     Bytes { pattern: String },
     /// The function(s) whose code loads `text`'s address (a RIP-relative
     /// `lea`/`mov`, checked by decoding). Strings tend to outlive the code
     /// around them, so this survives rewrites that break byte patterns.
-    /// PE (x64) only; resolves to the referencing function's entry.
+    /// Resolves to the referencing function's entry. On AArch64 the load is
+    /// an `adrp` and the `add` or `ldr` that completes it.
     StringRef { text: String },
     /// The function a `call rel32` calls. The pattern (scoped, like any
     /// pattern, by the anchor's `within`) covers the call, starting at it or
@@ -64,6 +69,22 @@ pub enum Locator {
     /// last three path components (see [`file_key`]), so builds made in
     /// different directories match. PE (x64) only.
     PanicLocation { file: String, line: u32, col: u32 },
+    /// The slot of a trait object's vtable that holds anchor `function`'s
+    /// entry as its `method`th method. rustc lays a vtable out as
+    /// `drop_in_place`, size, align, then the methods, so the slot is
+    /// `3 + method` words in. `size` and `align`, when given, must match the
+    /// header: the size and alignment of the type behind the trait object.
+    /// Resolves to the slot (data, not code), after `function`. Swapping the
+    /// pointer there hooks every call made through the vtable.
+    VtableSlot {
+        function: String,
+        #[serde(default)]
+        method: usize,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        size: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        align: Option<u64>,
+    },
 }
 
 impl Locator {
@@ -72,6 +93,7 @@ impl Locator {
         match self {
             Locator::Callee { from, .. } => Some(from),
             Locator::Caller { of } => Some(of),
+            Locator::VtableSlot { function, .. } => Some(function),
             _ => None,
         }
     }
@@ -82,6 +104,7 @@ impl Locator {
         match self {
             Locator::String { text } => format!("string {:?}", truncate(text, 40)),
             Locator::Symbol { name } => format!("symbol `{name}`"),
+            Locator::Export { name } => format!("export `{name}`"),
             Locator::Bytes { pattern } => format!("bytes `{}`", truncate(pattern, 40)),
             Locator::StringRef { text } => format!("string-ref {:?}", truncate(text, 40)),
             Locator::CallTarget { pattern } => format!("call-target `{}`", truncate(pattern, 40)),
@@ -91,6 +114,9 @@ impl Locator {
             Locator::PanicLocation { file, line, col } => {
                 format!("panic location {}:{line}:{col}", file_key(file))
             }
+            Locator::VtableSlot {
+                function, method, ..
+            } => format!("vtable slot of `{function}` as method #{method}"),
         }
     }
 }
@@ -218,6 +244,40 @@ mod tests {
             serde_json::json!({ "kind": "call-target", "pattern": "e8 ?? ?? ?? ?? 90" })
         );
         assert_eq!(serde_json::from_value::<Locator>(j).unwrap(), loc);
+    }
+
+    #[test]
+    fn exports_and_vtable_slots_are_kebab_kind_in_json() {
+        let slot = Locator::VtableSlot {
+            function: "emit".into(),
+            method: 0,
+            size: Some(64),
+            align: Some(8),
+        };
+        let j = serde_json::to_value(&slot).unwrap();
+        assert_eq!(
+            j,
+            serde_json::json!({
+                "kind": "vtable-slot", "function": "emit", "method": 0, "size": 64, "align": 8
+            })
+        );
+        let bare: Locator =
+            serde_json::from_value(serde_json::json!({ "kind": "vtable-slot", "function": "f" }))
+                .unwrap();
+        assert_eq!(
+            bare,
+            Locator::VtableSlot {
+                function: "f".into(),
+                method: 0,
+                size: None,
+                align: None
+            }
+        );
+        assert_eq!(bare.depends_on(), Some("f"));
+        let export: Locator =
+            serde_json::from_value(serde_json::json!({ "kind": "export", "name": "ld_event" }))
+                .unwrap();
+        assert_eq!(export.label(), "export `ld_event`");
     }
 
     #[test]

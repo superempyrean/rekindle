@@ -51,7 +51,7 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
-    /// Suggest function anchors from a PE binary alone: for each NAME=ADDR, a
+    /// Suggest function anchors from a binary alone: for each NAME=ADDR, a
     /// short unique signature plus string-ref locators, each verified. Prints
     /// an anchor set (JSON).
     Suggest {

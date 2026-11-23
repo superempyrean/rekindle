@@ -36,9 +36,10 @@ pub struct Section {
     pub executable: bool,
 }
 
-/// A PE32+ or x86-64 ELF image as laid out in its file: sections, and the
-/// function extents from the exception directory (`.pdata` `RUNTIME_FUNCTION`s)
-/// or `.eh_frame`, which x64 binaries carry even when stripped of symbols.
+/// A PE32+ image, or an x86-64 or AArch64 ELF image, as laid out in its
+/// file: sections, and the function extents from the exception directory
+/// (`.pdata` `RUNTIME_FUNCTION`s) or `.eh_frame`, which both carry even when
+/// stripped of symbols.
 #[derive(Debug, Clone)]
 pub struct PeImage<'a> {
     pub bytes: &'a [u8],
@@ -46,6 +47,25 @@ pub struct PeImage<'a> {
     pub sections: Vec<Section>,
     /// `(begin_rva, end_rva)`, sorted by begin.
     pub functions: Vec<(u32, u32)>,
+    pub machine: Machine,
+}
+
+/// The instruction set of an image's code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Machine {
+    X86_64,
+    Aarch64,
+}
+
+impl PeImage<'_> {
+    /// Fail unless the image's code is x64, which the signature builders
+    /// here decode.
+    fn require_x64(&self) -> Result<()> {
+        if self.machine != Machine::X86_64 {
+            bail!("short signatures are built for x64 code only");
+        }
+        Ok(())
+    }
 }
 
 fn u16_at(b: &[u8], o: usize) -> Option<u16> {
@@ -102,6 +122,7 @@ impl<'a> PeImage<'a> {
             image_base,
             sections,
             functions: Vec::new(),
+            machine: Machine::X86_64,
         };
         // Exception directory = data directory 3.
         if n_dirs > 3 {
@@ -129,9 +150,11 @@ impl<'a> PeImage<'a> {
     fn parse_elf(bytes: &'a [u8]) -> Result<Self> {
         use object::{Object, ObjectSection, ObjectSegment, SectionKind};
         let obj = object::File::parse(bytes).context("parsing the ELF image")?;
-        if obj.architecture() != object::Architecture::X86_64 {
-            bail!("only x86-64 ELF images are supported");
-        }
+        let machine = match obj.architecture() {
+            object::Architecture::X86_64 => Machine::X86_64,
+            object::Architecture::Aarch64 => Machine::Aarch64,
+            a => bail!("{a:?} ELF images are not supported"),
+        };
         let image_base = obj.segments().map(|s| s.address()).min().unwrap_or(0);
         let rva = |addr: u64| u32::try_from(addr.wrapping_sub(image_base)).ok();
         let mut sections = Vec::new();
@@ -183,6 +206,7 @@ impl<'a> PeImage<'a> {
             image_base,
             sections,
             functions,
+            machine,
         })
     }
 
@@ -373,6 +397,7 @@ pub fn signature_among(
     equivalent: &[u64],
     opts: &ShortOptions,
 ) -> Result<Signature> {
+    img.require_x64()?;
     let allowed: Vec<usize> = equivalent
         .iter()
         .filter_map(|&a| img.to_rva(a).ok().and_then(|r| img.rva_to_offset(r)))
@@ -466,6 +491,7 @@ pub fn interior_signature(
     equivalent: &[u64],
     opts: &ShortOptions,
 ) -> Result<(usize, Signature)> {
+    img.require_x64()?;
     let rva = img.to_rva(entry)?;
     let (begin, end) = img
         .function_containing(rva)

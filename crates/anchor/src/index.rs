@@ -9,8 +9,9 @@ use iced_x86::{Decoder, DecoderOptions, Instruction, Mnemonic, OpKind};
 use object::{Object, ObjectSection, ObjectSymbol};
 
 use rekindle_analysis::sections::SectionMap;
-use rekindle_sigmatch::short::PeImage;
+use rekindle_sigmatch::short::{Machine, PeImage};
 
+use crate::a64;
 use crate::descriptor::{Operand, file_key};
 use crate::resolve::Status;
 use crate::shape;
@@ -39,8 +40,10 @@ pub(crate) struct BinaryIndex<'a> {
     pub(crate) exec: Vec<(usize, usize)>,
     /// Symbol name -> file offsets of its definitions.
     pub(crate) symbols: HashMap<String, Vec<usize>>,
-    /// ELF `R_X86_64_RELATIVE` relocations: slot VA -> the VA written there
-    /// at load.
+    /// ELF dynamic symbol (export) name -> file offsets of its definitions.
+    pub(crate) exports: HashMap<String, Vec<usize>>,
+    /// ELF relative relocations, plain or packed (`APS2`): slot VA -> the
+    /// VA written there at load.
     pub(crate) relative: HashMap<u64, u64>,
 }
 
@@ -56,6 +59,7 @@ impl<'a> BinaryIndex<'a> {
     pub(crate) fn new(bytes: &'a [u8]) -> Self {
         let mut exec = Vec::new();
         let mut symbols: HashMap<String, Vec<usize>> = HashMap::new();
+        let mut exports: HashMap<String, Vec<usize>> = HashMap::new();
         let mut relative = HashMap::new();
         if let Ok(obj) = object::File::parse(bytes) {
             for sec in obj.sections() {
@@ -79,21 +83,19 @@ impl<'a> BinaryIndex<'a> {
                     symbols.entry(name.to_string()).or_default().push(off);
                 }
             }
-            if let Some(relocations) = obj.dynamic_relocations() {
-                relative = relocations
-                    .filter(|(_, r)| {
-                        matches!(
-                            r.flags(),
-                            object::RelocationFlags::Elf {
-                                r_type: object::elf::R_X86_64_RELATIVE
-                            }
-                        )
-                    })
-                    .map(|(slot, r)| (slot, r.addend() as u64))
-                    .collect();
+            if obj.format() == object::BinaryFormat::Elf {
+                for sym in obj.dynamic_symbols().filter(ObjectSymbol::is_definition) {
+                    if let Ok(name) = sym.name()
+                        && !name.is_empty()
+                        && let Some(off) = addr_to_offset(&obj, sym.address())
+                    {
+                        exports.entry(name.to_string()).or_default().push(off);
+                    }
+                }
             }
+            relative = rekindle_analysis::relocs::relative(&obj);
         }
-        for v in symbols.values_mut() {
+        for v in symbols.values_mut().chain(exports.values_mut()) {
             v.sort_unstable();
             v.dedup();
         }
@@ -106,7 +108,121 @@ impl<'a> BinaryIndex<'a> {
             sections: SectionMap::parse(bytes).ok(),
             exec,
             symbols,
+            exports,
             relative,
+        }
+    }
+
+    /// Whether the image's code is AArch64, which `a64` reads, rather than
+    /// x64, which iced-x86 does.
+    pub(crate) fn is_a64(&self) -> bool {
+        self.pe.as_ref().is_some_and(|pe| pe.machine == Machine::Aarch64)
+    }
+
+    /// The VA of file offset `off`.
+    pub(crate) fn va_of(&self, off: usize) -> Option<u64> {
+        let pe = self.pe.as_ref()?;
+        Some(pe.image_base + u64::from(pe.offset_to_rva(off)?))
+    }
+
+    /// The file offset of `va`.
+    pub(crate) fn offset_of_va(&self, va: u64) -> Option<usize> {
+        let pe = self.pe.as_ref()?;
+        pe.rva_to_offset(pe.to_rva(va).ok()?)
+    }
+
+    /// The 8-byte word the file holds at `va`.
+    fn word_at(&self, va: u64) -> Option<u64> {
+        let off = self.offset_of_va(va)?;
+        let b = self.bytes.get(off..off + 8)?;
+        Some(u64::from_le_bytes(b.try_into().ok()?))
+    }
+
+    /// The pointer at `va` once loaded at the image's base: a relative
+    /// relocation's addend on ELF, the word itself on PE.
+    fn pointer_at(&self, va: u64) -> Option<u64> {
+        if let Some(&p) = self.relative.get(&va) {
+            return Some(p);
+        }
+        let pe = self.pe.as_ref()?;
+        let p = self.word_at(va)?;
+        (self.relative.is_empty() && pe.to_rva(p).is_ok_and(|r| pe.rva_to_offset(r).is_some()))
+            .then_some(p)
+    }
+
+    /// The VAs of pointer-aligned words that point at `target` once loaded.
+    fn pointers_to(&self, target: u64) -> Vec<u64> {
+        if !self.relative.is_empty() {
+            return self
+                .relative
+                .iter()
+                .filter(|&(_, &v)| v == target)
+                .map(|(&slot, _)| slot)
+                .collect();
+        }
+        let Some(pe) = &self.pe else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for s in pe.sections.iter().filter(|s| !s.executable) {
+            let start = s.rva.next_multiple_of(8);
+            let end = s.rva + s.raw_size;
+            for rva in (start..end.saturating_sub(7)).step_by(8) {
+                let va = pe.image_base + u64::from(rva);
+                if self.word_at(va) == Some(target) {
+                    out.push(va);
+                }
+            }
+        }
+        out
+    }
+
+    /// File offsets of the vtable slots that hold the function at file
+    /// offset `func` as their `method`th method, in a vtable whose header
+    /// matches `size` and `align` and whose earlier methods are pointers too.
+    pub(crate) fn vtable_slots(
+        &self,
+        func: usize,
+        method: usize,
+        size: Option<u64>,
+        align: Option<u64>,
+    ) -> Vec<usize> {
+        let Some(target) = self.va_of(func) else {
+            return Vec::new();
+        };
+        let mut out: Vec<usize> = self
+            .pointers_to(target)
+            .into_iter()
+            .filter(|&slot| {
+                let Some(header) = slot.checked_sub(8 * (3 + method as u64)) else {
+                    return false;
+                };
+                size.is_none_or(|s| self.word_at(header + 8) == Some(s))
+                    && align.is_none_or(|a| self.word_at(header + 16) == Some(a))
+                    && (0..method).all(|k| self.pointer_at(header + 24 + 8 * k as u64).is_some())
+            })
+            .filter_map(|slot| self.offset_of_va(slot))
+            .collect();
+        out.sort_unstable();
+        out
+    }
+
+    /// The AArch64 `bl` calls in file range `[start, end)`: (site, target).
+    pub(crate) fn a64_calls(&self, start: usize, end: usize) -> Vec<(u64, u64)> {
+        self.a64_refs(start, end)
+            .into_iter()
+            .filter_map(|(site, r)| match r {
+                a64::Ref::Call(t) => Some((site, t)),
+                a64::Ref::Data(_) => None,
+            })
+            .collect()
+    }
+
+    /// The AArch64 references in file range `[start, end)`.
+    fn a64_refs(&self, start: usize, end: usize) -> Vec<(u64, a64::Ref)> {
+        match (self.va_of(start), self.bytes.get(start..end)) {
+            (Some(va), Some(code)) => a64::refs(code, va),
+            _ => Vec::new(),
         }
     }
 
@@ -137,6 +253,9 @@ impl<'a> BinaryIndex<'a> {
 
     /// The `operand` of the instruction at file offset `off`.
     pub(crate) fn operand_value(&self, off: usize, operand: Operand) -> Option<i64> {
+        if self.is_a64() {
+            return None;
+        }
         let pe = self.pe.as_ref()?;
         let ip = pe.image_base + u64::from(pe.offset_to_rva(off)?);
         let code = self
@@ -157,6 +276,16 @@ impl<'a> BinaryIndex<'a> {
     /// File offset of the target of the first near `call` starting in
     /// `[off, off + len)`.
     pub(crate) fn first_call_target(&self, off: usize, len: usize) -> Option<usize> {
+        if self.is_a64() {
+            let end = off + len.next_multiple_of(4);
+            return self
+                .a64_refs(off, end)
+                .into_iter()
+                .find_map(|(_, r)| match r {
+                    a64::Ref::Call(t) => self.offset_of_va(t),
+                    a64::Ref::Data(_) => None,
+                });
+        }
         let pe = self.pe.as_ref()?;
         let ip = pe.image_base + u64::from(pe.offset_to_rva(off)?);
         // Enough to decode a call through a slot loaded LOAD_REACH
@@ -266,6 +395,17 @@ impl<'a> BinaryIndex<'a> {
                     v.push(entry);
                 }
             };
+            if pe.machine == Machine::Aarch64 {
+                for (start, end) in self.function_ranges() {
+                    for (_, r) in self.a64_refs(start, end) {
+                        match r {
+                            a64::Ref::Data(t) => add(&mut xrefs.rip, t, start),
+                            a64::Ref::Call(t) => add(&mut xrefs.calls, t, start),
+                        }
+                    }
+                }
+                return xrefs;
+            }
             for &(begin, end) in &pe.functions {
                 let Some((start, d)) = self.decoder(begin, end) else {
                     continue;
@@ -288,7 +428,7 @@ impl<'a> BinaryIndex<'a> {
 
     /// A decoder over the `.pdata` function `[begin, end)`, and its entry offset.
     pub(crate) fn decoder(&self, begin: u32, end: u32) -> Option<(usize, Decoder<'a>)> {
-        let pe = self.pe.as_ref()?;
+        let pe = self.pe.as_ref().filter(|pe| pe.machine == Machine::X86_64)?;
         let (start, last) = (pe.rva_to_offset(begin)?, pe.rva_to_offset(end - 1)?);
         let code = self.bytes.get(start..=last)?;
         let ip = pe.image_base + u64::from(begin);
@@ -301,6 +441,21 @@ impl<'a> BinaryIndex<'a> {
         let Some(pe) = &self.pe else {
             return Vec::new();
         };
+        if pe.machine == Machine::Aarch64 {
+            let Some((start, end)) = self.function_range(off) else {
+                return Vec::new();
+            };
+            let mut out = Vec::new();
+            for (_, r) in self.a64_refs(start, end) {
+                if let a64::Ref::Call(t) = r
+                    && let Some(o) = self.offset_of_va(t)
+                    && !out.contains(&o)
+                {
+                    out.push(o);
+                }
+            }
+            return out;
+        }
         let Some((_, d)) = pe
             .offset_to_rva(off)
             .and_then(|r| pe.function_containing(r))
@@ -340,6 +495,10 @@ impl<'a> BinaryIndex<'a> {
         let (Some(pe), Some(code)) = (self.pe.as_ref(), self.bytes.get(start..end)) else {
             return Vec::new();
         };
+        // Shapes are x64 instructions; AArch64 code has none.
+        if pe.machine != Machine::X86_64 {
+            return Vec::new();
+        }
         let Some(rva) = pe.offset_to_rva(start) else {
             return Vec::new();
         };
@@ -447,10 +606,9 @@ impl<'a> BinaryIndex<'a> {
             .collect()
     }
 
-    /// Entries of the functions that load a panic location record of `file`,
-    /// `line` and `col` (by a RIP-relative operand).
-    pub(crate) fn panic_refs(&self, file: &str, line: u32, col: u32) -> Vec<usize> {
-        let records = self.panic_records.get_or_init(|| {
+    /// Panic location records by (file key, line, col): their VAs.
+    fn panic_records(&self) -> &HashMap<(String, u32, u32), Vec<u64>> {
+        self.panic_records.get_or_init(|| {
             let mut m: HashMap<(String, u32, u32), Vec<u64>> = HashMap::new();
             for (va, l) in rekindle_analysis::locations::records(self.bytes) {
                 m.entry((file_key(&l.file), l.line, l.col))
@@ -458,7 +616,21 @@ impl<'a> BinaryIndex<'a> {
                     .push(va);
             }
             m
-        });
+        })
+    }
+
+    /// The panic location record at `va`, as (file key, line, col).
+    pub(crate) fn panic_location_at(&self, va: u64) -> Option<(String, u32, u32)> {
+        self.panic_records()
+            .iter()
+            .find(|(_, vas)| vas.contains(&va))
+            .map(|(k, _)| k.clone())
+    }
+
+    /// Entries of the functions that load a panic location record of `file`,
+    /// `line` and `col` (by a RIP-relative operand).
+    pub(crate) fn panic_refs(&self, file: &str, line: u32, col: u32) -> Vec<usize> {
+        let records = self.panic_records();
         let refs = &self.xrefs().rip;
         let mut out: Vec<usize> = records
             .get(&(file_key(file), line, col))

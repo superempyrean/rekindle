@@ -25,6 +25,9 @@ pub fn find_value(
     depth: usize,
 ) -> Result<Option<(Vec<u64>, u64)>> {
     let pe = PeImage::parse(binary)?;
+    if pe.machine != rekindle_sigmatch::short::Machine::X86_64 {
+        anyhow::bail!("values are read from x64 code only");
+    }
     let index = BinaryIndex::new(binary);
     let mut queue = VecDeque::from([(function, Vec::<u64>::new())]);
     let mut seen = HashSet::from([function]);
@@ -76,6 +79,9 @@ pub type InstructionOperands = (u64, Option<i64>, Option<i64>, bool);
 /// instructions that carry a measured value.
 pub fn operands(binary: &[u8], va: u64) -> Result<Vec<InstructionOperands>> {
     let pe = PeImage::parse(binary)?;
+    if pe.machine != rekindle_sigmatch::short::Machine::X86_64 {
+        anyhow::bail!("operands are read from x64 code only");
+    }
     let (begin, end) = pe
         .function_containing(pe.to_rva(va)?)
         .context("no .pdata function there")?;
@@ -106,6 +112,13 @@ pub fn calls(binary: &[u8], va: u64) -> Result<Vec<(u64, u64)>> {
         .function_containing(pe.to_rva(va)?)
         .context("no .pdata function there")?;
     let index = BinaryIndex::new(binary);
+    if index.is_a64() {
+        let (start, end) = (
+            pe.rva_to_offset(begin).context("function bytes")?,
+            pe.rva_to_offset(end - 1).context("function bytes")? + 1,
+        );
+        return Ok(index.a64_calls(start, end));
+    }
     let (_, d) = index.decoder(begin, end).context("function bytes")?;
     Ok(index.calls(d))
 }
