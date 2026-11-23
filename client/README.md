@@ -84,6 +84,25 @@ self-test places the shim and the host beside the mock, runs it off the
 desktop and checks the host's report. It never activates the window or sends
 OS input.
 
+## Debug endpoint
+
+With `REKINDLE_HOST_DEBUG_PORT` set to a port, the host serves what its
+wire detours see as JSON on `127.0.0.1` at that port. It is off without
+the variable, and it never listens on another interface.
+
+| Request | What it returns |
+|---|---|
+| `GET /ops` | the last 200 turns the guest emitted, each op decoded with property names |
+| `GET /events` | the last 200 UI events the client dispatched to the guest |
+| `GET /tree` | the tree rekindle mirrors: each node's kind, children and cells |
+
+Host calls and host frames are never recorded, since they carry the
+client's HTTP requests and responses with their headers and bodies. The
+`value`, `forceValue` and `valueSpans` cells, and every string in a UI
+event, appear as their length (`"<7 chars>"`), so text typed into a
+password field doesn't show. The report's `debug_port` field says the
+endpoint is up.
+
 ## Limitations
 
 Built and tested on x86-64 Windows and Linux. The x86-64 Android build has run

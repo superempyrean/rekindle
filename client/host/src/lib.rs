@@ -29,6 +29,7 @@ mod drive {
 }
 #[cfg(target_os = "android")]
 mod android;
+mod debug;
 mod hooks;
 mod image;
 mod install;
@@ -206,6 +207,9 @@ fn run() -> (String, Option<Driver>) {
     field(&mut out, "theme_route", wire.theme);
     field(&mut out, "wire_ui", wire.ui);
     field(&mut out, "wire_surfaces", wire.surfaces);
+    if let Some(port) = debug::start() {
+        field(&mut out, "debug_port", port);
+    }
     let r = layout::reconcile_layout(&mut layout, &hooks);
     field(
         &mut out,

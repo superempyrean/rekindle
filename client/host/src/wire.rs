@@ -734,6 +734,11 @@ fn with_engine<T>(f: impl FnOnce(&mut Engine) -> T) -> Option<T> {
         .flatten()
 }
 
+/// Run `f` on the tree rekindle mirrors, for the debug endpoint.
+pub(crate) fn mirror<T>(f: impl FnOnce(&rekindle_wire::Tree) -> T) -> Option<T> {
+    with_engine(|e| f(e.mirror()))
+}
+
 /// The op stream `buf` carries, or `None` for a host call.
 fn op_stream(buf: &[u8]) -> Option<&[u8]> {
     let (head, ops) = buf.split_first_chunk::<4>()?;
@@ -755,6 +760,7 @@ unsafe extern "C" fn hooked_emit(transport: *mut c_void, bytes: *const u8, len: 
         return unsafe { original(transport, bytes, len) };
     };
     TURNS.fetch_add(1, Ordering::Relaxed);
+    crate::debug::turn(ops);
     match with_engine(|e| e.filter(ops)) {
         Some(Ok(Some(rewritten))) => {
             REWRITTEN.fetch_add(1, Ordering::Relaxed);
@@ -793,6 +799,7 @@ unsafe extern "C" fn hooked_dispatch(
     EVENTS.fetch_add(1, Ordering::Relaxed);
     // SAFETY: the client passes `len` readable bytes.
     let input = unsafe { std::slice::from_raw_parts(bytes, len) };
+    crate::debug::event(input);
     match with_engine(|e| e.event(input)) {
         Some(Ok(Verdict::Pass)) => {}
         Some(Ok(Verdict::Replace(ev))) => {

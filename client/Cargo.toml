@@ -98,3 +98,13 @@ opt-level = 2
 debug = "limited"
 lto = "thin"
 codegen-units = 1
+
+# Quick iteration: `cargo build --profile dev-fast`, into target/dev-fast.
+# Some optimization, so GPUI and wasmtime run at a usable speed, with no LTO,
+# 16 codegen units and no debug info, so it builds and links fast.
+[profile.dev-fast]
+inherits = "dev"
+opt-level = 1
+lto = false
+codegen-units = 16
+debug = false
