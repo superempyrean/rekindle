@@ -20,20 +20,41 @@ const PAGE_REACH: usize = 32;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Insn {
     /// `adrp rd, page`.
-    Adrp { rd: u8, page: u64 },
+    Adrp {
+        rd: u8,
+        page: u64,
+    },
     /// `adr rd, target`.
-    Adr { rd: u8, target: u64 },
+    Adr {
+        rd: u8,
+        target: u64,
+    },
     /// `add rd, rn, #imm` (64-bit, `imm` already shifted).
-    AddImm { rd: u8, rn: u8, imm: u64 },
+    AddImm {
+        rd: u8,
+        rn: u8,
+        imm: u64,
+    },
     /// `ldr{b,h,w,x} rt, [rn, #imm]` (unsigned offset, `imm` already
     /// scaled).
-    LdrImm { rt: u8, rn: u8, imm: u64 },
+    LdrImm {
+        rt: u8,
+        rn: u8,
+        imm: u64,
+    },
     /// `ldr rt, target`: a PC-relative literal load.
-    LdrLiteral { rt: u8, target: u64 },
+    LdrLiteral {
+        rt: u8,
+        target: u64,
+    },
     /// `bl target`.
-    Bl { target: u64 },
+    Bl {
+        target: u64,
+    },
     /// `b target`.
-    B { target: u64 },
+    B {
+        target: u64,
+    },
     /// `b.cond`, `cbz`, `cbnz`, `tbz`, `tbnz`: a PC-relative branch inside a
     /// function.
     CondBranch,
@@ -270,9 +291,15 @@ mod tests {
     #[test]
     fn decodes_adrp_add_and_calls_at_their_addresses() {
         // 0x5459cbc: bl 0x5439ea0
-        assert_eq!(decode(0x97ff8079, 0x5459cbc), Insn::Bl { target: 0x5439ea0 });
+        assert_eq!(
+            decode(0x97ff8079, 0x5459cbc),
+            Insn::Bl { target: 0x5439ea0 }
+        );
         // 0x5459d54: bl 0x182ac38 (backwards, far)
-        assert_eq!(decode(0x970f43b9, 0x5459d54), Insn::Bl { target: 0x182ac38 });
+        assert_eq!(
+            decode(0x970f43b9, 0x5459d54),
+            Insn::Bl { target: 0x182ac38 }
+        );
         // add x29, sp, #0x120
         assert_eq!(
             decode(0x910483fd, 0),
@@ -308,7 +335,10 @@ mod tests {
                 page: 0x46a000
             }
         );
-        assert_eq!(refs(&code, 0x5459f58), vec![(0x5459f58, Ref::Data(0x46a9ff))]);
+        assert_eq!(
+            refs(&code, 0x5459f58),
+            vec![(0x5459f58, Ref::Data(0x46a9ff))]
+        );
     }
 
     #[test]

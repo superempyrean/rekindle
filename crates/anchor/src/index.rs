@@ -116,7 +116,9 @@ impl<'a> BinaryIndex<'a> {
     /// Whether the image's code is AArch64, which `a64` reads, rather than
     /// x64, which iced-x86 does.
     pub(crate) fn is_a64(&self) -> bool {
-        self.pe.as_ref().is_some_and(|pe| pe.machine == Machine::Aarch64)
+        self.pe
+            .as_ref()
+            .is_some_and(|pe| pe.machine == Machine::Aarch64)
     }
 
     /// The VA of file offset `off`.
@@ -428,7 +430,10 @@ impl<'a> BinaryIndex<'a> {
 
     /// A decoder over the `.pdata` function `[begin, end)`, and its entry offset.
     pub(crate) fn decoder(&self, begin: u32, end: u32) -> Option<(usize, Decoder<'a>)> {
-        let pe = self.pe.as_ref().filter(|pe| pe.machine == Machine::X86_64)?;
+        let pe = self
+            .pe
+            .as_ref()
+            .filter(|pe| pe.machine == Machine::X86_64)?;
         let (start, last) = (pe.rva_to_offset(begin)?, pe.rva_to_offset(end - 1)?);
         let code = self.bytes.get(start..=last)?;
         let ip = pe.image_base + u64::from(begin);

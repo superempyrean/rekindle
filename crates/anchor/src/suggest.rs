@@ -564,7 +564,11 @@ fn suggest_a64(binary: &[u8], name: &str, addr: u64, max_strings: usize) -> Resu
         .map(|(n, _)| n)
         .collect();
     names.sort();
-    locators.extend(names.into_iter().map(|n| Locator::Export { name: n.clone() }));
+    locators.extend(
+        names
+            .into_iter()
+            .map(|n| Locator::Export { name: n.clone() }),
+    );
     let entry = a64_signature(&index, start, end);
     let entry_len = entry.as_ref().map_or(0, Signature::len);
     if let Some(sig) = entry {
@@ -616,8 +620,7 @@ fn suggest_a64(binary: &[u8], name: &str, addr: u64, max_strings: usize) -> Resu
             continue;
         };
         let loc = Locator::PanicLocation { file, line, col };
-        if !locators.contains(&loc)
-            && resolve_locator(&loc, &index, None, &HashMap::new()) == want
+        if !locators.contains(&loc) && resolve_locator(&loc, &index, None, &HashMap::new()) == want
         {
             locators.push(loc);
         }

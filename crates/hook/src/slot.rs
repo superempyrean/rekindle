@@ -187,8 +187,8 @@ mod sys {
         // mprotect doesn't return the old protection, so it's read from the
         // mappings to be put back afterwards.
         let maps = std::fs::read_to_string("/proc/self/maps").context("reading /proc/self/maps")?;
-        let old = prot_in_maps(&maps, start)
-            .with_context(|| format!("no mapping holds {start:#x}"))?;
+        let old =
+            prot_in_maps(&maps, start).with_context(|| format!("no mapping holds {start:#x}"))?;
         let rw = Prot {
             read: true,
             write: true,
@@ -197,7 +197,10 @@ mod sys {
         // SAFETY: forwarded from the caller; adding write access breaks no
         // reader.
         if unsafe { libc::mprotect(start as *mut libc::c_void, len, bits(rw)) } != 0 {
-            bail!("mprotect({start:#x}, {len:#x}) failed: {}", std::io::Error::last_os_error());
+            bail!(
+                "mprotect({start:#x}, {len:#x}) failed: {}",
+                std::io::Error::last_os_error()
+            );
         }
         Ok(old)
     }
@@ -208,7 +211,10 @@ mod sys {
     pub(super) unsafe fn restore(start: usize, len: usize, old: Prot) -> Result<()> {
         // SAFETY: forwarded from the caller.
         if unsafe { libc::mprotect(start as *mut libc::c_void, len, bits(old)) } != 0 {
-            bail!("mprotect({start:#x}, {len:#x}) failed: {}", std::io::Error::last_os_error());
+            bail!(
+                "mprotect({start:#x}, {len:#x}) failed: {}",
+                std::io::Error::last_os_error()
+            );
         }
         Ok(())
     }
@@ -265,7 +271,12 @@ mod sys {
             let mut ignored = 0u32;
             // SAFETY: as above.
             unsafe {
-                VirtualProtect(start as *mut c_void, len, PAGE_EXECUTE_READWRITE, &raw mut ignored)
+                VirtualProtect(
+                    start as *mut c_void,
+                    len,
+                    PAGE_EXECUTE_READWRITE,
+                    &raw mut ignored,
+                )
             };
         }
         Ok(old)
@@ -344,7 +355,10 @@ mod tests {
                 assert_ne!(p, libc::MAP_FAILED);
                 std::ptr::copy_nonoverlapping(words.as_ptr(), p.cast(), words.len());
                 assert_eq!(libc::mprotect(p, len, libc::PROT_READ), 0);
-                Self { page: p as usize, len }
+                Self {
+                    page: p as usize,
+                    len,
+                }
             }
         }
     }
@@ -374,7 +388,10 @@ mod tests {
                 std::ptr::copy_nonoverlapping(words.as_ptr(), p.cast(), words.len());
                 let mut old = 0;
                 assert_ne!(VirtualProtect(p, len, 0x02, &raw mut old), 0);
-                Self { page: p as usize, len }
+                Self {
+                    page: p as usize,
+                    len,
+                }
             }
         }
     }
@@ -424,9 +441,11 @@ mod tests {
     fn restore_refuses_a_slot_another_swap_replaced() {
         let table = ReadOnlyTable::new(&[original as *const () as usize]);
         // SAFETY: the slot holds a function of `hooked`'s type.
-        let mut first = unsafe { SlotSwap::install(table.page, hooked as *const () as usize) }.unwrap();
+        let mut first =
+            unsafe { SlotSwap::install(table.page, hooked as *const () as usize) }.unwrap();
         // SAFETY: as above; the second swap hooks over the first.
-        let second = unsafe { SlotSwap::install(table.page, original as *const () as usize) }.unwrap();
+        let second =
+            unsafe { SlotSwap::install(table.page, original as *const () as usize) }.unwrap();
         assert_eq!(second.original(), hooked as *const () as usize);
         let err = first.restore().unwrap_err().to_string();
         assert!(err.contains("not the hook"), "{err}");
@@ -440,7 +459,9 @@ mod tests {
     #[test]
     fn an_unaligned_slot_is_refused() {
         // SAFETY: refused before any access.
-        let err = unsafe { SlotSwap::install(0x1003, 0) }.unwrap_err().to_string();
+        let err = unsafe { SlotSwap::install(0x1003, 0) }
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("not pointer-aligned"), "{err}");
     }
 }

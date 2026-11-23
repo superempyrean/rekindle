@@ -129,7 +129,10 @@ mod tests {
 
     #[test]
     fn the_platform_table_is_in_its_order_and_any_other_kind_is_a_string() {
-        let names: Vec<String> = ElementKind::PLATFORM.iter().map(ToString::to_string).collect();
+        let names: Vec<String> = ElementKind::PLATFORM
+            .iter()
+            .map(ToString::to_string)
+            .collect();
         assert_eq!(
             names.join(" "),
             "view text stack image list scroll hscroll flow navigator input sheet modal \

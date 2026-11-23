@@ -163,7 +163,11 @@ pub enum UiEvent {
     /// Op 4, `insets`.
     Insets(Insets),
     /// Op 5, `window`: the window's size in dp and its density.
-    Window { width: f32, height: f32, density: f32 },
+    Window {
+        width: f32,
+        height: f32,
+        density: f32,
+    },
     /// Op 6, `frameInterval`: the display's frame interval in ms.
     FrameInterval(f64),
     /// Op 7, `frame`: a display frame the guest asked for.
@@ -431,7 +435,11 @@ mod tests {
             ),
         ] {
             let bytes = hex(bytes);
-            assert_eq!(UiEvent::from_bytes(&bytes), Ok(event.clone()), "{bytes:02x?}");
+            assert_eq!(
+                UiEvent::from_bytes(&bytes),
+                Ok(event.clone()),
+                "{bytes:02x?}"
+            );
             assert_eq!(event.to_bytes(), bytes);
             let mut long = bytes.clone();
             long.push(0);

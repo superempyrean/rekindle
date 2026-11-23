@@ -638,8 +638,11 @@ pub use other::*;
 
 #[cfg(not(windows))]
 mod other {
-    use super::*;
-    use anyhow::bail;
+    use std::path::{Path, PathBuf};
+
+    use anyhow::{Result, bail};
+
+    use super::{Answer, Icon, UninstallEntry};
 
     pub fn attach_console() {}
 

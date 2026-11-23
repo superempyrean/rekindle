@@ -70,7 +70,10 @@ mod tests {
 
     #[test]
     fn slot_addresses_add_the_load_bias() {
-        assert_eq!(slot_address(0x7000_0000_0000, 0x60efb98), Some(0x7000_060e_fb98));
+        assert_eq!(
+            slot_address(0x7000_0000_0000, 0x60efb98),
+            Some(0x7000_060e_fb98)
+        );
         assert_eq!(slot_address(usize::MAX, 8), None);
     }
 

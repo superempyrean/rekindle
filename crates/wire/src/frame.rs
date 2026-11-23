@@ -225,7 +225,10 @@ mod tests {
         let event = event.to_bytes();
         assert_eq!(event[..12], [3, 0, 0, 0, 0x5a, 1, 0, 0, 0, 0, 0, 0]);
         let batch = Frame::batch_of([&press[..], &event[..]]).to_bytes();
-        assert_eq!(batch[..16], [4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(
+            batch[..16],
+            [4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        );
         let back = Frame::from_bytes(&batch).unwrap();
         assert_eq!(back.batch().unwrap(), vec![&press[..], &event[..]]);
         let inner = Frame::from_bytes(back.batch().unwrap()[1]).unwrap();
