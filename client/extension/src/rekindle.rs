@@ -297,6 +297,9 @@ impl Rekindle {
         self.take_download();
         self.apply_updates();
         self.check_faults();
+        if self.manager.console_open() {
+            self.show_manager();
+        }
     }
     // ---- rekindle's own settings panel ----
 
@@ -326,6 +329,11 @@ impl Rekindle {
             .map(|p| (p.id, p.missing_slots))
             .collect();
         self.manager.set_missing(missing);
+        if self.manager.console_open() {
+            let logs = self.runtime.logs().snapshot();
+            let from = logs.len().saturating_sub(300);
+            self.manager.set_logs(logs[from..].to_vec());
+        }
         let panel = self.manager.panel(&dev);
         // Only the plugin whose page is open has its panels drawn.
         rekindle_ui_hook::set_shown_plugin(self.manager.detail_of().map(String::from));
@@ -370,7 +378,7 @@ impl Rekindle {
                         .set_notice(format!("Couldn't open the file dialog: {e}")),
                 },
                 Effect::PickFile => {}
-                 Effect::Dev { id, on } => {
+                Effect::Dev { id, on } => {
                     let idx = self.sources.iter().position(|s| {
                         s.origin == Origin::Dev && s.id.as_deref() == Some(id.as_str())
                     });
@@ -381,6 +389,21 @@ impl Rekindle {
                     }
                 }
                 Effect::Download { id } => self.start_download(id),
+                Effect::Reload { id } => {
+                    let dev = self.sources.iter().position(|s| {
+                        s.origin == Origin::Dev && s.id.as_deref() == Some(id.as_str())
+                    });
+                    if let Some(idx) = dev {
+                        self.load_dev(idx);
+                    } else {
+                        let r = manager::sync(self.manager.home(), &mut self.runtime, &id, true);
+                        self.synced(&id, &r);
+                    }
+                }
+                Effect::Eval { command } => {
+                    let result = manager::console::run(&mut self.runtime, &command);
+                    self.manager.set_console_result(result);
+                }
                 Effect::CheckUpdates => match &self.updater {
                     Some(u) => {
                         u.check_now();

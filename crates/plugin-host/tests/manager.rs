@@ -567,3 +567,93 @@ fn walk(dir: &Path) -> Vec<PathBuf> {
     out.sort();
     out
 }
+
+#[test]
+fn the_developer_tab_reloads_shows_logs_and_runs_console_actions() {
+    use rekindle_plugin_host::model::{LogLevel, LogRecord};
+
+    let dir = scratch("developer-tab");
+    let home = Home::new(dir.join("home"));
+    let mut rt = runtime_for(&home);
+    rt.load(&midnight(), Trust::FirstParty).unwrap();
+    let mut m = Manager::new(home.clone());
+    let dev = [manager::DevPlugin {
+        id: id(),
+        name: "Midnight".into(),
+        path: "midnight.wasm".into(),
+        on: true,
+    }];
+    let lines = |m: &Manager| -> Vec<String> {
+        m.panel(&dev)
+            .elements
+            .iter()
+            .map(|e| format!("{e:?}"))
+            .collect()
+    };
+
+    // Without developer mode there is no Developer tab, and its controls
+    // do nothing.
+    assert!(!lines(&m).iter().any(|l| l.contains("Developer")));
+    assert!(click(&mut m, &format!("reload:{}", id())).is_empty());
+    assert!(click(&mut m, "console-run").is_empty());
+
+    home.set_developer_mode(true).unwrap();
+    tab(&mut m, 3);
+    assert!(m.console_open());
+    let shown = lines(&m);
+    assert!(
+        shown
+            .iter()
+            .any(|l| l.contains(&format!("reload:{}", id()))),
+        "{shown:?}"
+    );
+    assert!(shown.iter().any(|l| l.contains("console-input")));
+
+    // The log, filtered to one plugin.
+    let rec = |plugin: &str, message: &str| LogRecord {
+        plugin: plugin.into(),
+        level: LogLevel::Info,
+        message: message.into(),
+        at_ms: 0,
+    };
+    m.set_logs(vec![rec("a.one", "from one"), rec("b.two", "from two")]);
+    assert!(
+        lines(&m)
+            .iter()
+            .any(|l| l.contains("from one") && l.contains("from two"))
+    );
+    m.handle(&UiEvent {
+        surface: PANEL.into(),
+        element: "console-filter".into(),
+        value: UiValue::Selected(2),
+    });
+    let shown = lines(&m);
+    assert!(shown.iter().any(|l| l.contains("from two")));
+    assert!(!shown.iter().any(|l| l.contains("from one")), "{shown:?}");
+
+    assert_eq!(
+        click(&mut m, &format!("reload:{}", id())),
+        vec![Effect::Reload { id: id() }]
+    );
+
+    // The console runs what was typed, against the runtime.
+    type_text(&mut m, "console-input", r#"{"action":"plugins"}"#);
+    let fx = click(&mut m, "console-run");
+    let [Effect::Eval { command }] = fx.as_slice() else {
+        panic!("{fx:?}")
+    };
+    let out = manager::console::run(&mut rt, command);
+    assert!(out.contains(&id()) && out.contains("active"), "{out}");
+    m.set_console_result(out);
+    assert!(lines(&m).iter().any(|l| l.contains("active")));
+    assert!(manager::console::run(&mut rt, "not json").starts_with("error:"));
+    assert!(
+        manager::console::run(&mut rt, r#"{"action":"command","plugin":"x.y","id":"z"}"#)
+            .starts_with("error:")
+    );
+
+    // Developer mode off: the tab goes, and the grid falls back to Installed.
+    home.set_developer_mode(false).unwrap();
+    assert!(!m.console_open());
+    assert!(!lines(&m).iter().any(|l| l.contains("console-input")));
+}

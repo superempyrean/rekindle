@@ -18,6 +18,11 @@
 //!
 //! Only the user reaches this: plugins have no import that calls it, and
 //! the client routes only its own panel's interactions here.
+//!
+//! With developer mode on, a Developer tab adds a Reload button for each
+//! plugin, the plugins' log, and a [`console`].
+
+pub mod console;
 
 use std::path::Path;
 
@@ -26,7 +31,9 @@ use anyhow::{Context, Result, bail};
 use crate::capability::Trust;
 use crate::home::{DEVELOPER_MODE_WARNING, Home, InstallRecord, InstallState, Installed};
 use crate::manifest::{self, Manifest};
-use crate::model::{Card, CardAction, Element, Panel, Switch, UiEvent, UiValue};
+use crate::model::{
+    Card, CardAction, Element, LogLevel, LogRecord, Panel, Switch, UiEvent, UiValue,
+};
 use crate::review::{self, Screen};
 use crate::runtime::Runtime;
 use crate::signing::{self, Signature};
@@ -67,6 +74,12 @@ pub enum Effect {
     /// Download plugin `id` from the release channel ([`store::download`],
     /// off the UI thread) and pass the result to [`Manager::downloaded`].
     Download { id: String },
+    /// Reload plugin `id`: a dev plugin from its file, an installed one
+    /// from the installed file.
+    Reload { id: String },
+    /// Run a console action ([`console::run`]) against the client's runtime
+    /// and pass the result to [`Manager::set_console_result`].
+    Eval { command: String },
 }
 
 /// What [`sync`] did.
@@ -93,15 +106,21 @@ enum Tab {
     Installed,
     Rekindle,
     Community,
+    Developer,
     Settings,
 }
 
+/// The tabs everyone sees. The Developer tab goes before Settings while
+/// developer mode is on ([`Manager::tabs`]).
 const TABS: [(Tab, &str); 4] = [
     (Tab::Installed, "Installed"),
     (Tab::Rekindle, "rekindle"),
     (Tab::Community, "Community"),
     (Tab::Settings, "Settings"),
 ];
+
+/// How many log records the Developer tab shows.
+const CONSOLE_ROWS: usize = 200;
 
 enum View {
     /// The cards of the current tab.
@@ -131,6 +150,13 @@ pub struct Manager {
     /// Running plugins with features this client build can't show: (id,
     /// slots), from the runtime ([`Manager::set_missing`]).
     missing: Vec<(String, Vec<String>)>,
+    /// Recent plugin log records, oldest first ([`Manager::set_logs`]).
+    logs: Vec<LogRecord>,
+    /// The Developer tab: the plugin its log is filtered to, what is typed
+    /// in the console, and the last result.
+    console_filter: Option<String>,
+    console_input: String,
+    console_result: Option<String>,
 }
 
 /// What a slot is, as the user would say it.
@@ -183,6 +209,10 @@ impl Manager {
             typed: String::new(),
             reviews: Vec::new(),
             missing: Vec::new(),
+            logs: Vec::new(),
+            console_filter: None,
+            console_input: String::new(),
+            console_result: None,
         };
         m.refresh_reviews();
         m
@@ -214,6 +244,34 @@ impl Manager {
             .collect();
     }
 
+    /// The client's recent plugin log records, oldest first, for the
+    /// Developer tab.
+    pub fn set_logs(&mut self, logs: Vec<LogRecord>) {
+        self.logs = logs;
+    }
+
+    /// The result of an [`Effect::Eval`], shown under the console.
+    pub fn set_console_result(&mut self, result: impl Into<String>) {
+        self.console_result = Some(result.into());
+    }
+
+    /// Whether the Developer tab is showing, so the client can refresh it
+    /// as logs arrive.
+    pub fn console_open(&self) -> bool {
+        matches!(self.view, View::Grid)
+            && self.tab == Tab::Developer
+            && self.home.developer_mode().unwrap_or(false)
+    }
+
+    /// The tabs shown now.
+    fn tabs(&self) -> Vec<(Tab, &'static str)> {
+        let mut tabs = TABS.to_vec();
+        if self.home.developer_mode().unwrap_or(false) {
+            tabs.insert(3, (Tab::Developer, "Developer"));
+        }
+        tabs
+    }
+
     /// Show a line at the top of the panel (until the next interaction).
     pub fn set_notice(&mut self, notice: impl Into<String>) {
         self.notice = Some(notice.into());
@@ -227,16 +285,23 @@ impl Manager {
         }
         match &self.view {
             View::Grid => {
-                let selected = TABS.iter().position(|(t, _)| *t == self.tab).unwrap_or(0) as u32;
+                let tabs = self.tabs();
+                let tab = if tabs.iter().any(|(t, _)| *t == self.tab) {
+                    self.tab
+                } else {
+                    Tab::Installed
+                };
+                let selected = tabs.iter().position(|(t, _)| *t == tab).unwrap_or(0) as u32;
                 el.push(Element::Tabs {
                     id: "tab".into(),
-                    tabs: TABS.iter().map(|(_, name)| name.to_string()).collect(),
+                    tabs: tabs.iter().map(|(_, name)| name.to_string()).collect(),
                     selected,
                 });
-                match self.tab {
+                match tab {
                     Tab::Installed => self.installed(dev, &mut el),
                     Tab::Rekindle => self.rekindle(&mut el),
                     Tab::Community => self.community(&mut el),
+                    Tab::Developer => self.developer(dev, &mut el),
                     Tab::Settings => self.settings(&mut el),
                 }
             }
@@ -301,6 +366,19 @@ impl Manager {
         {
             self.typed.clone_from(t);
             return Vec::new();
+        }
+        match (ev.element.as_str(), &ev.value) {
+            ("console-input", UiValue::Text(t)) => {
+                self.console_input.clone_from(t);
+                return Vec::new();
+            }
+            ("console-filter", UiValue::Selected(i)) => {
+                self.console_filter = i
+                    .checked_sub(1)
+                    .and_then(|i| self.log_plugins().into_iter().nth(i as usize));
+                return Vec::new();
+            }
+            _ => {}
         }
         self.notice = None;
         match self.act(&ev.element, &ev.value) {
@@ -674,13 +752,115 @@ impl Manager {
         }
     }
 
+    /// The Developer tab: a Reload button per plugin, the plugins' log, and
+    /// the console.
+    fn developer(&self, dev: &[DevPlugin], el: &mut Vec<Element>) {
+        el.push(Element::Heading {
+            text: "Reload".into(),
+        });
+        let installed = self.home.installed().unwrap_or_default();
+        let plugins: Vec<(String, String)> = dev
+            .iter()
+            .map(|d| (d.id.clone(), d.name.clone()))
+            .chain(installed.iter().map(|i| (i.id.clone(), name_of(i))))
+            .collect();
+        if plugins.is_empty() {
+            el.push(text("No plugins are loaded."));
+        }
+        for (id, name) in plugins {
+            el.push(button(
+                format!("reload:{id}"),
+                format!("Reload {name}"),
+                false,
+            ));
+        }
+        el.push(Element::Separator);
+
+        el.push(Element::Heading { text: "Log".into() });
+        let ids = self.log_plugins();
+        let selected = self
+            .console_filter
+            .as_ref()
+            .and_then(|f| ids.iter().position(|i| i == f))
+            .map_or(0, |p| p as u32 + 1);
+        let mut options = vec!["All plugins".to_string()];
+        options.extend(ids);
+        el.push(Element::Select {
+            id: "console-filter".into(),
+            label: "Show".into(),
+            options,
+            selected,
+        });
+        let rows = self
+            .logs
+            .iter()
+            .rev()
+            .filter(|r| self.console_filter.as_deref().is_none_or(|f| r.plugin == f))
+            .take(CONSOLE_ROWS)
+            .map(|r| {
+                vec![
+                    level_label(r.level).into(),
+                    r.plugin.clone(),
+                    r.message.clone(),
+                ]
+            })
+            .collect();
+        el.push(Element::Table {
+            id: "console-log".into(),
+            label: String::new(),
+            columns: vec!["level".into(), "plugin".into(), "message".into()],
+            rows,
+        });
+        el.push(button("console-clear", "Clear", false));
+        el.push(Element::Separator);
+
+        el.push(Element::Heading {
+            text: "Console".into(),
+        });
+        el.push(text(console::HELP));
+        el.push(Element::TextInput {
+            id: "console-input".into(),
+            label: "Action".into(),
+            value: self.console_input.clone(),
+            placeholder: r#"{"action":"plugins"}"#.into(),
+            multiline: true,
+        });
+        el.push(button("console-run", "Run", false));
+        if let Some(r) = &self.console_result {
+            el.push(Element::Text { text: r.clone() });
+        }
+    }
+
+    /// The console's Run and Clear buttons.
+    fn console_control(&mut self, element: &str) -> Result<Vec<Effect>> {
+        if !self.home.developer_mode()? {
+            bail!("the console needs developer mode");
+        }
+        if element == "console-clear" {
+            self.logs.clear();
+            self.console_result = None;
+            return Ok(Vec::new());
+        }
+        Ok(vec![Effect::Eval {
+            command: self.console_input.clone(),
+        }])
+    }
+
+    /// The plugins in the log, sorted.
+    fn log_plugins(&self) -> Vec<String> {
+        let mut ids: Vec<String> = self.logs.iter().map(|r| r.plugin.clone()).collect();
+        ids.sort();
+        ids.dedup();
+        ids
+    }
+
     // ---- interactions ----
 
     fn act(&mut self, element: &str, value: &UiValue) -> Result<Vec<Effect>> {
         let on = matches!(value, UiValue::Toggled(true));
         if let ("tab", UiValue::Selected(i)) = (element, value) {
-            let (tab, _) = TABS.get(*i as usize).context("no such tab")?;
-            self.tab = *tab;
+            let (tab, _) = *self.tabs().get(*i as usize).context("no such tab")?;
+            self.tab = tab;
             self.view = View::Grid;
             return Ok(Vec::new());
         }
@@ -690,6 +870,7 @@ impl Manager {
         }
         match element {
             "install" => Ok(vec![Effect::PickFile]),
+            "console-run" | "console-clear" => self.console_control(element),
             "back" => {
                 self.view = View::Grid;
                 Ok(Vec::new())
@@ -789,6 +970,12 @@ impl Manager {
                 };
                 self.home.set_enabled(id, on)?;
                 Ok(sync_one(id, false))
+            }
+            "reload" => {
+                if !self.home.developer_mode()? {
+                    bail!("reloading needs developer mode");
+                }
+                Ok(vec![Effect::Reload { id: id.into() }])
             }
             "dev" => dev(on),
             "dev-on" => dev(true),
@@ -985,6 +1172,16 @@ fn missing_line(slots: &[String], name: &str) -> String {
         "This version of Discord has no {}, so {name} runs without them.",
         review::and_list(&features)
     )
+}
+
+fn level_label(level: LogLevel) -> &'static str {
+    match level {
+        LogLevel::Error => "error",
+        LogLevel::Warn => "warn",
+        LogLevel::Info => "info",
+        LogLevel::Debug => "debug",
+        LogLevel::Trace => "trace",
+    }
 }
 
 fn name_of(inst: &Installed) -> String {
