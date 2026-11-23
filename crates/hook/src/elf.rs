@@ -9,7 +9,9 @@ use anyhow::{Context, Result};
 use object::elf::{
     R_AARCH64_GLOB_DAT, R_AARCH64_JUMP_SLOT, R_X86_64_GLOB_DAT, R_X86_64_JUMP_SLOT, RelocationType,
 };
-use object::{Object, ObjectSymbol, ObjectSymbolTable, RelocationFlags, RelocationTarget};
+use object::{
+    Object, ObjectSegment, ObjectSymbol, ObjectSymbolTable, RelocationFlags, RelocationTarget,
+};
 
 /// The GOT slots the dynamic linker fills with the address of the imported
 /// `symbol`: its `JUMP_SLOT` (the PLT's) and `GLOB_DAT` (an address taken)
@@ -64,6 +66,24 @@ pub fn slot_address(load_bias: usize, vaddr: u64) -> Option<usize> {
     load_bias.checked_add(usize::try_from(vaddr).ok()?)
 }
 
+/// The virtual address (`p_vaddr`) the byte at file `offset` is loaded at,
+/// from the ELF's program headers: the `PT_LOAD` segment whose file range
+/// holds the offset decides it. `None` if no loaded segment covers the
+/// offset, or the image doesn't parse. The anchor sets give file offsets;
+/// an image whose segments sit at their file offsets (as Android's host
+/// does) maps each to the same number, but this reads the headers rather
+/// than assume it.
+pub fn offset_to_vaddr(image: &[u8], offset: u64) -> Option<u64> {
+    let obj = object::File::parse(image).ok()?;
+    for seg in obj.segments() {
+        let (start, len) = seg.file_range();
+        if offset >= start && offset < start + len {
+            return (seg.address()).checked_add(offset - start);
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -80,6 +100,19 @@ mod tests {
     #[test]
     fn a_non_elf_image_is_an_error() {
         assert!(got_slots(b"MZ not an elf", "malloc").is_err());
+    }
+
+    /// On Linux a section's file offset maps to its own virtual address.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_file_offset_maps_to_the_vaddr_of_its_segment() {
+        use object::ObjectSection;
+        let exe = std::fs::read(std::env::current_exe().unwrap()).unwrap();
+        let obj = object::File::parse(&*exe).unwrap();
+        let text = obj.section_by_name(".text").unwrap();
+        let (off, _) = text.file_range().unwrap();
+        assert_eq!(offset_to_vaddr(&exe, off), Some(text.address()));
+        assert_eq!(offset_to_vaddr(b"MZ not an elf", 0), None);
     }
 
     /// The test's own executable on Linux imports libc's `malloc` through
