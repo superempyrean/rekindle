@@ -85,6 +85,43 @@ pub enum Locator {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         align: Option<u64>,
     },
+    /// An entry of a table of `{name ptr, name len, value}` records: the
+    /// entry whose name is `key`. Dispatch tables keyed by name (a handler
+    /// per event or command) keep this shape across builds, while the
+    /// handlers themselves change. `stride` is the entry's size in bytes,
+    /// `field` the value's offset in it; the name pointer and its length
+    /// are the first two words. Resolves to where the pointer at `field`
+    /// points (a handler's entry), or, with `slot`, to the slot itself
+    /// (data, not code): swapping the pointer there hooks every lookup that
+    /// goes through the table. An entry counts only when the entry before
+    /// or after it, `stride` bytes away, also holds a name pointer and a
+    /// plausible length, and, unless `code` is false, when its value points
+    /// into an executable section: a binary often has several tables
+    /// naming the same key, and only one of them holds functions. 64-bit
+    /// images only.
+    TableEntry {
+        key: String,
+        #[serde(default = "default_stride")]
+        stride: u64,
+        #[serde(default = "default_field")]
+        field: u64,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        slot: bool,
+        #[serde(default = "default_code", skip_serializing_if = "Clone::clone")]
+        code: bool,
+    },
+}
+
+fn default_code() -> bool {
+    true
+}
+
+fn default_stride() -> u64 {
+    24
+}
+
+fn default_field() -> u64 {
+    16
 }
 
 impl Locator {
@@ -117,6 +154,12 @@ impl Locator {
             Locator::VtableSlot {
                 function, method, ..
             } => format!("vtable slot of `{function}` as method #{method}"),
+            Locator::TableEntry {
+                key, field, slot, ..
+            } => {
+                let what = if *slot { "slot" } else { "pointer" };
+                format!("table entry {:?} {what} at +{field}", truncate(key, 40))
+            }
         }
     }
 }
@@ -278,6 +321,40 @@ mod tests {
             serde_json::from_value(serde_json::json!({ "kind": "export", "name": "ld_event" }))
                 .unwrap();
         assert_eq!(export.label(), "export `ld_event`");
+    }
+
+    #[test]
+    fn table_entries_default_to_three_word_records() {
+        let bare: Locator = serde_json::from_value(
+            serde_json::json!({ "kind": "table-entry", "key": "EVENT_CREATE" }),
+        )
+        .unwrap();
+        assert_eq!(
+            bare,
+            Locator::TableEntry {
+                key: "EVENT_CREATE".into(),
+                stride: 24,
+                field: 16,
+                slot: false,
+                code: true,
+            }
+        );
+        assert_eq!(bare.label(), "table entry \"EVENT_CREATE\" pointer at +16");
+        let slot = Locator::TableEntry {
+            key: "k".into(),
+            stride: 32,
+            field: 24,
+            slot: true,
+            code: false,
+        };
+        let j = serde_json::to_value(&slot).unwrap();
+        assert_eq!(
+            j,
+            serde_json::json!({
+                "kind": "table-entry", "key": "k", "stride": 32, "field": 24, "slot": true, "code": false
+            })
+        );
+        assert_eq!(serde_json::from_value::<Locator>(j).unwrap(), slot);
     }
 
     #[test]

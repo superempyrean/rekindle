@@ -26,6 +26,9 @@ the anchor is eroding.
 | `callee` | the `nth` distinct function another anchor's function calls directly (PE x64) | the callee changing shape, as long as the caller still calls it |
 | `caller` | the functions that directly call another anchor's function (PE x64) | the caller changing shape, as long as it still makes the call |
 | `shape` | a run of instructions by mnemonic and operand kind, with registers as variables and no displacements; resolves to its `at`th instruction (PE x64) | register allocation, stack layout and field offsets changing, as long as the instructions stay in order |
+| `export` | an ELF dynamic symbol's definition | stripping, since other libraries link against exports by name |
+| `vtable-slot` | the slot of a trait object's vtable that holds another anchor's function as its `method`th method | the vtable moving, as long as the method stays in it |
+| `table-entry` | the `{name ptr, name len, value}` entry whose name is `key`, in a table of such entries; resolves to where the value points, or with `slot` to the value's slot (64-bit images) | the table and its handlers moving, as long as the entry keeps its name |
 
 A `shape` is written like `cmp d[r0+*],0; je *; movd x0,d[r0+*]`. Each
 write to a register starts a new variable, so one build reusing a dead
@@ -34,6 +37,25 @@ register and another taking a free one still match. The syntax is in
 two shapes, one with the context after it and one with the context before
 it, and `suggest-shape` builds one that is unique in the whole binary, as a
 structural locator for a function anchor.
+
+A `table-entry` reads a dispatch table keyed by name, the usual way a
+client maps event or command names to handlers:
+
+```json
+{ "kind": "table-entry", "key": "EVENT_NAME", "stride": 24, "field": 16, "slot": true }
+```
+
+`stride` is the entry's size in bytes and `field` the value's offset in
+it; those are the defaults, for a `&str` followed by one pointer. The
+pointers are read through the image's relocations (ELF relative
+relocations, plain or Android-packed, or a PE's absolute words). An entry
+counts only when the entry before or after it, `stride` bytes away, also
+holds a name pointer and a plausible length, and when its value points
+into code. A binary often holds the same name in several tables, and
+usually only one of them holds functions. Set `"code": false` for a table
+of data pointers. With `slot`, the anchor names the slot, not the
+handler: writing a new pointer there replaces the handler for every
+lookup through the table, without patching code.
 
 Call-graph locators name another anchor (`from` / `of`) and resolve after it,
 wherever it sits in the set (as with `within`). If it never resolves, they

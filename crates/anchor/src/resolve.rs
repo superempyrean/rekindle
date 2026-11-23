@@ -312,6 +312,13 @@ pub(crate) fn resolve_locator(
             .get(function)
             .map(|&off| index.vtable_slots(off, *method, *size, *align))
             .unwrap_or_default(),
+        Locator::TableEntry {
+            key,
+            stride,
+            field,
+            slot,
+            code,
+        } => index.table_entries(key, *stride, *field, *slot, *code),
     };
     index.status_from(hits)
 }
@@ -471,7 +478,7 @@ pub(crate) fn resolve_anchor(
 mod tests {
     use super::*;
     use crate::descriptor::Operand;
-    use crate::fixtures::{set, tiny_pe};
+    use crate::fixtures::{set, tiny_elf_table, tiny_pe};
 
     #[test]
     fn any_of_resolves_interchangeable_hits_to_the_first() {
@@ -764,5 +771,124 @@ mod tests {
                 offsets: vec![entry(0x00), entry(0x30)]
             }
         );
+    }
+
+    fn table_entry(key: &str, slot: bool) -> Locator {
+        Locator::TableEntry {
+            key: key.into(),
+            stride: 24,
+            field: 16,
+            slot,
+            code: true,
+        }
+    }
+
+    #[test]
+    fn table_entries_resolve_to_the_handler_or_its_slot() {
+        let bin = tiny_elf_table(&["EVENT_CREATE", "EVENT_UPDATE", "TYPING_START"]);
+        let index = BinaryIndex::new(&bin);
+        let none = HashMap::new();
+        // The handler of entry 1 is the `ret` at 0x110; its slot is 16 bytes
+        // into the entry at 0x318.
+        assert_eq!(
+            resolve_locator(&table_entry("EVENT_UPDATE", false), &index, None, &none),
+            index.status_from(vec![0x110])
+        );
+        assert_eq!(
+            resolve_locator(&table_entry("EVENT_UPDATE", true), &index, None, &none),
+            index.status_from(vec![0x328])
+        );
+        // The first and last entries have one neighbour each.
+        assert_eq!(
+            resolve_locator(&table_entry("EVENT_CREATE", false), &index, None, &none),
+            index.status_from(vec![0x100])
+        );
+        assert_eq!(
+            resolve_locator(&table_entry("TYPING_START", false), &index, None, &none),
+            index.status_from(vec![0x120])
+        );
+        // A prefix of a name isn't its key: the length differs.
+        assert_eq!(
+            resolve_locator(&table_entry("EVENT", false), &index, None, &none),
+            Status::Missing
+        );
+        // A wrong stride finds no neighbour.
+        let wide = Locator::TableEntry {
+            key: "EVENT_UPDATE".into(),
+            stride: 32,
+            field: 16,
+            slot: false,
+            code: true,
+        };
+        assert_eq!(resolve_locator(&wide, &index, None, &none), Status::Missing);
+    }
+
+    #[test]
+    fn a_lone_name_and_pointer_is_not_a_table() {
+        let bin = tiny_elf_table(&["EVENT_CREATE"]);
+        let index = BinaryIndex::new(&bin);
+        assert_eq!(
+            resolve_locator(
+                &table_entry("EVENT_CREATE", false),
+                &index,
+                None,
+                &HashMap::new()
+            ),
+            Status::Missing
+        );
+    }
+
+    #[test]
+    fn a_table_entry_anchor_resolves_in_a_set() {
+        let bin = tiny_elf_table(&["EVENT_CREATE", "EVENT_UPDATE"]);
+        let set = AnchorSet {
+            target: String::new(),
+            anchors: vec![Anchor {
+                name: "on-update".into(),
+                locators: vec![table_entry("EVENT_UPDATE", true)],
+                ..Anchor::default()
+            }],
+        };
+        let r = set.resolve(&bin);
+        assert_eq!(r.anchors[0].verdict, Verdict::Resolved);
+        assert_eq!(r.anchors[0].offset(), Some(0x328));
+    }
+
+    /// Resolves a table entry in a real 64-bit ELF: the file named by
+    /// `REKINDLE_TABLE_ELF`, the key by `REKINDLE_TABLE_KEY`. Skips when
+    /// either is unset or the file is absent.
+    #[test]
+    #[ignore = "needs a real binary: REKINDLE_TABLE_ELF and REKINDLE_TABLE_KEY"]
+    fn table_entries_resolve_in_a_real_elf() {
+        let (Ok(path), Ok(key)) = (
+            std::env::var("REKINDLE_TABLE_ELF"),
+            std::env::var("REKINDLE_TABLE_KEY"),
+        ) else {
+            eprintln!("skipped: REKINDLE_TABLE_ELF or REKINDLE_TABLE_KEY unset");
+            return;
+        };
+        let Ok(bin) = std::fs::read(&path) else {
+            eprintln!("skipped: {path} is absent");
+            return;
+        };
+        let index = BinaryIndex::new(&bin);
+        let none = HashMap::new();
+        let Status::Unique {
+            offset: handler, ..
+        } = resolve_locator(&table_entry(&key, false), &index, None, &none)
+        else {
+            panic!("{key}'s entry doesn't resolve uniquely");
+        };
+        let Status::Unique { offset: slot, .. } =
+            resolve_locator(&table_entry(&key, true), &index, None, &none)
+        else {
+            panic!("{key}'s slot doesn't resolve uniquely");
+        };
+        // The slot holds the handler, and the handler is in code.
+        let slot_va = index.va_of(slot).unwrap();
+        let handler_va = index.va_of(handler).unwrap();
+        assert_eq!(index.pointer_at(slot_va), Some(handler_va));
+        assert!(index.exec.iter().any(|&(s, e)| (s..e).contains(&handler)));
+        eprintln!("{key}: handler at file offset {handler:#x}, slot at {slot:#x}");
     }
 }

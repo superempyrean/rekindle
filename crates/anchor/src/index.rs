@@ -140,9 +140,77 @@ impl<'a> BinaryIndex<'a> {
         Some(u64::from_le_bytes(b.try_into().ok()?))
     }
 
+    /// Whether `entry` holds a name pointer and a length (1 to 256) that
+    /// reads as UTF-8 text.
+    fn name_entry(&self, entry: u64) -> Option<(u64, u64)> {
+        let name = self.pointer_at(entry)?;
+        let len = self.word_at(entry + 8)?;
+        let off = self.offset_of_va(name)?;
+        let text = self
+            .bytes
+            .get(off..off.checked_add(usize::try_from(len).ok()?)?)?;
+        ((1..=256).contains(&len) && std::str::from_utf8(text).is_ok()).then_some((name, len))
+    }
+
+    /// File offsets for a [`Locator::TableEntry`](crate::descriptor::Locator):
+    /// each `{name ptr, name len, value}` entry naming `key` whose neighbour
+    /// `stride` bytes before or after is an entry too, and, with `code`,
+    /// whose value points into an executable section. With `slot`, the
+    /// offset of the value's slot; otherwise the offset of what it points
+    /// at.
+    pub(crate) fn table_entries(
+        &self,
+        key: &str,
+        stride: u64,
+        field: u64,
+        slot: bool,
+        code: bool,
+    ) -> Vec<usize> {
+        if key.is_empty() || stride < 24 || field < 16 || field + 8 > stride {
+            return Vec::new();
+        }
+        let len = key.len() as u64;
+        let mut out = Vec::new();
+        for off in find_all(self.bytes, key.as_bytes()) {
+            let Some(name) = self.va_of(off) else {
+                continue;
+            };
+            for entry in self.pointers_to(name) {
+                if self.word_at(entry + 8) != Some(len) {
+                    continue;
+                }
+                let neighbour = entry
+                    .checked_sub(stride)
+                    .is_some_and(|before| self.name_entry(before).is_some())
+                    || self.name_entry(entry + stride).is_some();
+                if !neighbour {
+                    continue;
+                }
+                let Some(target) = self
+                    .pointer_at(entry + field)
+                    .and_then(|va| self.offset_of_va(va))
+                else {
+                    continue;
+                };
+                if code && !self.exec.iter().any(|&(s, e)| (s..e).contains(&target)) {
+                    continue;
+                }
+                let place = if slot {
+                    self.offset_of_va(entry + field)
+                } else {
+                    Some(target)
+                };
+                out.extend(place);
+            }
+        }
+        out.sort_unstable();
+        out.dedup();
+        out
+    }
+
     /// The pointer at `va` once loaded at the image's base: a relative
     /// relocation's addend on ELF, the word itself on PE.
-    fn pointer_at(&self, va: u64) -> Option<u64> {
+    pub(crate) fn pointer_at(&self, va: u64) -> Option<u64> {
         if let Some(&p) = self.relative.get(&va) {
             return Some(p);
         }
