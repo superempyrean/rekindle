@@ -61,6 +61,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use rekindle_wire::a11y::ids as a11y;
 use rekindle_wire::event::{self, Event, UiEvent};
 use rekindle_wire::frame::{self, Frame};
+use rekindle_wire::motion::ids::WORKLET;
+use rekindle_wire::motion::worklet::{PressLook, Worklet};
 use rekindle_wire::turn::{ON, create_props};
 use rekindle_wire::{DecodeError, NodeId, NodeOp, PropId, Tree, Turn, Value};
 
@@ -745,28 +747,44 @@ impl Engine {
             if self.mirror.node(n.id).is_none() {
                 continue;
             }
-            let cells: Vec<(PropId, Value)> = COLOR_PROPS
+            let mut cells: Vec<(PropId, Value)> = COLOR_PROPS
                 .iter()
                 .filter(|p| !ruled.contains(&(n.id, **p)))
                 .filter_map(|p| {
                     let c = self.guest.props().get(n.id, *p)?.as_color()?;
                     to.get(&(c & 0x00ff_ffff))
-                        .map(|t| (*p, recolored(c >> 24, *t)))
+                        .map(|t| (*p, Value::color(recolored(c >> 24, *t))))
                 })
                 .collect();
+            if !ruled.contains(&(n.id, WORKLET))
+                && let Some(w) = self.recolored_worklet(n.id, &to)
+            {
+                cells.push((WORKLET, w));
+            }
             if !cells.is_empty() {
                 writes.push((n.id, cells));
             }
         }
         writes
     }
+
+    /// The node's `worklet` cell with the recolours applied to its colours,
+    /// if it is a `press_look` and one of them changed. The worklet paints
+    /// a button's fill each frame from its own colours, over the
+    /// `background` cell.
+    fn recolored_worklet(&self, node: NodeId, to: &BTreeMap<u32, u32>) -> Option<Value> {
+        let cell = self.guest.props().get(node, WORKLET)?;
+        let mut look = PressLook::from_worklet(&Worklet::from_value(cell)?)?;
+        look.recolor(|c| to.get(&(c & 0x00ff_ffff)).map(|t| recolored(c >> 24, *t)))
+            .then(|| look.to_worklet().to_value())
+    }
 }
 
 /// `to` (`0xRRGGBBAA`) with its alpha multiplied by `alpha` (0 to 255), as
 /// the wire's `0xAARRGGBB`.
-fn recolored(alpha: u32, to: u32) -> Value {
+fn recolored(alpha: u32, to: u32) -> u32 {
     let a = ((to & 0xff) * alpha + 127) / 255;
-    Value::color((a << 24) | (to >> 8))
+    (a << 24) | (to >> 8)
 }
 
 /// A [`RowAction::Replace`], with the nodes it applies to this turn.

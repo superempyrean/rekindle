@@ -1170,3 +1170,62 @@ fn a_guests_child_edits_are_read_as_its_list() {
     );
     assert_eq!(e.guest().node(FEED).unwrap().children, new);
 }
+
+/// The `worklet` (733) cell of the Register button on the real guest's
+/// welcome screen, led by its `PropId`: a `press_look` whose fill goes from
+/// white to `0xffc2c2c7` when pressed.
+const REGISTER_WORKLET: &str = concat!(
+    "dd02073500000003cca19f3b0309000000030a000000030b000000030f0000700300000041030000803f030100000003",
+    "0000803f0300009643030000d8410301000000030ad7233c030000004003000000000300000000030000000003000000",
+    "00030000000003000000000301000000030800000004ffffffff0000000004c7c2c2ff000000000300000000030000c0",
+    "7f030000c07f0302000000030000803f030000c84203000020410300000000030ad7233c030000004003000000000300",
+    "00000003000000000300000000030000000003000000000300000000030000803f030000c84203000020410300000000",
+    "030ad7233c0300000040030000000003000000000300000000030000000003000000000300000000",
+);
+
+#[test]
+fn a_recolour_reaches_a_buttons_press_look() {
+    use rekindle_wire::motion::ids::WORKLET;
+    use rekindle_wire::motion::worklet::{PressLook, Worklet};
+    let bytes: Vec<u8> = (0..REGISTER_WORKLET.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&REGISTER_WORKLET[i..i + 2], 16).unwrap())
+        .collect();
+    let cell = rekindle_wire::decode(&bytes[2..]).unwrap();
+    let work = Work {
+        recolors: vec![Recolor {
+            from: 0xff_ffff,
+            to: 0x1e1f_22ff,
+        }],
+        ..Work::default()
+    };
+    let (mut e, mut host) = engine(work);
+    let mut t = first();
+    t.push(NodeOp::Update {
+        node: HEAD,
+        props: vec![
+            (ids::BACKGROUND, rgba(0xffff_ffff)),
+            (WORKLET, cell.clone()),
+        ],
+    });
+    send(&mut e, &mut host, &t);
+    assert_eq!(
+        host.props().get(HEAD, ids::BACKGROUND),
+        Some(&rgba(0x1e1f_22ff))
+    );
+    let look = |v: &Value| PressLook::from_worklet(&Worklet::from_value(v).unwrap()).unwrap();
+    let written = host.props().get(HEAD, WORKLET).unwrap();
+    // The rest colour follows the recolour, the pressed one isn't named.
+    assert_eq!(look(written).looks[0].rest, 0xff1e_1f22);
+    assert_eq!(look(written).looks[0].pressed, 0xffc2_c2c7);
+    // Only that word of the guest's cell changed.
+    let (a, b) = (
+        Worklet::from_value(&cell).unwrap().to_words(),
+        Worklet::from_value(written).unwrap().to_words(),
+    );
+    assert_eq!(a.len(), b.len());
+    assert_eq!(
+        (0..a.len()).filter(|&i| a[i] != b[i]).collect::<Vec<_>>(),
+        [22]
+    );
+}
