@@ -84,9 +84,59 @@ pub fn offset_to_vaddr(image: &[u8], offset: u64) -> Option<u64> {
     None
 }
 
+/// The GNU build ID (`NT_GNU_BUILD_ID`) in `notes`, the bytes of a
+/// `PT_NOTE` segment. `None` if the segment holds no build ID.
+///
+/// The linker hashes the image into it, so two images with the same ID are
+/// the same build. A patch the dynamic linker never sees (code rewritten in
+/// place) keeps the ID.
+pub fn gnu_build_id(notes: &[u8]) -> Option<&[u8]> {
+    const NT_GNU_BUILD_ID: u32 = 3;
+    let word = |at: usize| -> Option<u32> {
+        Some(u32::from_le_bytes(notes.get(at..at + 4)?.try_into().ok()?))
+    };
+    let pad = |n: usize| n.checked_add(3).map(|n| n & !3);
+    let mut at = 0;
+    while at + 12 <= notes.len() {
+        let (namesz, descsz, kind) = (word(at)? as usize, word(at + 4)? as usize, word(at + 8)?);
+        let name = at + 12;
+        let desc = name.checked_add(pad(namesz)?)?;
+        let end = desc.checked_add(pad(descsz)?)?;
+        if kind == NT_GNU_BUILD_ID && notes.get(name..name + namesz)? == b"GNU\0" {
+            return notes.get(desc..desc + descsz);
+        }
+        at = end;
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn note(name: &[u8], kind: u32, desc: &[u8]) -> Vec<u8> {
+        let mut n = Vec::new();
+        n.extend_from_slice(&(name.len() as u32).to_le_bytes());
+        n.extend_from_slice(&(desc.len() as u32).to_le_bytes());
+        n.extend_from_slice(&kind.to_le_bytes());
+        for part in [name, desc] {
+            n.extend_from_slice(part);
+            n.resize(n.len().next_multiple_of(4), 0);
+        }
+        n
+    }
+
+    #[test]
+    fn the_build_id_is_read_past_other_notes() {
+        let id = [0x9c, 0x88, 0xd1, 0x2e, 0xbb, 0x61, 0x90];
+        let mut notes = note(b"Android\0", 1, &[0x18, 0, 0, 0, b'r', b'2']);
+        notes.extend(note(b"GNU\0", 3, &id));
+        assert_eq!(gnu_build_id(&notes), Some(&id[..]));
+        // A note of another owner with the same type is not a build ID.
+        assert_eq!(gnu_build_id(&note(b"Go\0\0", 3, &id)), None);
+        assert_eq!(gnu_build_id(&notes[..notes.len() - 4]), None);
+        assert_eq!(gnu_build_id(&[]), None);
+    }
 
     #[test]
     fn slot_addresses_add_the_load_bias() {
