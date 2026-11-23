@@ -39,6 +39,9 @@ allow.
 | The spring's closed form, its settle rules and the 64 ms cap on a frame, matched frame by frame to the engine under emulation | recovered | `motion::spring` |
 | The `worklet` cell: a worklet id, then its arguments, sent to the engine as op 3. The `press_look` worklet on the real guest's buttons, with its colours | recovered | `motion::worklet` |
 | Which ops a `Spec` is (one op 24 an entry, with words of rekindle's), when a timed transition settles, and the frame word stream's layout | modelled | `motion::Spec`, `motion::Curve`, `motion::FrameOut` |
+| `spans` and `valueSpans`: arrays of pieces, each an object with a string `text` and style keys (`color`, `weight`, `font`, `bold`, `italic`, `underline`, `strike`, `code`, `bg`, `link`, `image` and the rest, with the types the Android platform reads them as), whose texts concatenate to the text shown | recovered | `text::Span` |
+| An input's `forceValue` (`seq`, `text`, `start`, `end`, optional `eventCount`), applied once per `seq`, and `value` ignored while a `changeText` is unanswered | recovered | `text::ForceValue` |
+| Which of tags 8 and 10 the guest writes for a span piece | modelled (tag 8) | `text::Span::to_value` |
 | The filter verdicts (pass, replace, consume) | rekindle's own | `event::FILTER_PASS` and the rest |
 | The capture format | rekindle's own | `capture` |
 
@@ -48,6 +51,12 @@ it.
 The PropId table is compiled in from `propid-names.tsv`. PropIds are
 appended in alphabetical batches and never renumbered, so a newer build's
 table extends this one, and an id past 854 still decodes with no name.
+
+UI ops must not be sent from the Android main thread. The platform's
+calls that need the main thread post to it and block the calling thread
+until it runs, and the guest can hold its UI lock while it waits on such a
+call, so a main-thread sender would wait on a lock whose holder waits on
+it.
 
 The crate is pure std. Nothing in it is behind a cargo feature: the parts
 only a mock client uses (`motion::Motion::frame`, `a11y::semantics`) cost

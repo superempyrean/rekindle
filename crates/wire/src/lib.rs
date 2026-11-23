@@ -33,7 +33,9 @@
 //! animates a view's channels per frame from the spec its `viewMotion`
 //! cell declares. Accessibility travels in the same store: [`a11y`] has the
 //! recovered accessibility `PropIds` and role vocabulary, and builds the
-//! semantic tree a platform would build from a tree's cells.
+//! semantic tree a platform would build from a tree's cells. [`text`] reads
+//! and writes the styled pieces of `spans` and `valueSpans`, and an input's
+//! `forceValue`.
 
 pub mod a11y;
 pub mod capture;
@@ -43,6 +45,7 @@ pub mod frame;
 pub mod motion;
 mod prop_id;
 mod props;
+pub mod text;
 mod tree;
 pub mod turn;
 mod value;
