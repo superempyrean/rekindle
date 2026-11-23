@@ -2869,6 +2869,7 @@ dependencies = [
  "anyhow",
  "iced-x86",
  "libc",
+ "object",
  "sha2",
 ]
 

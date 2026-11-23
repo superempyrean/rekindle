@@ -78,4 +78,10 @@ mod unsupported {
             match *self {}
         }
     }
+
+    impl Drop for Installed {
+        fn drop(&mut self) {
+            match *self {}
+        }
+    }
 }

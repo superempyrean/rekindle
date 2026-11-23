@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "Hook a client from inside its process: an attach gate by fingerprint, and reversible x64 inline detours."
+description = "Hook a client from inside its process: an attach gate by fingerprint, reversible x64 inline detours, and reversible vtable and GOT slot swaps."
 
 [lib]
 name = "rekindle_hook"
@@ -14,8 +14,10 @@ path = "src/lib.rs"
 anyhow = { workspace = true }
 sha2 = { workspace = true }
 iced-x86 = { workspace = true }
+# Finding GOT slots in an ELF image.
+object = { workspace = true }
 
-[target.'cfg(target_os = "linux")'.dependencies]
+[target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
 libc = "0.2"
 
 [lints]
