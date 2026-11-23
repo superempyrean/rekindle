@@ -140,7 +140,8 @@ impl Runtime {
         s
     }
 
-    /// The plugin's generated settings page.
+    /// The plugin's generated settings page. A `secret` setting with a value
+    /// shows as [`crate::settings::SECRET_MASK`].
     pub fn settings_page(&self, plugin: &str) -> Option<SettingsPage> {
         let s = self.settings.get(plugin)?.lock().unwrap();
         let entries = s
@@ -148,7 +149,7 @@ impl Runtime {
             .iter()
             .map(|spec| SettingEntry {
                 spec: spec.clone(),
-                value: s.get(&spec.key).expect("declared"),
+                value: s.shown(&spec.key).expect("declared"),
                 visible: s.visible(&spec.key),
                 enabled: s.enabled(&spec.key),
             })

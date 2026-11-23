@@ -33,6 +33,11 @@ const MAX_TEXT: usize = 4096;
 const MAX_ITEMS: usize = 500;
 const MAX_COLUMNS: usize = 8;
 
+/// What the settings page shows for a `secret` setting that has a value.
+/// Writing it back leaves the value as it is, so a page that sends the
+/// field unchanged doesn't overwrite the secret.
+pub const SECRET_MASK: &str = "\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum SettingKind {
@@ -41,6 +46,9 @@ pub enum SettingKind {
     Slider,
     Number,
     Text,
+    /// Text the settings page masks: an API key, a token. The plugin reads
+    /// it in full. It can't have a default.
+    Secret,
     Color,
     Keybind,
     StringList,
@@ -194,6 +202,12 @@ pub(crate) fn validate_schema(specs: &[SettingSpec]) -> Result<()> {
             SettingKind::Slider if s.min.is_none() || s.max.is_none() => {
                 bail!("slider setting `{}` needs min and max", s.key)
             }
+            SettingKind::Secret if s.default.is_some() => {
+                bail!("secret setting `{}` can't have a default", s.key)
+            }
+            SettingKind::Secret if s.multiline => {
+                bail!("secret setting `{}` can't be multiline", s.key)
+            }
             _ => {}
         }
         if let (Some(lo), Some(hi)) = (s.min, s.max)
@@ -233,7 +247,7 @@ pub fn default_value(spec: &SettingSpec) -> SettingValue {
                 .max(0.0)
                 .min(spec.max.unwrap_or(f64::MAX)),
         ),
-        SettingKind::Text => SettingValue::Text(String::new()),
+        SettingKind::Text | SettingKind::Secret => SettingValue::Text(String::new()),
         SettingKind::Color => SettingValue::Color(Color::hex(0x5865f2)),
         SettingKind::Keybind => SettingValue::Keybind(String::new()),
         SettingKind::StringList => SettingValue::Items(Vec::new()),
@@ -260,7 +274,7 @@ fn from_json(spec: &SettingSpec, v: &Json) -> Result<SettingValue> {
         (SettingKind::Slider | SettingKind::Number, Json::Number(n)) => {
             SettingValue::Number(n.as_f64().context("number")?)
         }
-        (SettingKind::Text, Json::String(s)) => SettingValue::Text(s.clone()),
+        (SettingKind::Text | SettingKind::Secret, Json::String(s)) => SettingValue::Text(s.clone()),
         (SettingKind::Keybind, Json::String(s)) => SettingValue::Keybind(s.clone()),
         (SettingKind::Color, Json::String(s)) => {
             SettingValue::Color(Color::parse(s).with_context(|| format!("`{s}` isn't #rrggbb"))?)
@@ -311,7 +325,7 @@ fn check_value(spec: &SettingSpec, v: &SettingValue) -> std::result::Result<(), 
         | (SettingKind::Color, SettingValue::Color(_)) => true,
         (SettingKind::Select, SettingValue::Selected(i)) => (*i as usize) < spec.options.len(),
         (SettingKind::Slider | SettingKind::Number, SettingValue::Number(n)) => in_range(*n),
-        (SettingKind::Text, SettingValue::Text(t)) => {
+        (SettingKind::Text | SettingKind::Secret, SettingValue::Text(t)) => {
             text_ok(t) && (spec.multiline || !t.contains('\n'))
         }
         (SettingKind::Keybind, SettingValue::Keybind(k)) => k.len() <= 64 && text_ok(k),
@@ -443,11 +457,30 @@ impl SettingsStore {
         )
     }
 
+    /// The value of `key` as the settings page shows it: a `secret` that has
+    /// a value is [`SECRET_MASK`]. `None` if the schema has no `key`.
+    pub fn shown(&self, key: &str) -> Option<SettingValue> {
+        let v = self.get(key)?;
+        Some(match &v {
+            SettingValue::Text(t)
+                if !t.is_empty() && self.spec(key)?.kind == SettingKind::Secret =>
+            {
+                SettingValue::Text(SECRET_MASK.into())
+            }
+            _ => v,
+        })
+    }
+
     /// Validate and store. `Ok(true)` if the value changed.
     pub fn set(&mut self, key: &str, value: SettingValue) -> std::result::Result<bool, String> {
         let spec = self
             .spec(key)
             .ok_or_else(|| format!("no setting `{key}` in the schema"))?;
+        if spec.kind == SettingKind::Secret
+            && matches!(&value, SettingValue::Text(t) if t == SECRET_MASK)
+        {
+            return Ok(false);
+        }
         check_value(spec, &value)?;
         if self.get(key).as_ref() == Some(&value) {
             return Ok(false);
@@ -551,6 +584,39 @@ mod tests {
             "unchanged"
         );
         assert!(s.reset("log-deletes"));
+    }
+
+    #[test]
+    fn secrets_are_masked_on_the_page_and_read_in_full() {
+        let specs = parse_schema(&json!([
+            {"key": "api-key", "type": "secret", "label": "API key"},
+        ]))
+        .unwrap();
+        let mut s = SettingsStore::in_memory(specs);
+        assert_eq!(s.shown("api-key"), Some(SettingValue::Text(String::new())));
+        assert_eq!(
+            s.set("api-key", SettingValue::Text("sk-123".into())),
+            Ok(true)
+        );
+        assert_eq!(s.get("api-key"), Some(SettingValue::Text("sk-123".into())));
+        assert_eq!(
+            s.shown("api-key"),
+            Some(SettingValue::Text(SECRET_MASK.into()))
+        );
+        // The page sends the mask back unchanged: the secret stays.
+        assert_eq!(
+            s.set("api-key", SettingValue::Text(SECRET_MASK.into())),
+            Ok(false)
+        );
+        assert_eq!(s.get("api-key"), Some(SettingValue::Text("sk-123".into())));
+        assert!(
+            parse_schema(&json!([{"key": "k", "type": "secret", "label": "K", "default": "x"}]))
+                .is_err()
+        );
+        assert!(
+            parse_schema(&json!([{"key": "k", "type": "secret", "label": "K", "multiline": true}]))
+                .is_err()
+        );
     }
 
     #[test]

@@ -12,8 +12,9 @@
 //   const words = settings.items('keywords');
 //   settings.onChange('tint', () => refresh());
 //
-// Types: toggle, select, slider, number, text, color, keybind, string-list,
-// table, users, channels, guilds. Changes arrive in `onSettingsChanged(key)`
+// Types: toggle, select, slider, number, text, secret, color, keybind,
+// string-list, table, users, channels, guilds. A secret is text the settings
+// page masks, such as an API key; read it with `text`. Changes arrive in `onSettingsChanged(key)`
 // (and `onChange` callbacks); renders re-run by themselves.
 
 import * as raw from 'rekindle:plugin/settings@0.8.0';

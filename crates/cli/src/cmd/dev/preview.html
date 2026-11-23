@@ -585,7 +585,7 @@ function settingEl(e) {
     case "table": return { ...base, kind: "table", columns: s.columns || [], rows: v || [] };
     case "users": case "channels": case "guilds":
       return { ...base, kind: "text-input", value: (v || []).join(", "), placeholder: s.type.slice(0, -1) + " ids, comma-separated" };
-    default: return { ...base, kind: "text-input", value: v == null ? "" : String(v), placeholder: s.placeholder || (s.type === "keybind" ? "e.g. Ctrl+Shift+K" : ""), multiline: !!s.multiline };
+    default: return { ...base, kind: "text-input", value: v == null ? "" : String(v), placeholder: s.placeholder || (s.type === "keybind" ? "e.g. Ctrl+Shift+K" : ""), multiline: !!s.multiline, secret: s.type === "secret" };
   }
 }
 
@@ -765,7 +765,7 @@ function element(el, key, send) {
       const commit = () => { if (input.value !== sent) { sent = input.value; emit({ kind: "text", value: input.value }); } };
       const input = el.multiline
         ? h("textarea", { onchange: commit, onkeydown: (ev) => { if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) commit(); } })
-        : h("input", { type: "text", onchange: commit, onkeydown: (ev) => { if (ev.key === "Enter") commit(); } });
+        : h("input", { type: el.secret ? "password" : "text", onchange: commit, onkeydown: (ev) => { if (ev.key === "Enter") commit(); } });
       node = row(input);
       node._update = (e) => {
         setLabel(node, e); input.placeholder = e.placeholder || "";

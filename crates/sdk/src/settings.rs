@@ -14,8 +14,10 @@
 //! let words = settings::items("keywords");
 //! ```
 //!
-//! The types are `toggle`, `select`, `slider`, `number`, `text`, `color`,
-//! `keybind`, `string-list`, `table`, `users`, `channels` and `guilds`.
+//! The types are `toggle`, `select`, `slider`, `number`, `text`, `secret`,
+//! `color`, `keybind`, `string-list`, `table`, `users`, `channels` and
+//! `guilds`. A `secret` is text the settings page masks, such as an API key.
+//! Read it with [`text`].
 //! Changes arrive in
 //! [`Plugin::on_settings_changed`](crate::Plugin::on_settings_changed).
 //! The typed readers return `false`, `0`, an empty value or `None` when the
