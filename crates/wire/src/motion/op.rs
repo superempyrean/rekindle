@@ -10,15 +10,70 @@
 //! truncated op ends the stream, and the engine ignores the words after it.
 //! [`Program`] keeps those words, so a cell re-encodes byte for byte.
 //!
-//! Which ops a view's program uses, and what most operands mean, is not
-//! decoded. The real guest's buttons send one op 21 each:
-//! `[21, 9, 5, 0xffffffff, 0]`, with the slot the button's `worklet` binds
-//! first (9), 5, this view, and no spec.
+//! The ops are numbered in [`code`], with what each does where it is
+//! known. The ones a `viewMotion` cell uses most have constructors and
+//! readers: [`Follow`] (op 21) and [`LayoutTransition`] (op 24). The real
+//! guest's buttons send one op 21 each, `[21, 9, 5, 0xffffffff, 0]`: value
+//! 9, the first slot of the button's `press_look` worklet, follows input 5
+//! ([`input::PRESSED`]) of this view, with no spec.
 
 use crate::Value;
 
 /// A view field that means the view being programmed, in `view_motion`.
 pub const THIS_VIEW: u32 = 0xffff_ffff;
+
+/// The opcodes, from the engine's decoder (`0x5540b68`) and its handlers
+/// (`0x553cffc`, and `0x5534ef0` for `view_motion`).
+///
+/// The engine animates numbered values in one table, not view properties.
+/// A worklet ([`super::worklet`]) reads values and writes channels, and the
+/// value ids it reads are its slots.
+pub mod code {
+    /// `id, value`: cancel the value's animation and set it.
+    pub const SET: u32 = 1;
+    /// `id, b, S`: animate the value from where it is.
+    pub const ANIMATE: u32 = 2;
+    /// `view, kind, worklet, V`: bind a worklet to a view. The Android
+    /// platform sends a `worklet` cell as this op with `kind` 0, and
+    /// `panWorklet` with `kind` 1.
+    pub const BIND: u32 = 3;
+    /// `view, kind`: unbind, what an empty worklet cell becomes.
+    pub const UNBIND: u32 = 4;
+    /// `id`: stop the animation and zero its velocity.
+    pub const STOP: u32 = 7;
+    /// `id, value`: [`SET`] if the value was never set.
+    pub const INIT: u32 = 8;
+    /// `id`: drop the value from every table.
+    pub const DROP: u32 = 9;
+    /// `portal, w2, w3, w4, S`: a portal flight.
+    pub const FLIGHT: u32 = 15;
+    /// `id, input, key, oS`: [`super::Follow`].
+    pub const FOLLOW: u32 = 21;
+    /// `view, tx, ty, sx, sy, S`: [`super::LayoutTransition`].
+    pub const LAYOUT_TRANSITION: u32 = 24;
+    /// `view, width, height, S`: animate the values `width` and `height`
+    /// (`0xffffffff` for neither) when the view's measured size changes.
+    pub const SIZE_TRANSITION: u32 = 28;
+    /// [`SIZE_TRANSITION`] with the engine's flag set.
+    pub const SIZE_TRANSITION_FLAGGED: u32 = 32;
+    /// `view, w2, w3, V, oS x 5, f`: a list row's config.
+    pub const ROW: u32 = 30;
+}
+
+/// The inputs the platform reports through `ldh_motion_system(kind, key,
+/// value, ms)`, which [`Follow`] ops read. Named from the Android
+/// platform's calls.
+pub mod input {
+    /// Horizontal scroll offset, in points, keyed by the scroll view.
+    pub const SCROLL_X: u32 = 3;
+    /// Vertical scroll offset.
+    pub const SCROLL_Y: u32 = 4;
+    /// 1 while the view is pressed and 0 otherwise, keyed by the view.
+    /// The platform reports it from `dispatchSetPressed`.
+    pub const PRESSED: u32 = 5;
+    /// 1 while the user drags the view.
+    pub const DRAGGING: u32 = 7;
+}
 
 /// The deepest a spec nests: 16 wrappers around a spec are accepted, 17
 /// are not.
@@ -134,7 +189,8 @@ pub enum Anim {
     /// Tag 2: an analytic damped spring. `flags` bit 0 clamps overshoot,
     /// bit 1 means `velocity` is given (otherwise the running velocity is
     /// kept), and bit 2 keeps a velocity pointing away from the target and
-    /// snaps at the rest thresholds.
+    /// snaps at the rest thresholds. [`super::spring`] runs it as the engine
+    /// does.
     Spring {
         to: f32,
         mass: f32,
@@ -406,6 +462,101 @@ impl Op {
             });
         }
         Some(Op { opcode, fields })
+    }
+}
+
+/// Op 21: value `id` follows the platform's input `(input, key)`
+/// ([`input`]). When the platform reports a new input value, the engine
+/// animates `id` to it along `anim`, or sets it if there is none. If the
+/// input already has a value, binding sets `id` to it at once. The handler
+/// is `0x553474c`, the input side `0x553be08`.
+///
+/// In `view_motion`, a `key` of [`THIS_VIEW`] is the view being
+/// programmed.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Follow {
+    pub id: u32,
+    pub input: u32,
+    pub key: u32,
+    pub anim: Option<Anim>,
+}
+
+impl Follow {
+    pub fn to_op(&self) -> Op {
+        Op {
+            opcode: code::FOLLOW,
+            fields: vec![
+                Field::Word(self.id),
+                Field::Word(self.input),
+                Field::Word(self.key),
+                Field::MaybeAnim(self.anim.clone()),
+            ],
+        }
+    }
+
+    pub fn from_op(op: &Op) -> Option<Follow> {
+        if op.opcode != code::FOLLOW {
+            return None;
+        }
+        let Some(Field::MaybeAnim(anim)) = op.fields.get(3) else {
+            return None;
+        };
+        Some(Follow {
+            id: op.word(0)?,
+            input: op.word(1)?,
+            key: op.word(2)?,
+            anim: anim.clone(),
+        })
+    }
+}
+
+/// Op 24: animate a view to its new frame when its layout changes. The
+/// engine stores one per view (`0x5534c70`), and `ldh_motion_layout`
+/// (`0x553ec20`) fires it.
+///
+/// When the view's rect moves or resizes, the engine sets the four values
+/// so the view still appears where it was, and animates each back to rest
+/// along `anim`: `translate_x` and `translate_y` from the old centre's
+/// offset to 0, and `scale_x` and `scale_y` from the old size over the new
+/// one to 1. A value id of `0xffffffff` leaves that axis alone, and
+/// without `scale_x` the offset is taken between corners, not centres.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LayoutTransition {
+    pub view: u32,
+    pub translate_x: u32,
+    pub translate_y: u32,
+    pub scale_x: u32,
+    pub scale_y: u32,
+    pub anim: Anim,
+}
+
+impl LayoutTransition {
+    pub fn to_op(&self) -> Op {
+        Op {
+            opcode: code::LAYOUT_TRANSITION,
+            fields: vec![
+                Field::Word(self.view),
+                Field::Word(self.translate_x),
+                Field::Word(self.translate_y),
+                Field::Word(self.scale_x),
+                Field::Word(self.scale_y),
+                Field::Anim(self.anim.clone()),
+            ],
+        }
+    }
+
+    pub fn from_op(op: &Op) -> Option<LayoutTransition> {
+        if op.opcode != code::LAYOUT_TRANSITION {
+            return None;
+        }
+        Some(LayoutTransition {
+            view: op.word(0)?,
+            translate_x: op.word(1)?,
+            translate_y: op.word(2)?,
+            scale_x: op.word(3)?,
+            scale_y: op.word(4)?,
+            anim: op.anim()?.clone(),
+        })
     }
 }
 

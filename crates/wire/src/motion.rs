@@ -30,17 +30,23 @@
 //!   word stream, with `dt` in milliseconds;
 //! - `set_reduced(bool)` is the only reduced-motion entry, and a change
 //!   re-evaluates every view;
+//! - the spring's closed form and settle rules ([`spring`]), and the
+//!   64 ms cap on one frame's `dt`;
+//! - the `worklet` cell's layout and the `press_look` worklet the real
+//!   guest's buttons use ([`worklet`]);
 //! - the timing `PropIds` are fields of a spec, not live channels: `spring`
 //!   (470), `stiffness` (484), `damping` (142), `mass` (290), `timing`
 //!   (521), `ms` (310), `delay` (145), `easing` (170).
 //!
 //! # Modelled
 //!
-//! - Which ops a [`Spec`] is ([`Spec::to_program`]). Each entry is an op
-//!   24 for this view, a recovered op whose spec `view_motion` keeps per
-//!   view. What its four words mean is rekindle's.
-//! - The interpolation: a timed curve with the engine's easings and a
-//!   damped spring ([`Curve`]), and when a transition counts as settled.
+//! - Which ops a [`Spec`] is ([`Spec::to_program`]). Each entry is laid
+//!   out as an op 24, but its words are rekindle's. The real op 24 is a
+//!   layout transition ([`op::LayoutTransition`]). The real guest has no
+//!   per-channel entry: it binds channels to values through a `worklet`
+//!   ([`worklet`]) and moves the values with `apply` ops.
+//! - When a timed transition counts as settled. The spring settles as the
+//!   engine's does.
 //! - What a resting-value change does under a spec (it animates from the
 //!   value shown), and that an entry with `enterFrom` (180) animates in the
 //!   first time a spec reaches a view.
@@ -58,6 +64,8 @@
 )]
 
 pub mod op;
+pub mod spring;
+pub mod worklet;
 
 use std::collections::BTreeMap;
 
@@ -66,6 +74,7 @@ use crate::{PropId, Value};
 
 pub use op::Easing;
 use op::{Anim, Field, Op, Program};
+use spring::{Spring, SpringRun};
 
 /// The `PropIds` the engine's platform reads. Recovered ids; the pairing of
 /// `enterFrom` with a spec entry is modelled.
@@ -74,6 +83,8 @@ pub mod ids {
 
     /// A view's motion spec, the cell the platform passes to `view_motion`.
     pub const VIEW_MOTION: PropId = PropId(740);
+    /// A view's worklet and its arguments ([`super::worklet`]).
+    pub const WORKLET: PropId = PropId(733);
     /// The value a channel animates in from.
     pub const ENTER_FROM: PropId = PropId(180);
     pub const SPRING: PropId = PropId(470);
@@ -246,15 +257,16 @@ impl Channel {
     }
 }
 
-/// Modelled. How a channel moves to its target: the two specs the model
-/// runs, out of the engine's seven ([`op::Anim`]). The engine's spring is
-/// analytic, and this one is stepped.
+/// How a channel moves to its target: the two specs the model runs, out
+/// of the engine's seven ([`op::Anim`]). Both move as the engine's do: the
+/// timing along its easing, and the spring in the engine's closed form
+/// ([`spring::Spring::solve`]), with each frame cut to 64 ms.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Curve {
     /// `ms` long after `delay` ms, along `easing`.
     Timing { ms: f32, delay: f32, easing: Easing },
-    /// A damped spring: `stiffness` and `damping` per unit `mass`, in
-    /// seconds.
+    /// A damped spring with no flags: it keeps the running velocity and
+    /// settles by energy ([`spring::SpringRun`]).
     Spring {
         stiffness: f32,
         damping: f32,
@@ -346,14 +358,16 @@ pub struct Entry {
 ///
 /// On the wire it is the `viewMotion` (740) cell, an op stream in the
 /// engine's grammar ([`Spec::to_program`]). The grammar is recovered and
-/// the ops are rekindle's.
+/// the entries are rekindle's. They are laid out as ops 24, which the real
+/// engine reads as layout transitions ([`op::LayoutTransition`]) with the
+/// entry's words as value ids, so a `Spec` is only for the mock's engine.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Spec {
     pub entries: Vec<Entry>,
 }
 
 /// The opcode a [`Spec`] entry is written as.
-const ENTRY_OP: u32 = 24;
+const ENTRY_OP: u32 = op::code::LAYOUT_TRANSITION;
 
 impl Spec {
     pub fn new() -> Self {
@@ -467,15 +481,39 @@ struct Running {
     value: f32,
     /// Units per second, for springs.
     velocity: f32,
-    /// Milliseconds since the transition started.
+    /// Milliseconds since the transition started, each frame's share cut
+    /// to [`spring::MAX_FRAME_MS`] as the engine does.
     elapsed: f32,
     curve: Curve,
+    /// The engine's closed-form spring, for a spring curve.
+    spring: Option<SpringRun>,
     /// Reduced motion: the next frame lands on `to`.
     jump: bool,
 }
 
 impl Running {
     fn new(from: f32, to: f32, velocity: f32, curve: Curve, jump: bool) -> Self {
+        let spring = match curve {
+            Curve::Spring {
+                stiffness,
+                damping,
+                mass,
+            } => Some(SpringRun::start(
+                from,
+                to,
+                Spring {
+                    mass,
+                    stiffness,
+                    damping,
+                },
+                0,
+                0.0,
+                0.0,
+                0.0,
+                velocity,
+            )),
+            Curve::Timing { .. } => None,
+        };
         Running {
             from,
             to,
@@ -483,6 +521,7 @@ impl Running {
             velocity,
             elapsed: 0.0,
             curve,
+            spring,
             jump,
         }
     }
@@ -494,9 +533,15 @@ impl Running {
             self.velocity = 0.0;
             return true;
         }
-        self.elapsed += dt;
-        let settled = match self.curve {
-            Curve::Timing { ms, delay, easing } => {
+        self.elapsed += spring::frame_ms(dt);
+        let settled = match (self.curve, &mut self.spring) {
+            (_, Some(run)) => {
+                let s = run.step(dt);
+                self.value = s.value;
+                self.velocity = s.velocity;
+                s.settled
+            }
+            (Curve::Timing { ms, delay, easing }, None) => {
                 let t = self.elapsed - delay;
                 if t >= ms {
                     true
@@ -506,25 +551,7 @@ impl Running {
                     false
                 }
             }
-            Curve::Spring {
-                stiffness,
-                damping,
-                mass,
-            } => {
-                // Semi-implicit Euler in steps of at most 1/240 s.
-                let mass = mass.max(1e-3);
-                let mut left = dt / 1000.0;
-                while left > 0.0 {
-                    let h = left.min(1.0 / 240.0);
-                    let accel =
-                        (-stiffness * (self.value - self.to) - damping * self.velocity) / mass;
-                    self.velocity += accel * h;
-                    self.value += self.velocity * h;
-                    left -= h;
-                }
-                let eps = 1e-3 * (self.to - self.from).abs().max(1.0);
-                (self.value - self.to).abs() <= eps && self.velocity.abs() <= eps * 10.0
-            }
+            (Curve::Spring { .. }, None) => true,
         };
         if settled {
             self.value = self.to;
