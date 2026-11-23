@@ -40,10 +40,11 @@
 //! The turns are `rekindle_wire::turn` and the events
 //! `rekindle_wire::event`, both read from Phoenix's Android host. A
 //! `ChildEdits` op of the guest's is read as the Children op it amounts to,
-//! and a turn the engine rewrites carries whole child lists. Host frames and
-//! UI events other than an event on a node pass unchanged. A BATCH frame's
-//! UI events are filtered one by one as a bare event would be, and the
-//! frames beside them in the batch pass.
+//! and a turn the engine rewrites carries whole child lists and no tag-12
+//! values, since each names a words list by its place in the buffer. Host
+//! frames and UI events other than an event on a node pass unchanged. A
+//! BATCH frame's UI events are filtered one by one as a bare event would
+//! be, and the frames beside them in the batch pass.
 //!
 //! # Modelled
 //!
@@ -105,7 +106,9 @@ pub enum Verdict {
     /// The guest receives this event instead.
     Replace(Event),
     /// The guest never receives it. If the event pressed one of rekindle's
-    /// nodes with a handler, the value is the handler's reply.
+    /// nodes with a handler, the value is the handler's reply. Phoenix's
+    /// dispatch returns no data for an event, so the reply is rekindle's
+    /// own model, which the mock's guest reads.
     Consume(Option<Value>),
     /// The guest receives this BATCH frame instead: the one it was sent,
     /// with each UI event in it dropped or replaced. A handler's reply to
@@ -373,7 +376,10 @@ impl Engine {
 
     /// Rewrite one turn's bytes. `None` when the turn goes through unchanged.
     pub fn filter(&mut self, guest: &[u8]) -> Result<Option<Vec<u8>>, DecodeError> {
-        let original = self.guest.resolve(&Turn::from_bytes(guest)?)?;
+        let mut decoded = Turn::from_bytes(guest)?;
+        // Dropping or adding ops would move the words lists a tag 12 names.
+        decoded.own_words()?;
+        let original = self.guest.resolve(&decoded)?;
         self.guest.apply(&original);
         let mut turn = self.intercept(&original);
         let mut front = self.unmount();

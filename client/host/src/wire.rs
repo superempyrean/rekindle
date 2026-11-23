@@ -14,7 +14,8 @@
 //! event through the engine before the guest receives it, and the UI
 //! events inside a BATCH frame one by one. A reply the engine makes for
 //! an event it consumed goes back through the client's own reply
-//! function, found by `wire_event_reply`.
+//! function, found by `wire_event_reply`. Phoenix's dispatch returns no
+//! data for an event, so that reply is rekindle's own model.
 //!
 //! The engine is `rekindle_wire_inject::Engine`, configured by a `Work`
 //! value. [`follow`] makes it from the plugins' contributions every tick:

@@ -442,6 +442,34 @@ fn a_dropped_node_never_reaches_the_host() {
 }
 
 #[test]
+fn a_patch_of_a_dropped_nodes_words_still_decodes() {
+    let words = PropId(740);
+    let (mut e, mut host) = engine(everything());
+    send(&mut e, &mut host, &bodies());
+    let mut t = Turn::new();
+    t.push(NodeOp::Update {
+        node: DROPPED,
+        props: vec![(words, Value::U32Array(vec![1, 2, 3, 4]))],
+    });
+    t.push(NodeOp::Update {
+        node: PLAIN,
+        props: vec![(
+            words,
+            Value::Sparse {
+                list: 0,
+                pairs: vec![(0, 7)],
+            },
+        )],
+    });
+    let (applied, _) = send(&mut e, &mut host, &t);
+    assert!(!mentions(&applied, DROPPED));
+    assert_eq!(
+        host.props().get(PLAIN, words),
+        Some(&Value::U32Array(vec![7, 2, 3, 4]))
+    );
+}
+
+#[test]
 fn a_node_that_stops_matching_comes_back_and_one_that_starts_is_removed() {
     let (mut e, mut host) = engine(everything());
     send(&mut e, &mut host, &bodies());
