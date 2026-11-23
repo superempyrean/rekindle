@@ -28,8 +28,13 @@
 //! The encoder sends an array as tag 11 or 12 only when the writer has a
 //! words table and the array holds 4 to 65535 integers in `u32` range. Tag
 //! 12 is chosen when patching one of the last 64 same-length lists is
-//! smaller than sending the list. [`Value::words`] writes tag 11 under the
-//! same rule and never chooses tag 12.
+//! smaller than sending the list. The turn driver installs a table or none
+//! by a flag, and what sets the flag isn't read. The Android guest, run
+//! headless, wrote no tag 11 or 12 in any buffer, and sent arrays of up to
+//! 139 integers in `u32` range as tag 7. [`Value::words`] writes tag 7, as
+//! it did. [`Value::words_tabled`] writes tag 11 under the encoder's rule,
+//! for a writer known to have a table, and never chooses tag 12. Both tags
+//! decode either way.
 
 use crate::PropId;
 
@@ -64,7 +69,8 @@ pub enum Value {
     Object(Vec<(PropId, Value)>),
     /// tag 9 — four `f32`s: the edge insets of `padding` (332), `margin`
     /// (287) and `hitSlopEdges` (809), the only `PropIds` `gpui-native` writes
-    /// it for. The order of the edges isn't read from the binary.
+    /// it for. The edges are left, top, right and bottom, from the real
+    /// guest's turns: its welcome screen's padding is `(16, 80, 16, 24)`.
     Quad([f32; 4]),
     /// tag 10 — `u32` count + count × (string key, Value). Insertion order is
     /// preserved so encoding is byte-exact.
@@ -164,14 +170,22 @@ impl Value {
         }
     }
 
-    /// A list of `u32` words as the guest's encoder writes it with a words
-    /// table: tag 11 for 4 to 65535 words, otherwise an array of integers.
+    /// A list of `u32` words as the guest's encoder writes it with no words
+    /// table: an array of integers, through [`Value::int`]. A word from
+    /// `0x80000000` up is a tag 4.
     #[must_use]
     pub fn words(words: &[u32]) -> Value {
+        Value::Array(words.iter().map(|w| Value::int(i64::from(*w))).collect())
+    }
+
+    /// A list of `u32` words as the guest's encoder writes it with a words
+    /// table: tag 11 for 4 to 65535 words, otherwise as [`Value::words`].
+    #[must_use]
+    pub fn words_tabled(words: &[u32]) -> Value {
         if (WORDS_MIN..=WORDS_MAX).contains(&words.len()) {
             Value::U32Array(words.to_vec())
         } else {
-            Value::Array(words.iter().map(|w| Value::int(i64::from(*w))).collect())
+            Value::words(words)
         }
     }
 

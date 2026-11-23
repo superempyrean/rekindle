@@ -19,11 +19,12 @@
 //! - `declare(view, channel, value)` sets a resting value. A value equal to
 //!   the default removes the entry, NaN is ignored, an id outside 1..26 is
 //!   rejected, and channels 8 to 26 are accepted and ignored ([`Motion::declare`]);
-//! - a per-view spec reaches `view_motion(view, &[u32])` as `u32` words,
-//!   from `PropId` `viewMotion` (740). The cell is an array of integers, one
-//!   per word, and the Android platform cuts each to 32 bits (anything that
-//!   isn't a number is 0) before it calls `nativeViewMotion`. Since every
-//!   element fits a `u32`, the encoder sends 4 or more words as tag 11 or 12
+//! - `view_motion(view, &[u32])` takes the op stream `apply` takes
+//!   ([`op`]), from `PropId` `viewMotion` (740). The cell is an array of
+//!   integers, one per word, and the Android platform cuts each to 32 bits
+//!   (anything that isn't a number is 0) before it calls
+//!   `nativeViewMotion`. The real guest sends the array as tag 7, five
+//!   words and more included, because its writer had no words table
 //!   ([`Value::words`]);
 //! - the per-frame loop: `wants_frame`, then `frame(dt)` returning a `u32`
 //!   word stream, with `dt` in milliseconds;
@@ -35,11 +36,11 @@
 //!
 //! # Modelled
 //!
-//! - Which words a spec is ([`Spec::to_words`]). `view_motion` takes the
-//!   same 32-opcode stream as `apply`, and rekindle's words stand in for
-//!   those ops.
-//! - The interpolation: an eased duration and a damped spring
-//!   ([`Curve`]), and when a transition counts as settled.
+//! - Which ops a [`Spec`] is ([`Spec::to_program`]). Each entry is an op
+//!   24 for this view, a recovered op whose spec `view_motion` keeps per
+//!   view. What its four words mean is rekindle's.
+//! - The interpolation: a timed curve with the engine's easings and a
+//!   damped spring ([`Curve`]), and when a transition counts as settled.
 //! - What a resting-value change does under a spec (it animates from the
 //!   value shown), and that an entry with `enterFrom` (180) animates in the
 //!   first time a spec reaches a view.
@@ -56,10 +57,15 @@
     reason = "declare compares with the default exactly, and a settled transition lands on its target exactly"
 )]
 
+pub mod op;
+
 use std::collections::BTreeMap;
 
 use crate::tree::NodeId;
 use crate::{PropId, Value};
+
+pub use op::Easing;
+use op::{Anim, Field, Op, Program};
 
 /// The `PropIds` the engine's platform reads. Recovered ids; the pairing of
 /// `enterFrom` with a spec entry is modelled.
@@ -240,55 +246,9 @@ impl Channel {
     }
 }
 
-/// How a timed transition's progress maps to its value.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Easing {
-    Linear,
-    EaseIn,
-    EaseOut,
-    EaseInOut,
-}
-
-impl Easing {
-    const ALL: [Easing; 4] = [
-        Easing::Linear,
-        Easing::EaseIn,
-        Easing::EaseOut,
-        Easing::EaseInOut,
-    ];
-
-    pub fn name(self) -> &'static str {
-        match self {
-            Easing::Linear => "linear",
-            Easing::EaseIn => "ease-in",
-            Easing::EaseOut => "ease-out",
-            Easing::EaseInOut => "ease-in-out",
-        }
-    }
-
-    pub fn from_name(name: &str) -> Option<Easing> {
-        Easing::ALL.into_iter().find(|e| e.name() == name)
-    }
-
-    /// Cubic curves. `t` is in `0..=1`.
-    pub fn apply(self, t: f32) -> f32 {
-        match self {
-            Easing::Linear => t,
-            Easing::EaseIn => t * t * t,
-            Easing::EaseOut => 1.0 - (1.0 - t).powi(3),
-            Easing::EaseInOut => {
-                if t < 0.5 {
-                    4.0 * t * t * t
-                } else {
-                    1.0 - (-2.0 * t + 2.0).powi(3) / 2.0
-                }
-            }
-        }
-    }
-}
-
-/// Modelled. How a channel moves to its target. The host's interpolation is
-/// located but not decoded, so a desktop build's would replace these curves.
+/// Modelled. How a channel moves to its target: the two specs the model
+/// runs, out of the engine's seven ([`op::Anim`]). The engine's spring is
+/// analytic, and this one is stepped.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Curve {
     /// `ms` long after `delay` ms, along `easing`.
@@ -300,6 +260,76 @@ pub enum Curve {
         damping: f32,
         mass: f32,
     },
+}
+
+impl Curve {
+    /// The curve as a spec: a timing, inside a delay if `delay` isn't 0,
+    /// or a spring with no flags. `to` is NaN, which the model reads as the
+    /// channel's resting value.
+    pub fn to_anim(self) -> Anim {
+        match self {
+            Curve::Timing { ms, delay, easing } => {
+                let timing = Anim::Timing {
+                    to: f32::NAN,
+                    ms,
+                    easing,
+                };
+                if delay == 0.0 {
+                    timing
+                } else {
+                    Anim::Delay {
+                        ms: delay,
+                        then: Box::new(timing),
+                    }
+                }
+            }
+            Curve::Spring {
+                stiffness,
+                damping,
+                mass,
+            } => Anim::Spring {
+                to: f32::NAN,
+                mass,
+                stiffness,
+                damping,
+                flags: 0,
+                rest_displacement: 0.0,
+                rest_speed: 0.0,
+                velocity: 0.0,
+            },
+        }
+    }
+
+    /// The curve a spec of [`Curve::to_anim`]'s shape is. `None` for any
+    /// other spec.
+    pub fn from_anim(anim: &Anim) -> Option<Curve> {
+        Some(match anim {
+            Anim::Timing { ms, easing, .. } => Curve::Timing {
+                ms: *ms,
+                delay: 0.0,
+                easing: *easing,
+            },
+            Anim::Delay { ms: delay, then } => match **then {
+                Anim::Timing { ms, easing, .. } => Curve::Timing {
+                    ms,
+                    delay: *delay,
+                    easing,
+                },
+                _ => return None,
+            },
+            Anim::Spring {
+                mass,
+                stiffness,
+                damping,
+                ..
+            } => Curve::Spring {
+                stiffness: *stiffness,
+                damping: *damping,
+                mass: *mass,
+            },
+            _ => return None,
+        })
+    }
 }
 
 /// One channel of a [`Spec`].
@@ -314,17 +344,16 @@ pub struct Entry {
 
 /// Modelled. A view's motion spec: which channels animate, and how.
 ///
-/// On the wire it is the `viewMotion` (740) cell: the `u32` words
-/// `view_motion` takes, one integer each ([`Spec::to_value`]). That carriage
-/// is recovered. The words are rekindle's ([`Spec::to_words`]), where
-/// Phoenix's are ops of the engine's 32-opcode stream.
+/// On the wire it is the `viewMotion` (740) cell, an op stream in the
+/// engine's grammar ([`Spec::to_program`]). The grammar is recovered and
+/// the ops are rekindle's.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Spec {
     pub entries: Vec<Entry>,
 }
 
-/// Words per entry in [`Spec::to_words`].
-const ENTRY_WORDS: usize = 7;
+/// The opcode a [`Spec`] entry is written as.
+const ENTRY_OP: u32 = 24;
 
 impl Spec {
     pub fn new() -> Self {
@@ -362,92 +391,77 @@ impl Spec {
         self.entries.iter().find(|e| e.channel == channel)
     }
 
-    /// The `viewMotion` cell: [`Spec::to_words`] as the guest's encoder
-    /// writes words, tag 11 when a words table is open ([`Value::words`]).
+    /// The `viewMotion` cell: [`Spec::to_program`] as an array of integers.
     pub fn to_value(&self) -> Value {
-        Value::words(&self.to_words())
+        self.to_program().to_value()
     }
 
-    /// Read a `viewMotion` cell: its words ([`Value::as_words`]) through
-    /// [`Spec::from_words`]. `None` if the cell holds no words or they don't
-    /// make a spec.
+    /// Read a `viewMotion` cell. `None` if it holds no words. A cell with
+    /// no entries of rekindle's, such as the real guest's, reads as an
+    /// empty spec.
     pub fn from_value(value: &Value) -> Option<Spec> {
-        Spec::from_words(&value.as_words()?)
+        Some(Spec::from_program(&Program::from_value(value)?))
     }
 
-    /// The words `view_motion` takes: a count, then per entry the channel id,
-    /// flags (bit 0: enters, bit 1: spring), `enterFrom`, three curve
-    /// parameters as `f32` bits (`ms`, `delay`, unused, or `stiffness`,
-    /// `damping`, `mass`) and the easing's index.
-    pub fn to_words(&self) -> Vec<u32> {
-        let mut out = vec![self.entries.len() as u32];
-        for e in &self.entries {
-            let (spring, a, b, c, easing) = match e.curve {
-                Curve::Timing { ms, delay, easing } => (
-                    0,
-                    ms,
-                    delay,
-                    0.0,
-                    Easing::ALL.iter().position(|x| *x == easing).unwrap_or(0) as u32,
-                ),
-                Curve::Spring {
-                    stiffness,
-                    damping,
-                    mass,
-                } => (2, stiffness, damping, mass, 0),
-            };
-            let enters = u32::from(e.enter_from.is_some());
-            out.extend([
-                e.channel.id(),
-                enters | spring,
-                e.enter_from.unwrap_or(0.0).to_bits(),
-                a.to_bits(),
-                b.to_bits(),
-                c.to_bits(),
-                easing,
-            ]);
-        }
-        out
+    /// One op 24 per entry: this view, the channel id, 1 if it enters,
+    /// `enterFrom` as `f32` bits, 0, and the curve as a spec
+    /// ([`Curve::to_anim`]).
+    pub fn to_program(&self) -> Program {
+        Program::new(
+            self.entries
+                .iter()
+                .map(|e| Op {
+                    opcode: ENTRY_OP,
+                    fields: vec![
+                        Field::Word(op::THIS_VIEW),
+                        Field::Word(e.channel.id()),
+                        Field::Word(u32::from(e.enter_from.is_some())),
+                        Field::Word(e.enter_from.unwrap_or(0.0).to_bits()),
+                        Field::Word(0),
+                        Field::Anim(e.curve.to_anim()),
+                    ],
+                })
+                .collect(),
+        )
     }
 
-    /// Read `view_motion`'s words. `None` if they are truncated or name a
-    /// channel outside 1..=26.
-    pub fn from_words(words: &[u32]) -> Option<Spec> {
-        let (n, rest) = words.split_first()?;
-        let n = *n as usize;
-        if rest.len() != n.checked_mul(ENTRY_WORDS)? {
-            return None;
-        }
+    /// The entries in a program's ops 24 for this view. Other ops, and ops
+    /// 24 whose channel or spec [`Spec::to_program`] doesn't write, are
+    /// skipped.
+    pub fn from_program(program: &Program) -> Spec {
         let mut spec = Spec::new();
-        for w in rest.as_chunks::<ENTRY_WORDS>().0 {
-            let channel = Channel::from_id(w[0])?;
-            let f = |i: usize| f32::from_bits(w[i]);
-            let curve = if w[1] & 2 != 0 {
-                Curve::Spring {
-                    stiffness: f(3),
-                    damping: f(4),
-                    mass: f(5),
-                }
-            } else {
-                Curve::Timing {
-                    ms: f(3),
-                    delay: f(4),
-                    easing: *Easing::ALL.get(w[6] as usize)?,
-                }
-            };
-            spec.set(Entry {
-                channel,
-                enter_from: (w[1] & 1 != 0).then(|| f(2)),
-                curve,
-            });
+        for o in &program.ops {
+            if let Some(e) = entry_of(o) {
+                spec.set(e);
+            }
         }
-        Some(spec)
+        spec
     }
+
+    pub fn to_words(&self) -> Vec<u32> {
+        self.to_program().to_words()
+    }
+
+    pub fn from_words(words: &[u32]) -> Spec {
+        Spec::from_program(&Program::decode(words))
+    }
+}
+
+fn entry_of(o: &Op) -> Option<Entry> {
+    if o.opcode != ENTRY_OP || o.word(0)? != op::THIS_VIEW {
+        return None;
+    }
+    let enter_from = o.word(3).map(f32::from_bits)?;
+    Some(Entry {
+        channel: Channel::from_id(o.word(1)?)?,
+        enter_from: (o.word(2)? != 0).then_some(enter_from),
+        curve: Curve::from_anim(o.anim()?)?,
+    })
 }
 
 /// A running transition of one channel of one view.
 #[derive(Clone, Copy, Debug)]
-struct Anim {
+struct Running {
     from: f32,
     to: f32,
     value: f32,
@@ -460,9 +474,9 @@ struct Anim {
     jump: bool,
 }
 
-impl Anim {
+impl Running {
     fn new(from: f32, to: f32, velocity: f32, curve: Curve, jump: bool) -> Self {
-        Anim {
+        Running {
             from,
             to,
             value: from,
@@ -574,7 +588,7 @@ pub struct Stats {
 pub struct Motion {
     rest: BTreeMap<(NodeId, Channel), f32>,
     specs: BTreeMap<NodeId, Spec>,
-    anims: BTreeMap<(NodeId, Channel), Anim>,
+    anims: BTreeMap<(NodeId, Channel), Running>,
     reduced: bool,
     stats: Stats,
 }
@@ -638,10 +652,11 @@ impl Motion {
     /// spec a view takes animates its entering channels in. Empty or
     /// malformed words clear the spec. Running transitions finish.
     pub fn view_motion(&mut self, view: NodeId, words: &[u32]) {
-        let Some(spec) = Spec::from_words(words).filter(|s| !s.entries.is_empty()) else {
+        let spec = Spec::from_words(words);
+        if spec.entries.is_empty() {
             self.specs.remove(&view);
             return;
-        };
+        }
         self.stats.specs += 1;
         let first = !self.specs.contains_key(&view);
         if first {
@@ -666,7 +681,7 @@ impl Motion {
         self.stats.started += 1;
         self.anims.insert(
             (view, channel),
-            Anim::new(from, to, velocity, curve, self.reduced),
+            Running::new(from, to, velocity, curve, self.reduced),
         );
     }
 
@@ -740,7 +755,7 @@ mod tests {
         Curve::Timing {
             ms: 200.0,
             delay: 0.0,
-            easing: Easing::EaseOut,
+            easing: Easing::EaseOutCubic,
         }
     }
 
@@ -836,23 +851,45 @@ mod tests {
 
     #[test]
     fn a_spec_survives_the_wire_and_the_words() {
+        let delayed = Curve::Timing {
+            ms: 100.0,
+            delay: 50.0,
+            easing: Easing::Bezier([0.2, 0.0, 0.0, 1.0]),
+        };
         let spec = Spec::new()
             .enter(Channel::Opacity, 0.0, fade())
             .enter(Channel::TranslateY, 12.0, spring())
-            .on_change(Channel::Scale, fade());
+            .on_change(Channel::Scale, delayed);
         assert_eq!(Spec::from_value(&spec.to_value()), Some(spec.clone()));
-        assert_eq!(Spec::from_words(&spec.to_words()), Some(spec.clone()));
-        let mut bytes = Vec::new();
-        spec.to_value().encode(&mut bytes);
+        assert_eq!(Spec::from_words(&spec.to_words()), spec);
+        let bytes = spec.to_value().to_bytes();
+        assert_eq!(bytes[0], 7, "the words go as tag 7");
         assert_eq!(
             crate::decode(&bytes).map(|v| Spec::from_value(&v)),
             Ok(Some(spec.clone()))
         );
-        assert_eq!(bytes[0], 11, "four or more words go as tag 11");
+        // A tag 11 reads the same.
         let words = spec.to_words();
-        let ints = Value::Array(words.iter().map(|w| Value::int(i64::from(*w))).collect());
-        assert_eq!(Spec::from_value(&ints), Some(spec.clone()));
-        assert_eq!(Spec::from_words(&words[..words.len() - 1]), None);
+        assert_eq!(
+            Spec::from_value(&Value::U32Array(words.clone())),
+            Some(spec.clone())
+        );
+        // Each entry is one op 24 for this view.
+        let program = spec.to_program();
+        assert_eq!(program.ops.len(), 3);
+        assert!(
+            program
+                .ops
+                .iter()
+                .all(|o| o.opcode == 24 && o.word(0) == Some(op::THIS_VIEW))
+        );
+        // `to` is NaN, so the programs compare by their words.
+        assert_eq!(Program::decode(&words).to_words(), program.to_words());
+        // A truncated last op is dropped, and the words stay in the tail.
+        let cut = Program::decode(&words[..words.len() - 1]);
+        assert_eq!(cut.ops.len(), 2);
+        assert_eq!(cut.to_words(), words[..words.len() - 1]);
+        assert_eq!(Spec::from_program(&cut).entries.len(), 2);
     }
 
     #[test]

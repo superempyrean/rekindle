@@ -16,12 +16,13 @@ allow.
 | Piece | Status | Where |
 |---|---|---|
 | The 13-tag value codec, fixed-width little-endian (the decoder at VA `0x172bc4c`, the encoder at `0x1751a88`) | recovered | `Value`, `decode` |
-| Integers as tag 3 when they fit an `i32`, colours as integers `0xAARRGGBB`, tag 9 as the insets of `padding`, `margin` and `hitSlopEdges` | recovered | `Value::int`, `Value::color`, `Value::Quad` |
+| Integers as tag 3 when they fit an `i32`, colours as integers `0xAARRGGBB`, tag 9 as the insets of `padding`, `margin` and `hitSlopEdges`, left, top, right and bottom | recovered | `Value::int`, `Value::color`, `Value::Quad` |
 | The 855 PropIds, 0 to 854, by name (tables at VA `0x5d9fcf0` and `0x5da3260`) | recovered | `PropId`, `propid-names.tsv` |
 | The turn: the version byte `0x01` and ten ops, Create to ChildEdits, with `u16` property counts, Null for a removed property, `text` first and `on` last in a Create, and when the guest sends ChildEdits | recovered | `turn` |
 | Kinds as `u16`-length strings: the Android platform's 29 interned view names, in its table's order, and any other kind as a plain string | recovered | `ElementKind::PLATFORM` |
 | The rest of a child list after the last ChildEdits edit, which the platform copies | recovered | `turn::apply_edits` |
 | The words table of tags 11 and 12: one per buffer, a tag 12 naming a list by its place in the same buffer | recovered | `Cursor`, `Turn::own_words` |
+| Whether a writer has a words table. The real guest's turns had none and sent `u32` arrays as tag 7, which `Value::words` writes; `Value::words_tabled` writes tag 11 | open | `Value::words` |
 | UI events: the leading `u32` 0, the version byte, and ops 1 to 9 (`ui`, `back`, `keyCommand`, `insets`, `window`, `frameInterval`, `frame`, `motion`, `navSides`), with what the guest's app drops or clamps | recovered | `event::UiEvent` |
 | What the pairs of event op 8 (`motion`) mean | open, kept as words | `event::UiEvent::Motion` |
 | A reply to a consumed event, as one value (Phoenix's dispatch returns no data for an event) | modelled | `event::FILTER_CONSUME` |
@@ -31,8 +32,10 @@ allow.
 | How `view_props` stores a cell | modelled | `ViewProps` |
 | The accessibility PropIds, the 22 roles, the two `liveRegion` values and the value each is written with | recovered | `a11y` |
 | How a platform turns accessibility cells into a tree | modelled | `a11y::semantics` |
-| The motion engine's 26 channels, `declare`'s resting values and defaults, a per-view spec through `view_motion`, the per-frame tick, `set_reduced`, `viewMotion` as the `u32` words `view_motion` takes (tag 11 from 4 words) | recovered | `motion` |
-| Which words a spec is, the eased and spring curves, and the frame word stream's layout | modelled | `motion::Spec`, `motion::Curve`, `motion::FrameOut` |
+| The motion engine's 26 channels, `declare`'s resting values and defaults, a per-view program through `view_motion`, the per-frame tick, `set_reduced` | recovered | `motion` |
+| The op stream `apply` and `view_motion` take: 32 opcodes, their operands, and the spec grammar (timing with six easings, spring, decay, delay, sequence, repeat, reduced-motion-exempt). `viewMotion` holds it as a tag-7 array of integers, one per word, as the real guest's `[21, 9, 5, 0xffffffff, 0]` | recovered | `motion::op` |
+| What most opcodes and operands mean | open, kept as words | `motion::op::Op` |
+| Which ops a `Spec` is (one op 24 an entry), the timed and spring curves the model runs, and the frame word stream's layout | modelled | `motion::Spec`, `motion::Curve`, `motion::FrameOut` |
 | The filter verdicts (pass, replace, consume) | rekindle's own | `event::FILTER_PASS` and the rest |
 | The capture format | rekindle's own | `capture` |
 
