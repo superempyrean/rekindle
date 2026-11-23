@@ -2,8 +2,10 @@
 # push to main and every pull request; a Linux runner minute is cheaper and
 # builds are faster. The Windows job builds and lints the client workspace
 # and tests the launcher, the root workspace's one Windows-only crate. A
-# Windows minute counts double against the Actions quota, so that job runs
-# on pull requests and on demand, not on every push. The client's
+# Windows minute counts double against the Actions quota of a private
+# repository, so there that job runs on pull requests and on demand. While
+# the repository is public, Actions minutes are free and it runs on every
+# push too. The client's
 # live self-test runs against the mock client, which isn't in this
 # repository.
 
@@ -55,7 +57,7 @@ jobs:
 
   client:
     name: Client workspace
-    if: github.event_name != 'push'
+    if: github.event_name != 'push' || !github.event.repository.private
     runs-on: windows-latest
     defaults:
       run:
