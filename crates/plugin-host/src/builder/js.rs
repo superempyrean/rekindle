@@ -23,6 +23,81 @@ use crate::manifest::Manifest;
 /// The jco release these builds are made and tested with.
 pub const JCO_VERSION: &str = "1.41.0";
 
+/// The TypeScript the shared toolchain installs.
+pub const TYPESCRIPT_VERSION: &str = "7.0.2";
+
+/// jco's package file, relative to a `node_modules` parent.
+const JCO_PACKAGE: &str = "node_modules/@bytecodealliance/jco/package.json";
+
+/// The JavaScript toolchain (jco and TypeScript) shared by every project
+/// that has no `node_modules` of its own: `cache/js-toolchain/<jco version>`
+/// in the rekindle home.
+pub fn shared_toolchain_dir() -> Result<PathBuf> {
+    Ok(crate::home::Home::from_env()?
+        .root()
+        .join("cache")
+        .join("js-toolchain")
+        .join(JCO_VERSION))
+}
+
+/// Install the shared toolchain with npm, unless it is already installed.
+/// Returns its directory.
+pub fn install_shared_toolchain() -> Result<PathBuf> {
+    let dir = shared_toolchain_dir()?;
+    let done = dir.join(".installed");
+    if done.is_file() {
+        return Ok(dir);
+    }
+    std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+    std::fs::write(
+        dir.join("package.json"),
+        format!(
+            r#"{{"name":"rekindle-js-toolchain","private":true,"dependencies":{{"@bytecodealliance/jco":"{JCO_VERSION}","typescript":"{TYPESCRIPT_VERSION}"}}}}"#
+        ),
+    )?;
+    eprintln!(
+        "note: installing jco {JCO_VERSION} and TypeScript {TYPESCRIPT_VERSION} into {}, once for every plugin without its own node_modules",
+        dir.display()
+    );
+    let mut npm = if cfg!(windows) {
+        let mut c = Command::new("cmd");
+        c.args(["/C", "npm"]);
+        c
+    } else {
+        Command::new("npm")
+    };
+    let status = npm
+        .current_dir(&dir)
+        .args(["install", "--no-audit", "--no-fund", "--loglevel", "error"])
+        .status()
+        .context(
+            "running npm (JavaScript and TypeScript plugins need Node.js, which includes npm)",
+        )?;
+    if !status.success() {
+        bail!(
+            "npm couldn't install the JavaScript toolchain into {}",
+            dir.display()
+        );
+    }
+    std::fs::write(&done, JCO_VERSION)?;
+    Ok(dir)
+}
+
+/// A toolchain file: the project's (or an ancestor's) `node_modules` first,
+/// then the shared toolchain, installed first if `install`.
+fn toolchain_file(dir: &Path, rel: &str, install: bool) -> Result<Option<PathBuf>> {
+    if let Some(p) = guest::find_up(dir, &[rel]) {
+        return Ok(Some(p));
+    }
+    let shared = if install {
+        install_shared_toolchain()?
+    } else {
+        shared_toolchain_dir()?
+    };
+    let p = shared.join(rel);
+    Ok(p.exists().then_some(p))
+}
+
 const PRELUDE: &str = include_str!("../../templates/js/prelude.mjs");
 const ENTRY: &str = include_str!("../../templates/js/entry.mjs");
 
@@ -327,20 +402,16 @@ pub(super) fn read(package_json: &Path) -> Result<(Manifest, Config)> {
     Ok((manifest, Config { entry, engine }))
 }
 
-/// jco's CLI script, from the project's (or an ancestor's) `node_modules`.
+/// jco's CLI script: the project's (or an ancestor's) `node_modules`, else
+/// the shared toolchain, which this installs if it has to.
 fn jco(dir: &Path) -> Result<PathBuf> {
     #[derive(Deserialize)]
     struct Bin {
         bin: serde_json::Value,
     }
-    let pkg = guest::find_up(dir, &["node_modules/@bytecodealliance/jco/package.json"])
-        .with_context(|| {
-            format!(
-                "jco isn't installed for {}; run `npm install` there (the package.json should have \
-             `\"@bytecodealliance/jco\": \"{JCO_VERSION}\"` in devDependencies)",
-                dir.display()
-            )
-        })?;
+    let pkg = toolchain_file(dir, JCO_PACKAGE, true)?.context(
+        "the shared JavaScript toolchain has no jco; delete its directory and build again",
+    )?;
     let bin: Bin =
         serde_json::from_slice(&std::fs::read(&pkg)?).context("reading jco's package.json")?;
     let rel = match &bin.bin {
@@ -630,8 +701,8 @@ fn type_check(dir: &Path, entry: &Path, quiet: bool) -> Result<()> {
         note("the project has no tsconfig.json");
         return Ok(());
     }
-    let Some(tsc) = guest::find_up(dir, &["node_modules/typescript/bin/tsc"]) else {
-        note("TypeScript isn't installed (`npm install` installs it)");
+    let Some(tsc) = toolchain_file(dir, "node_modules/typescript/bin/tsc", false)? else {
+        note("TypeScript isn't installed");
         return Ok(());
     };
     let out = node(dir)

@@ -377,17 +377,10 @@ fn new_typescript(
   }},
   "scripts": {{
     "build": "rekindle build",
-    "test": "rekindle test",
-    "check": "tsc --noEmit",
-    "postinstall": "rekindle sdk || echo rekindle is not installed, so the SDK types were not written"
-  }},
-  "devDependencies": {{
-    "@bytecodealliance/jco": "{jco}",
-    "typescript": "7.0.2"
+    "test": "rekindle test"
   }}
 }}
-"##,
-        jco = builder::js::JCO_VERSION,
+"##
     );
     write_files(
         root,
@@ -413,8 +406,9 @@ fn new_typescript(
             ),
         ],
     )?;
-    // The SDK now, so the editor resolves `rekindle` imports before the
-    // first build (the toolchain's declarations follow `npm install`).
+    // The SDK and the contract's declarations now, so the editor resolves
+    // `rekindle` imports before the first build. This installs the shared
+    // toolchain the first time.
     if let Err(e) = builder::write_editor_files(root) {
         eprintln!("warning: couldn't write the SDK: {e:#}");
     }
@@ -422,9 +416,8 @@ fn new_typescript(
     println!("created {} ({id})", root.display());
     // A toolchain an ancestor directory already has (an npm workspace) is
     // used as it is.
-    let shared =
-        builder::guest::find_up(root, &["node_modules/@bytecodealliance/jco/package.json"]);
-    if let Some(found) = &shared {
+    let local = builder::guest::find_up(root, &["node_modules/@bytecodealliance/jco/package.json"]);
+    if let Some(found) = &local {
         let base = found
             .ancestors()
             .find(|a| a.ends_with("node_modules"))
@@ -437,20 +430,11 @@ fn new_typescript(
         );
     }
     let wasm = format!("produce target/rekindle/{id}.wasm");
-    let mut steps = vec![
+    let steps = [
         ("rekindle dev", "live preview with hot reload"),
         ("rekindle test", "run the tests in tests/"),
         ("rekindle build", wasm.as_str()),
     ];
-    if shared.is_none() {
-        steps.insert(
-            0,
-            (
-                "npm install",
-                "install the toolchain (or share one: put plugins in an npm workspace)",
-            ),
-        );
-    }
     next_steps(root, &steps);
     Ok(())
 }
