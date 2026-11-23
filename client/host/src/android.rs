@@ -43,7 +43,8 @@ pub(crate) fn install(hooks: &Hooks) -> anyhow::Result<usize> {
     ORIGINAL.store(original, Ordering::SeqCst);
     // SAFETY: the slot holds the emit method, whose signature is `EmitFn`,
     // as `hooked_emit`'s is.
-    let swap = unsafe { rekindle_hook::SlotSwap::install(slot, hooked_emit as *const () as usize)? };
+    let swap =
+        unsafe { rekindle_hook::SlotSwap::install(slot, hooked_emit as *const () as usize)? };
     if swap.original() != original {
         anyhow::bail!("the emit slot at {slot:#x} changed while it was swapped");
     }
@@ -67,7 +68,11 @@ fn is_turn(buf: &[u8]) -> bool {
 }
 
 /// Called by the guest in place of its transport's emit method.
-unsafe extern "C" fn hooked_emit(transport: *mut c_void, bytes: *const u8, len: usize) -> EmitResult {
+unsafe extern "C" fn hooked_emit(
+    transport: *mut c_void,
+    bytes: *const u8,
+    len: usize,
+) -> EmitResult {
     // SAFETY: the guest passes `len` readable bytes.
     let buf = unsafe { std::slice::from_raw_parts(bytes, len) };
     let counter = if is_turn(buf) { &TURNS } else { &CALLS };
