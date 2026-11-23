@@ -28,13 +28,15 @@
 //! The encoder sends an array as tag 11 or 12 only when the writer has a
 //! words table and the array holds 4 to 65535 integers in `u32` range. Tag
 //! 12 is chosen when patching one of the last 64 same-length lists is
-//! smaller than sending the list. The turn driver installs a table or none
-//! by a flag, and what sets the flag isn't read. The Android guest, run
-//! headless, wrote no tag 11 or 12 in any buffer, and sent arrays of up to
-//! 139 integers in `u32` range as tag 7. [`Value::words`] writes tag 7, as
-//! it did. [`Value::words_tabled`] writes tag 11 under the encoder's rule,
-//! for a writer known to have a table, and never chooses tag 12. Both tags
-//! decode either way.
+//! smaller than sending the list. The turn driver installs a table when
+//! the platform's capabilities include `WireWords`, which the guest reads
+//! from the `capabilities` of the `DeviceInfo.constants` reply. The Android
+//! platform always lists it. The Android guest, run headless with that
+//! call unanswered, wrote no tag 11 or 12 and sent arrays of up to 139
+//! integers as tag 7. With `WireWords` in the reply, the same run wrote
+//! tag 11 and tag 12. [`Value::words`] writes tag 7, which every platform
+//! reads. [`Value::words_tabled`] writes tag 11 under the encoder's rule,
+//! and never chooses tag 12. Both tags decode either way.
 
 use crate::PropId;
 

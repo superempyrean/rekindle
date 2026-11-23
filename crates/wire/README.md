@@ -22,7 +22,7 @@ allow.
 | Kinds as `u16`-length strings: the Android platform's 29 interned view names, in its table's order, and any other kind as a plain string | recovered | `ElementKind::PLATFORM` |
 | The rest of a child list after the last ChildEdits edit, which the platform copies | recovered | `turn::apply_edits` |
 | The words table of tags 11 and 12: one per buffer, a tag 12 naming a list by its place in the same buffer | recovered | `Cursor`, `Turn::own_words` |
-| Whether a writer has a words table. The real guest's turns had none and sent `u32` arrays as tag 7, which `Value::words` writes; `Value::words_tabled` writes tag 11 | open | `Value::words` |
+| What turns the words table on: `WireWords` in the `capabilities` of the platform's `DeviceInfo.constants` reply, which the Android platform always sends. Without it the guest sends `u32` arrays as tag 7, which `Value::words` writes; `Value::words_tabled` writes tag 11 | recovered | `Value::words` |
 | UI events: the leading `u32` 0, the version byte, and ops 1 to 9 (`ui`, `back`, `keyCommand`, `insets`, `window`, `frameInterval`, `frame`, `motion`, `navSides`), with what the guest's app drops or clamps | recovered | `event::UiEvent` |
 | What the pairs of event op 8 (`motion`) mean | open, kept as words | `event::UiEvent::Motion` |
 | A reply to a consumed event, as one value (Phoenix's dispatch returns no data for an event) | modelled | `event::FILTER_CONSUME` |
@@ -34,8 +34,11 @@ allow.
 | How a platform turns accessibility cells into a tree | modelled | `a11y::semantics` |
 | The motion engine's 26 channels, `declare`'s resting values and defaults, a per-view program through `view_motion`, the per-frame tick, `set_reduced` | recovered | `motion` |
 | The op stream `apply` and `view_motion` take: 32 opcodes, their operands, and the spec grammar (timing with six easings, spring, decay, delay, sequence, repeat, reduced-motion-exempt). `viewMotion` holds it as a tag-7 array of integers, one per word, as the real guest's `[21, 9, 5, 0xffffffff, 0]` | recovered | `motion::op` |
-| What most opcodes and operands mean | open, kept as words | `motion::op::Op` |
-| Which ops a `Spec` is (one op 24 an entry), the timed and spring curves the model runs, and the frame word stream's layout | modelled | `motion::Spec`, `motion::Curve`, `motion::FrameOut` |
+| Ops 3 and 4 (bind and unbind a worklet), 21 (a value follows a platform input, such as a view's pressed state), 24 (the layout transition) and 28 (the size transition), and the platform's input kinds | recovered | `motion::op::code`, `Follow`, `LayoutTransition`, `motion::op::input` |
+| What the other opcodes' operands mean | open, kept as words | `motion::op::Op` |
+| The spring's closed form, its settle rules and the 64 ms cap on a frame, matched frame by frame to the engine under emulation | recovered | `motion::spring` |
+| The `worklet` cell: a worklet id, then its arguments, sent to the engine as op 3. The `press_look` worklet on the real guest's buttons, with its colours | recovered | `motion::worklet` |
+| Which ops a `Spec` is (one op 24 an entry, with words of rekindle's), when a timed transition settles, and the frame word stream's layout | modelled | `motion::Spec`, `motion::Curve`, `motion::FrameOut` |
 | The filter verdicts (pass, replace, consume) | rekindle's own | `event::FILTER_PASS` and the rest |
 | The capture format | rekindle's own | `capture` |
 
