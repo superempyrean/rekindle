@@ -4,7 +4,7 @@
 // your own activity and work any time (a timer, an event), at most 5 changes
 // per 20 s.
 
-import * as raw from 'rekindle:plugin/presence@0.8.0';
+import * as raw from 'rekindle:plugin/presence@0.9.0';
 import { call, optU64, u64, type Id } from 'rekindle';
 
 export type RichPresence = raw.RichPresence;

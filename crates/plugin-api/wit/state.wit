@@ -9,8 +9,9 @@
 //   * Within one callback, answers are a consistent snapshot.
 //   * Records are rekindle's own projection, modelled on the client's
 //     stores (MessageStore, ChannelStore, GuildMemberStore, ...), not on
-//     gateway JSON. Secrets never appear: no tokens, no voice session ids,
-//     no activity secrets, no email/phone/MFA, no private user flags.
+//     gateway JSON, with the fields the client's own models have. Secrets
+//     never appear: no tokens, no voice session ids, no activity secrets.
+//     The current user's account fields (email, phone, MFA) are on `me`.
 //   * `none` means "not loaded / not visible to you", never an error.
 //   * Lists are capped (200 unless noted); a capped list says so via the
 //     paired `*-count` query where one exists.
@@ -20,7 +21,7 @@
 /// share these shapes without importing the query interfaces (a `use` of
 /// another interface is an import of it).
 interface records {
-    use types.{snowflake, color, user-ref, message-ref};
+    use types.{snowflake, color, user-ref, message-ref, avatar-decoration, nameplate, display-name-style, primary-guild};
 
     /// One permission overwrite on a channel.
     record overwrite {
@@ -50,15 +51,51 @@ interface records {
     record user {
         id: snowflake,
         username: string,
+        /// "0" for users on unique usernames.
+        discriminator: string,
         global-name: option<string>,
         bot: bool,
         system: bool,
         /// Public badge bits (`public_flags`). SDK constants.
         public-flags: u64,
+        /// All flag bits, public and private, where the client has them.
+        flag-bits: u64,
+        /// 0 none, 1 Nitro Classic, 2 Nitro, 3 Nitro Basic.
+        premium-type: u8,
+        /// Avatar and banner hashes.
+        avatar: option<string>,
+        banner: option<string>,
         /// Profile accent colour, if set.
         accent: option<color>,
         /// An avatar decoration or nameplate is set (rendered by the host).
         has-decoration: bool,
+        avatar-decoration: option<avatar-decoration>,
+        nameplate: option<nameplate>,
+        display-name-style: option<display-name-style>,
+        primary-guild: option<primary-guild>,
+
+        // ---- From the profile, if the client has loaded it ----
+        bio: option<string>,
+        pronouns: option<string>,
+        /// Profile theme: primary and accent.
+        theme-colors: list<color>,
+        profile-effect: option<snowflake>,
+
+        // ---- The current user's own account; `none` for others ----
+        locale: option<string>,
+        verified: option<bool>,
+        mfa-enabled: option<bool>,
+        /// `email`, `phone` and `store-country` need `read-account`.
+        email: option<string>,
+        phone: option<string>,
+        nsfw-allowed: option<bool>,
+        /// Discord's age verification status number.
+        age-verification-status: option<u8>,
+        /// Purchase flag bits.
+        purchased-flags: option<u64>,
+        /// The two-factor methods set up (Discord's numbers).
+        authenticator-types: list<u8>,
+        store-country: option<string>,
     }
 
     record custom-status { text: option<string>, emoji: option<string>, expires-ms: option<u64> }
@@ -75,6 +112,30 @@ interface records {
         verification-level: u8,
         nsfw-level: u8,
         preferred-locale: string,
+        /// Icon, banner, invite splash and discovery splash hashes.
+        icon: option<string>,
+        banner: option<string>,
+        splash: option<string>,
+        discovery-splash: option<string>,
+        vanity-url-code: option<string>,
+        afk-channel: option<snowflake>,
+        afk-timeout-secs: u32,
+        system-channel: option<snowflake>,
+        rules-channel: option<snowflake>,
+        public-updates-channel: option<snowflake>,
+        safety-alerts-channel: option<snowflake>,
+        /// System channel flag bits.
+        system-channel-flags: u32,
+        mfa-level: u8,
+        explicit-content-filter: u8,
+        default-message-notifications: u8,
+        premium-progress-bar: bool,
+        max-members: option<u32>,
+        max-video-channel-users: option<u32>,
+        /// The bot's application, for a bot-created guild.
+        application: option<snowflake>,
+        large: bool,
+        unavailable: bool,
         /// From the client's guild record (approximate for large guilds).
         member-count: option<u32>,
         /// When you joined, epoch ms.
@@ -121,6 +182,26 @@ interface records {
         last-message: option<snowflake>,
         /// DM / group DM recipients.
         recipients: list<user-ref>,
+        /// Group DM owner and icon hash.
+        owner: option<snowflake>,
+        icon: option<string>,
+        /// Voice: bitrate, user limit, region, video quality mode.
+        bitrate: option<u32>,
+        user-limit: option<u32>,
+        rtc-region: option<string>,
+        video-quality: option<u8>,
+        /// Channel flag bits.
+        flag-bits: u64,
+        default-auto-archive-mins: option<u32>,
+        default-thread-slowmode: option<u32>,
+        /// Forum and media: the default reaction and sort and layout modes.
+        default-reaction: option<string>,
+        default-sort: option<u8>,
+        default-layout: option<u8>,
+        last-pin-ms: option<u64>,
+        /// DMs: a message request, and marked as spam.
+        message-request: bool,
+        spam: bool,
         thread: option<thread-meta>,
         forum-tags: list<forum-tag>,
         /// You've muted it.
@@ -148,6 +229,18 @@ interface records {
         managed: bool,
         /// Unicode emoji role icon; image icons are host-rendered only.
         unicode-emoji: option<string>,
+        /// The image icon's hash.
+        icon: option<string>,
+        /// Role flag bits.
+        flag-bits: u32,
+        /// Tags: the bot or integration it belongs to, the booster role,
+        /// a subscription listing, purchasable, the linked role.
+        bot: option<snowflake>,
+        integration: option<snowflake>,
+        premium-subscriber: bool,
+        subscription-listing: option<snowflake>,
+        available-for-purchase: bool,
+        guild-connections: bool,
     }
 
     record emoji {
@@ -298,6 +391,20 @@ interface records {
         my-votes: list<u32>,
     }
 
+    record message-interaction {
+        id: snowflake,
+        /// Discord's interaction type number.
+        kind: u8,
+        user: snowflake,
+        /// The command's name, for a command.
+        name: option<string>,
+    }
+
+    record message-call {
+        participants: list<snowflake>,
+        ended-ms: option<u64>,
+    }
+
     /// A forwarded message's snapshot.
     record forwarded {
         content: string,
@@ -335,6 +442,22 @@ interface records {
         /// The thread started from this message.
         thread: option<snowflake>,
         forwarded: option<forwarded>,
+        /// The nonce the sender's client set, if the message has one.
+        nonce: option<string>,
+        webhook-id: option<snowflake>,
+        application-id: option<snowflake>,
+        /// The command or component interaction that made it.
+        interaction: option<message-interaction>,
+        mention-channels: list<snowflake>,
+        /// Its position in a thread.
+        position: option<u32>,
+        call: option<message-call>,
+        /// Buttons, selects and other components, as Discord's JSON.
+        components-json: option<string>,
+        /// The message this replies to was deleted.
+        reply-deleted: bool,
+        /// A role subscription purchase: (listing, tier name, months, renewal).
+        role-subscription: option<tuple<snowflake, string, u32, bool>>,
         /// Only you can see it (ephemeral / local system message).
         ephemeral: bool,
         /// Still sending / failed to send (your own).
@@ -532,4 +655,42 @@ interface inspect {
     use types.{target};
 
     raw-json: func(target: target) -> option<string>;
+}
+
+/// Pages of a channel's history (requires `history`, and each call needs
+/// `read-messages`). `messages.loaded-messages` returns what the client
+/// has loaded. This reads further back, as the same `message` records.
+interface history {
+    use types.{snowflake};
+    use records.{message};
+
+    record history-query {
+        channel: snowflake,
+        /// Newest first, older than this message. Without `before` or
+        /// `after`, the newest page.
+        before: option<snowflake>,
+        /// Oldest first, newer than this message. Ignored with `before`.
+        after: option<snowflake>,
+        /// At most 1000.
+        limit: u32,
+    }
+
+    record page {
+        messages: list<message>,
+        /// The next page's `before` (or `after`), or `none` at the end.
+        cursor: option<snowflake>,
+    }
+
+    enum history-error {
+        /// The plugin has no `read-messages`.
+        not-granted,
+        /// This client build can't read its history.
+        unavailable,
+        /// The host's per-plugin rate limit.
+        rate-limited,
+        /// No channel, or a limit of 0.
+        invalid,
+    }
+
+    query: func(q: history-query) -> result<page, history-error>;
 }

@@ -69,6 +69,10 @@ pub(super) fn cap_to_wit(c: Capability) -> wit::types::Capability {
         Capability::Tweaks => W::Tweaks,
         Capability::Files => W::Files,
         Capability::Intercept => W::Intercept,
+        Capability::Moderate => W::Moderate,
+        Capability::History => W::History,
+        Capability::View => W::View,
+        Capability::ReadAccount => W::ReadAccount,
     }
 }
 

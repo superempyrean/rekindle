@@ -8,8 +8,8 @@
 // the thing on its own.
 //
 // Risk classes from the research (L local, S self-state, P presence others
-// see, O outward content). Moderation over others (M) and account/security
-// (X) are not offered yet.
+// see, O outward content, M moderation over others). Account and security
+// settings (X) are not offered.
 
 /// Shared result type for actions.
 interface action-types {
@@ -63,6 +63,9 @@ interface local-actions {
     start-edit: func(message: message-ref) -> result<_, action-error>;
     /// Put text into the composer at the cursor, for the user to send.
     insert-text: func(text: string) -> result<_, action-error>;
+    /// Open the DM with a user, creating it if needed, the way the
+    /// client's Message button does. Returns the DM channel.
+    open-dm: func(user: snowflake) -> result<snowflake, action-error>;
 
     /// Per-user local voice settings (MediaEngineStore; synced to your
     /// own audio settings, invisible to others).
@@ -129,9 +132,119 @@ interface actions {
     /// Join/leave a thread.
     set-thread-joined: func(thread: snowflake, joined: bool) -> result<_, action-error>;
 
-    // Not offered yet: forwarding, typing indicators, friend requests,
-    // invites, joining guilds, calling, anything over other members (kick,
-    // ban, timeout, server mute, move), and account/security settings.
+    /// Forward a message to a channel the user can send in.
+    forward-message: func(message: message-ref, to-channel: snowflake) -> result<_, action-error>;
+    /// Show the user as typing in a channel for a few seconds.
+    set-typing: func(channel: snowflake) -> result<_, action-error>;
+    /// `add` sends or accepts a friend request. Otherwise this removes the
+    /// friend, or cancels or declines the request.
+    set-friend: func(user: snowflake, add: bool) -> result<_, action-error>;
+    /// Create an invite to a channel (needs CREATE_INSTANT_INVITE) and
+    /// return its code. A `max-age-secs` or `max-uses` of 0 means no limit.
+    create-invite: func(channel: snowflake, max-age-secs: u32, max-uses: u32) -> result<string, action-error>;
+    /// Join a guild from an invite code. Returns the guild.
+    join-guild: func(invite-code: string) -> result<snowflake, action-error>;
+
+    // Not offered: calls, raw API requests and account or security
+    // settings. Moderating other members is `moderation`.
+}
+
+/// Moderating other members (requires `moderate`). Class M. Each call is
+/// gesture-bound and budgeted like `actions`, needs the Discord permission
+/// for it (the host checks first), and the host asks the user to confirm.
+interface moderation {
+    use types.{snowflake};
+    use action-types.{action-error};
+
+    /// Needs KICK_MEMBERS.
+    kick: func(guild: snowflake, user: snowflake, reason: option<string>) -> result<_, action-error>;
+    /// Needs BAN_MEMBERS. Deletes the user's messages from the last
+    /// `delete-message-secs` seconds, up to 604800 (7 days).
+    ban: func(guild: snowflake, user: snowflake, delete-message-secs: u32, reason: option<string>) -> result<_, action-error>;
+    /// Needs BAN_MEMBERS.
+    unban: func(guild: snowflake, user: snowflake) -> result<_, action-error>;
+    /// Time a member out until `until-ms` (epoch ms), or end it with
+    /// `none`. Needs MODERATE_MEMBERS.
+    timeout: func(guild: snowflake, user: snowflake, until-ms: option<u64>, reason: option<string>) -> result<_, action-error>;
+    /// Needs MUTE_MEMBERS.
+    set-voice-mute: func(guild: snowflake, user: snowflake, muted: bool) -> result<_, action-error>;
+    /// Needs DEAFEN_MEMBERS.
+    set-voice-deaf: func(guild: snowflake, user: snowflake, deafened: bool) -> result<_, action-error>;
+    /// Move a member to a voice channel, or disconnect them with `none`.
+    /// Needs MOVE_MEMBERS.
+    move-member: func(guild: snowflake, user: snowflake, channel: option<snowflake>) -> result<_, action-error>;
+    /// Delete 2 to 100 messages in a channel, each under 14 days old.
+    /// Needs MANAGE_MESSAGES.
+    bulk-delete: func(channel: snowflake, messages: list<snowflake>) -> result<_, action-error>;
+}
+
+/// Local overrides of how this client shows users and members, the current
+/// user included, and of the user's own settings (requires `view`). Not
+/// gesture-bound. The host lays them over what the client reads, in the
+/// order the plugins set them, and drops a plugin's when it unloads.
+/// Nothing is sent to Discord.
+interface view {
+    use types.{snowflake, color, avatar-decoration, nameplate, display-name-style, primary-guild};
+    use action-types.{action-error};
+
+    /// Whose records an override applies to.
+    variant users {
+        me,
+        others,
+        everyone,
+        one(snowflake),
+    }
+
+    /// A field of `records.user`.
+    variant user-field {
+        username(string),
+        discriminator(string),
+        global-name(option<string>),
+        bot(bool),
+        public-flags(u64),
+        flag-bits(u64),
+        premium-type(u8),
+        avatar(option<string>),
+        banner(option<string>),
+        accent(option<color>),
+        avatar-decoration(option<avatar-decoration>),
+        nameplate(option<nameplate>),
+        display-name-style(option<display-name-style>),
+        primary-guild(option<primary-guild>),
+        bio(option<string>),
+        pronouns(option<string>),
+        theme-colors(list<color>),
+        profile-effect(option<snowflake>),
+        locale(option<string>),
+        verified(option<bool>),
+        mfa-enabled(option<bool>),
+        nsfw-allowed(option<bool>),
+        age-verification-status(option<u8>),
+    }
+
+    /// A field of `types.member`.
+    variant member-field {
+        nick(option<string>),
+        roles(list<snowflake>),
+        avatar(option<string>),
+        banner(option<string>),
+        bio(option<string>),
+        avatar-decoration(option<avatar-decoration>),
+        flag-bits(u32),
+        timed-out-until-ms(option<u64>),
+    }
+
+    /// Override these fields of the users `who` names. A later call for the
+    /// same `who` and field replaces the earlier one.
+    set-users: func(who: users, fields: list<user-field>) -> result<_, action-error>;
+    /// Override these fields of members, in one guild or, with `none`, in
+    /// every guild.
+    set-members: func(guild: option<snowflake>, who: users, fields: list<member-field>) -> result<_, action-error>;
+    /// Override one of the keys `client-state.my-setting-keys` lists, as its
+    /// string form, or drop the override with `none`.
+    set-my-setting: func(key: string, value: option<string>) -> result<_, action-error>;
+    /// Drop every override this plugin made.
+    reset: func();
 }
 
 /// Your presence (requires `presence`). Class P: others see these.

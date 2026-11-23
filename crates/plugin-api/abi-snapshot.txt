@@ -1,13 +1,18 @@
-version 0.8.0
-wit-sha256 115abd7d8e1741ef40c4a70e6e0de269b5377fc4407518a3cb22364c87a1a4e9
+version 0.9.0
+wit-sha256 b703c801ee1a2c73fea046cd326d177c70e30aba8939f4c8d701303cbd513dc2
+func actions.create-invite
 func actions.delete-message
 func actions.edit-message
+func actions.forward-message
+func actions.join-guild
 func actions.join-voice
 func actions.send-message
+func actions.set-friend
 func actions.set-pinned
 func actions.set-self-deaf
 func actions.set-self-mute
 func actions.set-thread-joined
+func actions.set-typing
 func actions.suppress-embeds
 func actions.vote
 func audio.client-sounds
@@ -53,6 +58,7 @@ func event-filter.on-intercept
 func event-handler.on-events
 func files.open
 func files.save
+func history.query
 func host-events.intercept
 func host-events.subscribe
 func host.clear-timer
@@ -77,6 +83,7 @@ func local-actions.mark-all-read
 func local-actions.mark-guild-read
 func local-actions.mark-read
 func local-actions.mark-unread
+func local-actions.open-dm
 func local-actions.save-message
 func local-actions.set-category-collapsed
 func local-actions.set-muted
@@ -90,6 +97,14 @@ func messages.loaded-messages
 func messages.pins
 func messages.resolve-message-link
 func messages.visible-messages
+func moderation.ban
+func moderation.bulk-delete
+func moderation.kick
+func moderation.move-member
+func moderation.set-voice-deaf
+func moderation.set-voice-mute
+func moderation.timeout
+func moderation.unban
 func notification-filter.on-notification
 func notify.post
 func overlay.clear
@@ -189,6 +204,10 @@ func users.relationships
 func users.speaking
 func users.typing
 func users.voice-states
+func view.reset
+func view.set-members
+func view.set-my-setting
+func view.set-users
 capability read-client
 capability read-users
 capability read-messages
@@ -210,6 +229,10 @@ capability presence
 capability tweaks
 capability files
 capability intercept
+capability moderate
+capability history
+capability view
+capability read-account
 slot message.context-menu Menu
 slot message.hover-bar Button
 slot user.context-menu Menu

@@ -311,6 +311,27 @@ impl<'a> Sim<'a> {
             member_count: g.member_count,
             joined_ms: g.joined_at.as_deref().and_then(convert::iso_ms),
             muted: false,
+            icon: props.icon,
+            banner: props.banner,
+            splash: props.splash,
+            discovery_splash: props.discovery_splash,
+            vanity_url_code: props.vanity_url_code,
+            afk_channel: props.afk_channel_id,
+            afk_timeout_secs: props.afk_timeout,
+            system_channel: props.system_channel_id,
+            rules_channel: props.rules_channel_id,
+            public_updates_channel: props.public_updates_channel_id,
+            safety_alerts_channel: props.safety_alerts_channel_id,
+            system_channel_flags: props.system_channel_flags,
+            mfa_level: props.mfa_level,
+            explicit_content_filter: props.explicit_content_filter,
+            default_message_notifications: props.default_message_notifications,
+            premium_progress_bar: props.premium_progress_bar_enabled,
+            max_members: props.max_members,
+            max_video_channel_users: props.max_video_channel_users,
+            application: props.application_id,
+            large: g.large,
+            unavailable: g.unavailable,
         });
         self.world
             .roles
@@ -474,6 +495,24 @@ impl<'a> Sim<'a> {
                 .collect(),
             muted: self.stores.muted_channels.contains(&c.id),
             visible: old.is_none_or(|o| o.visible),
+            owner: c.owner_id,
+            icon: c.icon.clone(),
+            bitrate: c.bitrate,
+            user_limit: c.user_limit,
+            rtc_region: c.rtc_region.clone(),
+            video_quality: c.video_quality_mode,
+            flag_bits: c.flags,
+            default_auto_archive_mins: c.default_auto_archive_duration,
+            default_thread_slowmode: c.default_thread_rate_limit_per_user,
+            default_reaction: c
+                .default_reaction_emoji
+                .as_ref()
+                .and_then(|r| r.emoji_name.clone().or(r.emoji_id.map(|i| i.to_string()))),
+            default_sort: c.default_sort_order,
+            default_layout: c.default_forum_layout,
+            last_pin_ms: c.last_pin_timestamp.as_deref().and_then(convert::iso_ms),
+            message_request: c.is_message_request,
+            spam: c.is_spam,
         };
         // Threads have no overwrites of their own.
         if guild.is_some() && !is_thread(c.kind) {
@@ -520,11 +559,10 @@ impl<'a> Sim<'a> {
                 old.map_or(0, |o| o.public_flags)
             },
             accent: u.accent_color.map(convert::rgb),
-            has_decoration: u
-                .avatar_decoration_data
-                .as_ref()
-                .is_some_and(|v| !v.is_null()),
+            ..old.cloned().unwrap_or_default()
         };
+        let mut user = user;
+        convert::user_fields(u, &mut user);
         self.world.users.insert(u.id, user);
     }
 

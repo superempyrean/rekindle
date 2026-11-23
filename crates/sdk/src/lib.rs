@@ -48,6 +48,9 @@
 //! | [`render`] | `render-messages` | change how messages look ([`Plugin::render`]) |
 //! | [`compose`] | `compose` | rewrite the user's outgoing messages ([`Plugin::on_compose`]) |
 //! | [`actions`] | `act-local`, `react`, `act` | act as the user, on their click |
+//! | [`moderation`] | `moderate` | kick, ban, timeout, voice moderation, bulk delete, on the user's click |
+//! | [`history`] | `history` | page through a channel's history past what is loaded |
+//! | [`view`] | `view` | change how this client shows users, members and the user's settings |
 //! | [`presence`] | `presence` | status, custom status, rich presence |
 //! | [`theme`] | `theming` | tokens, tint, fonts, surfaces, background |
 //! | [`storage`] | `storage` | key/value data |
@@ -71,8 +74,10 @@ pub mod consts;
 pub mod decorations;
 pub mod events;
 pub mod files;
+pub mod history;
 pub mod http;
 pub mod messages;
+pub mod moderation;
 pub mod notify;
 pub mod overlay;
 pub mod presence;
@@ -87,6 +92,7 @@ pub mod timer;
 pub mod tweaks;
 pub mod ui;
 pub mod users;
+pub mod view;
 
 #[doc(hidden)]
 pub mod __private;
@@ -120,8 +126,9 @@ pub mod prelude {
         UserRef, now_millis,
     };
     pub use crate::{
-        actions, audio, clipboard, consts, events, files, http, messages, notify, overlay,
-        presence, settings, state, storage, theme, time, timer, tweaks, users,
+        actions, audio, clipboard, consts, events, files, history, http, messages, moderation,
+        notify, overlay, presence, settings, state, storage, theme, time, timer, tweaks, users,
+        view,
     };
     pub use crate::{debug, error, info, trace, warn};
 }

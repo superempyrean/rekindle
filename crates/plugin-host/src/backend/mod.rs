@@ -27,9 +27,9 @@ pub use mock::{MockBackend, RegisteredFont, World};
 
 use crate::api;
 use crate::model::{
-    Action, ActionError, Color, DesktopNotification, Element, FileError, OverlaySprite, Panel,
-    PickedFile, SlotError, SlotItem, SurfaceStyle, ThemeValue, Tint, ToastKind, Tweak, TweakError,
-    UiError, UiOp,
+    Action, ActionError, ActionValue, Color, DesktopNotification, Element, FileError,
+    OverlaySprite, Panel, PickedFile, SlotError, SlotItem, SurfaceStyle, ThemeValue, Tint,
+    ToastKind, Tweak, TweakError, UiError, UiOp,
 };
 use crate::tokens::{ThemeError, TokenInfo};
 
@@ -332,6 +332,35 @@ pub trait ClientBackend: Send {
     /// permissions (`Forbidden`) and whether the target is loaded.
     fn perform(&mut self, _plugin: &str, _action: Action) -> Result<(), ActionError> {
         Err(ActionError::Unavailable)
+    }
+
+    /// Perform an action that returns something: `open-dm`, `create-invite`
+    /// and `join-guild`. Checked like [`Self::perform`].
+    fn perform_value(&mut self, plugin: &str, action: Action) -> Result<ActionValue, ActionError> {
+        self.perform(plugin, action).map(|()| ActionValue::None)
+    }
+
+    /// A page of a channel's history past what the client has loaded:
+    /// newest first older than `before`, or oldest first newer than
+    /// `after`. `None`: this build can't read its history. The real client
+    /// should read its own message store.
+    fn history(
+        &self,
+        _channel: u64,
+        _before: Option<u64>,
+        _after: Option<u64>,
+        _limit: u32,
+    ) -> Option<Vec<api::Message>> {
+        None
+    }
+
+    /// Replace `plugin`'s `view` overrides (empty: drop them). The backend
+    /// lays every plugin's overrides over users, members and the user's
+    /// settings wherever the client draws or reads them, in the order they
+    /// were set. `false`: this build can't. The real client should apply
+    /// them where it renders and decides from those records.
+    fn set_view(&mut self, _plugin: &str, _overrides: crate::model::ViewOverrides) -> bool {
+        false
     }
 
     // ===================== 0.8.0 UI surfaces =====================

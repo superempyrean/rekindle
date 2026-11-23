@@ -72,6 +72,14 @@ impl Runtime {
                         self.host_log(&id, model::LogLevel::Warn, &msg);
                     }
                 }
+                Some(ex::event_filter::Verdict::Patch(patches)) => {
+                    if apply_patches(&mut ev, &patches) > 0 {
+                        let id = self.plugins[idx].manifest.id.clone();
+                        let msg = "event-filter patched fields this kind of event doesn't have, or \
+                                   text that isn't allowed; those were ignored";
+                        self.host_log(&id, model::LogLevel::Warn, msg);
+                    }
+                }
                 Some(ex::event_filter::Verdict::Pass) | None => {}
             }
         }
@@ -182,4 +190,30 @@ impl Runtime {
             }
         }
     }
+}
+
+/// Apply an `event-filter`'s patches to `ev`. Returns how many couldn't be
+/// applied: the kind has no such field, or the text failed the compose
+/// checks.
+fn apply_patches(ev: &mut api::Event, patches: &[api::EventPatch]) -> usize {
+    let (api::Event::MessageCreated(m) | api::Event::MessageEdited((m, _))) = ev else {
+        return patches.len();
+    };
+    let mut ignored = 0;
+    for p in patches {
+        match p {
+            api::EventPatch::Content(c) => {
+                if super::compose::check_compose(c).is_none() {
+                    m.content.clone_from(c);
+                } else {
+                    ignored += 1;
+                }
+            }
+            api::EventPatch::FlagBits(f) => m.flag_bits = *f,
+            api::EventPatch::RemoveEmbeds => m.embeds.clear(),
+            api::EventPatch::RemoveAttachments => m.attachments.clear(),
+            api::EventPatch::RemoveStickers => m.stickers.clear(),
+        }
+    }
+    ignored
 }

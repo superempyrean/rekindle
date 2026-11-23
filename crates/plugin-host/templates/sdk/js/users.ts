@@ -3,12 +3,12 @@
 // activities, members, typing, voice, your relationships and notes. Nothing
 // here fetches.
 
-import * as raw from 'rekindle:plugin/users@0.8.0';
-import type { Color, Member } from 'rekindle:plugin/types@0.8.0';
-import type { Presence, Relationship, RelationshipKind, VoiceState } from 'rekindle:plugin/records@0.8.0';
+import * as raw from 'rekindle:plugin/users@0.9.0';
+import type { Color, Member } from 'rekindle:plugin/types@0.9.0';
+import type { Presence, Relationship, RelationshipKind, VoiceState } from 'rekindle:plugin/records@0.9.0';
 import { optU64, u64, type Id } from 'rekindle';
 
-export type { Activity, ClientStatus, Presence, Relationship, RelationshipKind, VoiceState } from 'rekindle:plugin/records@0.8.0';
+export type { Activity, ClientStatus, Presence, Relationship, RelationshipKind, VoiceState } from 'rekindle:plugin/records@0.9.0';
 export type { Member };
 
 /** Presence as the client knows it (guild-scoped if `guild` is given). */

@@ -202,4 +202,43 @@ pub struct Message {
     pub poll: Option<Poll>,
     pub thread: Option<IdOnly>,
     pub message_snapshots: Option<Vec<MessageSnapshot>>,
+    /// A string or a number.
+    pub nonce: Option<serde_json::Value>,
+    #[serde(default, deserialize_with = "opt_snowflake")]
+    pub application_id: Option<u64>,
+    pub interaction_metadata: Option<InteractionMetadata>,
+    pub mention_channels: Option<Vec<IdOnly>>,
+    pub position: Option<u32>,
+    pub call: Option<Call>,
+    pub components: Option<serde_json::Value>,
+    pub role_subscription_data: Option<RoleSubscription>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct InteractionMetadata {
+    #[serde(default, deserialize_with = "opt_snowflake")]
+    pub id: Option<u64>,
+    #[serde(rename = "type", default)]
+    pub kind: u8,
+    pub user: Option<User>,
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct Call {
+    #[serde(default, deserialize_with = "super::snowflakes")]
+    pub participants: Vec<u64>,
+    pub ended_timestamp: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct RoleSubscription {
+    #[serde(default, deserialize_with = "opt_snowflake")]
+    pub role_subscription_listing_id: Option<u64>,
+    #[serde(default)]
+    pub tier_name: String,
+    #[serde(default)]
+    pub total_months_subscribed: u32,
+    #[serde(default)]
+    pub is_renewal: bool,
 }

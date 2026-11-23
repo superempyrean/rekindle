@@ -7,7 +7,7 @@
 //! it has the capability for, until [`subscribe`] narrows that to a list.
 
 pub use crate::raw::rekindle::plugin::events::{
-    ConnectionState, DeletedMessage, Event, EventKind, GuildLeftReason, ReactionChange,
+    ConnectionState, DeletedMessage, Event, EventKind, EventPatch, GuildLeftReason, ReactionChange,
     RelationshipChange, SelectionChange,
 };
 use crate::raw::rekindle::plugin::host_events as raw;

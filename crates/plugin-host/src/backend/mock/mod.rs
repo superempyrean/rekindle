@@ -108,6 +108,8 @@ pub struct MockBackend {
     /// Posted desktop notifications.
     pub notifications: Vec<DesktopNotification>,
     tweaks: BTreeMap<String, TweakEntry>,
+    /// `view` overrides, as (plugin, overrides), the last set last.
+    views: Vec<(String, crate::model::ViewOverrides)>,
 }
 
 /// A tweak in the mock's registry.
@@ -118,6 +120,16 @@ struct TweakEntry {
     presets: Vec<(String, String)>,
     /// The value the user set by hand, which wins over presets.
     user: Option<String>,
+}
+
+impl MockBackend {
+    /// A member as the plugins' `view` overrides show it.
+    fn viewed(&self, mut m: api::Member) -> api::Member {
+        for (_, v) in &self.views {
+            v.apply_member(self.world.me, &mut m);
+        }
+        m
+    }
 }
 
 impl Default for MockBackend {
@@ -159,6 +171,7 @@ impl MockBackend {
             ghosts: BTreeMap::new(),
             dm_sections: BTreeMap::new(),
             notices: BTreeMap::new(),
+            views: Vec::new(),
             keybinds: Vec::new(),
             slash_commands: Vec::new(),
             click_bindings: Vec::new(),
@@ -558,6 +571,7 @@ impl ClientBackend for MockBackend {
         self.overlay_sprites.retain(|s| s.plugin != plugin);
         self.clear_account_state(plugin);
         self.notices.remove(plugin);
+        self.views.retain(|(p, _)| p != plugin);
         self.keybinds.retain(|k| k.plugin != plugin);
         self.slash_commands.retain(|(p, _)| p != plugin);
         self.click_bindings.retain(|(p, _)| p != plugin);
@@ -600,6 +614,8 @@ impl ClientBackend for MockBackend {
             "state.messages",
             "messages.resolve-link",
             "inspect.raw-json",
+            "history.query",
+            "view",
         ]
         .map(String::from)
         .to_vec()
@@ -610,7 +626,7 @@ impl ClientBackend for MockBackend {
     }
 
     fn me(&self) -> Option<User> {
-        self.world.users.get(&self.world.me).cloned()
+        self.user(self.world.me)
     }
 
     fn my_status(&self) -> String {
@@ -622,7 +638,11 @@ impl ClientBackend for MockBackend {
     }
 
     fn user(&self, id: u64) -> Option<User> {
-        self.world.users.get(&id).cloned()
+        let mut u = self.world.users.get(&id).cloned()?;
+        for (_, v) in &self.views {
+            v.apply_user(self.world.me, &mut u);
+        }
+        Some(u)
     }
 
     fn guild(&self, id: u64) -> Option<Guild> {
@@ -795,7 +815,13 @@ impl ClientBackend for MockBackend {
     }
 
     fn my_setting(&self, key: &str) -> Option<String> {
-        self.world.settings.get(key).cloned()
+        let real = self.world.settings.get(key)?;
+        let overridden = self
+            .views
+            .iter()
+            .rev()
+            .find_map(|(_, o)| o.settings.get(key));
+        Some(overridden.unwrap_or(real).clone())
     }
 
     fn my_setting_keys(&self) -> Vec<String> {
@@ -809,13 +835,17 @@ impl ClientBackend for MockBackend {
     }
 
     fn member(&self, guild: u64, user: u64) -> Option<api::Member> {
-        self.world.member(guild, user).cloned()
+        self.world
+            .member(guild, user)
+            .cloned()
+            .map(|m| self.viewed(m))
     }
 
     fn loaded_members(&self, guild: u64, limit: u32) -> (Vec<api::Member>, u32) {
         let all = self.world.members.iter().filter(|m| m.guild == guild);
         let total = all.clone().count() as u32;
-        (all.take(limit as usize).cloned().collect(), total)
+        let shown = all.take(limit as usize).map(|m| self.viewed(m.clone()));
+        (shown.collect(), total)
     }
 
     fn member_permissions(&self, user: u64, channel_or_guild: u64) -> Option<u64> {
@@ -966,6 +996,76 @@ impl ClientBackend for MockBackend {
         self.performed.push((plugin.to_string(), action));
         self.bump();
         Ok(())
+    }
+
+    fn perform_value(
+        &mut self,
+        plugin: &str,
+        action: Action,
+    ) -> Result<crate::model::ActionValue, ActionError> {
+        use crate::model::ActionValue as V;
+        let value = match &action {
+            Action::OpenDm { user } => {
+                let dm = self.dm_channel(*user).ok_or(ActionError::NotFound)?;
+                self.world.selection.channel = Some(dm);
+                self.world.selection.guild = None;
+                V::Id(dm)
+            }
+            Action::CreateInvite { channel, .. } => {
+                if self.world.channel(*channel).is_none() {
+                    return Err(ActionError::NotFound);
+                }
+                V::Code(format!("mock{channel:x}"))
+            }
+            // The simulated client is in every guild it knows.
+            Action::JoinGuild { .. } => return Err(ActionError::NotFound),
+            _ => {
+                self.world.perform(&action)?;
+                V::None
+            }
+        };
+        self.performed.push((plugin.to_string(), action));
+        self.bump();
+        Ok(value)
+    }
+
+    fn history(
+        &self,
+        channel: u64,
+        before: Option<u64>,
+        after: Option<u64>,
+        limit: u32,
+    ) -> Option<Vec<Message>> {
+        let all = self
+            .world
+            .messages
+            .get(&channel)
+            .map_or(&[][..], |v| &v[..]);
+        let page = match after {
+            Some(a) => all
+                .iter()
+                .filter(|m| m.id > a)
+                .take(limit as usize)
+                .cloned()
+                .collect(),
+            None => all
+                .iter()
+                .rev()
+                .filter(|m| before.is_none_or(|b| m.id < b))
+                .take(limit as usize)
+                .cloned()
+                .collect(),
+        };
+        Some(page)
+    }
+
+    fn set_view(&mut self, plugin: &str, overrides: crate::model::ViewOverrides) -> bool {
+        self.views.retain(|(p, _)| p != plugin);
+        if !overrides.is_empty() {
+            self.views.push((plugin.to_string(), overrides));
+        }
+        self.bump();
+        true
     }
 
     // ---------------- UI surfaces ----------------

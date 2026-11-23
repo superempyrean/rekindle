@@ -12,11 +12,11 @@
 //
 // Reactions are `rekindle/reactions`; visible actions `rekindle/actions`.
 
-import * as raw from 'rekindle:plugin/local-actions@0.8.0';
-import type { MessageRef } from 'rekindle:plugin/types@0.8.0';
+import * as raw from 'rekindle:plugin/local-actions@0.9.0';
+import type { MessageRef } from 'rekindle:plugin/types@0.9.0';
 import { call, u64, type Id } from 'rekindle';
 
-export type ActionError = import('rekindle:plugin/action-types@0.8.0').ActionError;
+export type ActionError = import('rekindle:plugin/action-types@0.9.0').ActionError;
 
 export function markRead(channel: Id): void {
   call('localActions.markRead', () => raw.markRead(u64(channel)));
@@ -77,4 +77,9 @@ export function setCategoryCollapsed(category: Id, collapsed: boolean): void {
 /** Mute a channel's or guild's notifications for you. */
 export function setMuted(channelOrGuild: Id, muted: boolean): void {
   call('localActions.setMuted', () => raw.setMuted(u64(channelOrGuild), muted));
+}
+
+/** Open the DM with `user`, creating it if needed; returns the DM channel. */
+export function openDm(user: Id): bigint {
+  return call('localActions.openDm', () => raw.openDm(u64(user)));
 }

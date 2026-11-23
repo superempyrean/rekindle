@@ -159,6 +159,72 @@ pub enum Action {
         content: String,
         files: Vec<OutgoingFile>,
     },
+    ForwardMessage {
+        message: crate::api::MessageRef,
+        to_channel: u64,
+    },
+    SetTyping {
+        channel: u64,
+    },
+    SetFriend {
+        user: u64,
+        add: bool,
+    },
+    /// Returns [`ActionValue::Code`].
+    CreateInvite {
+        channel: u64,
+        max_age_secs: u32,
+        max_uses: u32,
+    },
+    /// Returns [`ActionValue::Id`]: the guild.
+    JoinGuild {
+        invite_code: String,
+    },
+    /// Returns [`ActionValue::Id`]: the DM channel.
+    OpenDm {
+        user: u64,
+    },
+    // moderation
+    Kick {
+        guild: u64,
+        user: u64,
+        reason: Option<String>,
+    },
+    Ban {
+        guild: u64,
+        user: u64,
+        delete_message_secs: u32,
+        reason: Option<String>,
+    },
+    Unban {
+        guild: u64,
+        user: u64,
+    },
+    Timeout {
+        guild: u64,
+        user: u64,
+        until_ms: Option<u64>,
+        reason: Option<String>,
+    },
+    SetVoiceMute {
+        guild: u64,
+        user: u64,
+        muted: bool,
+    },
+    SetVoiceDeaf {
+        guild: u64,
+        user: u64,
+        deafened: bool,
+    },
+    MoveMember {
+        guild: u64,
+        user: u64,
+        channel: Option<u64>,
+    },
+    BulkDelete {
+        channel: u64,
+        messages: Vec<u64>,
+    },
     // presence
     SetStatus {
         status: String,
@@ -207,4 +273,130 @@ pub enum ActionError {
     Invalid,
     #[error("Discord refused it")]
     Failed,
+}
+
+/// What an action that returns something returned
+/// ([`ClientBackend::perform_value`](crate::ClientBackend::perform_value)).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ActionValue {
+    None,
+    Id(u64),
+    Code(String),
+}
+
+/// One plugin's `view` overrides: fields of users and members, and setting
+/// keys, in the order it set them. The backend lays them over what it reads.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ViewOverrides {
+    pub users: Vec<(crate::api::Users, crate::api::UserField)>,
+    /// (guild, or every guild; who; field).
+    pub members: Vec<(Option<u64>, crate::api::Users, crate::api::MemberField)>,
+    /// Setting key to its string form.
+    pub settings: std::collections::BTreeMap<String, String>,
+}
+
+/// Whether `who` names user `id`, the current user being `me`.
+pub fn names(who: &crate::api::Users, me: u64, id: u64) -> bool {
+    use crate::api::Users as U;
+    match who {
+        U::Me => id == me,
+        U::Others => id != me,
+        U::Everyone => true,
+        U::One(u) => *u == id,
+    }
+}
+
+impl ViewOverrides {
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// Set `field` for `who`, replacing this plugin's earlier override of
+    /// the same field for the same `who`.
+    pub fn set_user(&mut self, who: crate::api::Users, field: crate::api::UserField) {
+        let kind = std::mem::discriminant(&field);
+        self.users
+            .retain(|(w, f)| !(*w == who && std::mem::discriminant(f) == kind));
+        self.users.push((who, field));
+    }
+
+    pub fn set_member(
+        &mut self,
+        guild: Option<u64>,
+        who: crate::api::Users,
+        field: crate::api::MemberField,
+    ) {
+        let kind = std::mem::discriminant(&field);
+        self.members
+            .retain(|(g, w, f)| !(*g == guild && *w == who && std::mem::discriminant(f) == kind));
+        self.members.push((guild, who, field));
+    }
+
+    /// Apply the user overrides that name `user`.
+    pub fn apply_user(&self, me: u64, user: &mut crate::api::User) {
+        for (who, f) in &self.users {
+            if names(who, me, user.id) {
+                apply_user_field(user, f);
+            }
+        }
+    }
+
+    /// Apply the member overrides that name `member`.
+    pub fn apply_member(&self, me: u64, member: &mut crate::api::Member) {
+        for (guild, who, f) in &self.members {
+            if guild.is_none_or(|g| g == member.guild) && names(who, me, member.user) {
+                apply_member_field(member, f);
+            }
+        }
+    }
+}
+
+fn apply_user_field(u: &mut crate::api::User, f: &crate::api::UserField) {
+    use crate::api::UserField as F;
+    match f.clone() {
+        F::Username(v) => u.username = v,
+        F::Discriminator(v) => u.discriminator = v,
+        F::GlobalName(v) => u.global_name = v,
+        F::Bot(v) => u.bot = v,
+        F::PublicFlags(v) => u.public_flags = v,
+        F::FlagBits(v) => u.flag_bits = v,
+        F::PremiumType(v) => u.premium_type = v,
+        F::Avatar(v) => u.avatar = v,
+        F::Banner(v) => u.banner = v,
+        F::Accent(v) => u.accent = v,
+        F::AvatarDecoration(v) => {
+            u.avatar_decoration = v;
+            u.has_decoration = u.avatar_decoration.is_some() || u.nameplate.is_some();
+        }
+        F::Nameplate(v) => {
+            u.nameplate = v;
+            u.has_decoration = u.avatar_decoration.is_some() || u.nameplate.is_some();
+        }
+        F::DisplayNameStyle(v) => u.display_name_style = v,
+        F::PrimaryGuild(v) => u.primary_guild = v,
+        F::Bio(v) => u.bio = v,
+        F::Pronouns(v) => u.pronouns = v,
+        F::ThemeColors(v) => u.theme_colors = v,
+        F::ProfileEffect(v) => u.profile_effect = v,
+        F::Locale(v) => u.locale = v,
+        F::Verified(v) => u.verified = v,
+        F::MfaEnabled(v) => u.mfa_enabled = v,
+        F::NsfwAllowed(v) => u.nsfw_allowed = v,
+        F::AgeVerificationStatus(v) => u.age_verification_status = v,
+    }
+}
+
+fn apply_member_field(m: &mut crate::api::Member, f: &crate::api::MemberField) {
+    use crate::api::MemberField as F;
+    match f.clone() {
+        F::Nick(v) => m.nick = v,
+        F::Roles(v) => m.roles = v,
+        F::Avatar(v) => m.avatar = v,
+        F::Banner(v) => m.banner = v,
+        F::Bio(v) => m.bio = v,
+        F::AvatarDecoration(v) => m.avatar_decoration = v,
+        F::FlagBits(v) => m.flag_bits = v,
+        F::TimedOutUntilMs(v) => m.timed_out_until_ms = v,
+    }
 }

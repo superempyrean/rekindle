@@ -376,6 +376,11 @@ impl World {
                 self.selection.channel = Some(c.id);
                 self.selection.guild = c.guild;
             }
+            Action::BulkDelete { channel, messages } => {
+                if let Some(all) = self.messages.get_mut(channel) {
+                    all.retain(|m| !messages.contains(&m.id));
+                }
+            }
             _ => {}
         }
         Ok(())

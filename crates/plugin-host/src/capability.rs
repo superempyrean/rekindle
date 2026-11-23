@@ -46,10 +46,15 @@ pub enum Capability {
     Files,
     // changing what the client receives
     Intercept,
+    // added in 0.9.0
+    Moderate,
+    History,
+    View,
+    ReadAccount,
 }
 
 impl Capability {
-    pub const ALL: [Capability; 21] = [
+    pub const ALL: [Capability; 25] = [
         Capability::ReadClient,
         Capability::ReadUsers,
         Capability::ReadMessages,
@@ -71,6 +76,10 @@ impl Capability {
         Capability::Tweaks,
         Capability::Files,
         Capability::Intercept,
+        Capability::Moderate,
+        Capability::History,
+        Capability::View,
+        Capability::ReadAccount,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -96,6 +105,10 @@ impl Capability {
             Capability::Tweaks => "tweaks",
             Capability::Files => "files",
             Capability::Intercept => "intercept",
+            Capability::Moderate => "moderate",
+            Capability::History => "history",
+            Capability::View => "view",
+            Capability::ReadAccount => "read-account",
         }
     }
 
@@ -150,6 +163,14 @@ impl Capability {
             Capability::Intercept => {
                 "hide or change messages and other events before the client shows them"
             }
+            Capability::Moderate => {
+                "kick, ban, time out, move or server-mute people and bulk-delete messages when you click its items"
+            }
+            Capability::History => "read further back in a channel's messages than what's loaded",
+            Capability::View => {
+                "change how this client shows people, you included, and your settings (only on this device)"
+            }
+            Capability::ReadAccount => "see your email address, phone number and account country",
         }
     }
 
@@ -176,9 +197,16 @@ impl Capability {
             Capability::Presence => Some("presence"),
             Capability::Tweaks => Some("tweaks"),
             Capability::Files => Some("files"),
+            Capability::Moderate => Some("moderation"),
+            Capability::History => Some("history"),
+            Capability::View => Some("view"),
             // `intercept` gates an export (`event-filter`); `host-events.intercept`
             // needs no import of its own.
-            Capability::Pointer | Capability::Compose | Capability::Intercept => None,
+            // `read-account` gates fields of `client-state.me`.
+            Capability::Pointer
+            | Capability::Compose
+            | Capability::Intercept
+            | Capability::ReadAccount => None,
         }
     }
 

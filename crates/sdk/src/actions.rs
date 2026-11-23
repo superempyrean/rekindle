@@ -6,11 +6,14 @@
 //! [`crate::presence`] is the exception.
 //!
 //! - Local and self-only (`act-local`): mark read, open a reply or edit,
-//!   insert text, per-user volume, notes, saved messages, mute.
+//!   insert text, open a DM, per-user volume, notes, saved messages, mute.
 //! - Reactions (`react`; `act` implies it).
-//! - Visible actions (`act`): send a message (with files the plugin made),
-//!   pin, delete, edit the user's own message, suppress embeds, vote, join
-//!   voice, self mute and deafen, threads.
+//! - Visible actions (`act`): send or forward a message (with files the
+//!   plugin made), pin, delete, edit the user's own message, suppress
+//!   embeds, vote, join voice, self mute and deafen, threads, typing,
+//!   friend requests, invites and joining a guild.
+//!
+//! Moderating other members is [`crate::moderation`].
 
 use crate::MessageRef;
 pub use crate::raw::rekindle::plugin::action_types::{ActionError, OutgoingFile};
@@ -72,6 +75,12 @@ pub fn start_edit(message: &MessageRef) -> Result {
 /// Puts text into the composer at the cursor, for the user to send.
 pub fn insert_text(text: &str) -> Result {
     local::insert_text(text)
+}
+
+/// Opens the DM with `user`, creating it if needed, and returns the DM
+/// channel.
+pub fn open_dm(user: u64) -> std::result::Result<u64, ActionError> {
+    local::open_dm(user)
 }
 
 /// Sets the local volume of a user in voice, from 0 to 200 percent.
@@ -168,4 +177,35 @@ pub fn set_self_deaf(deafened: bool) -> Result {
 /// Joins or leaves a thread.
 pub fn set_thread_joined(thread: u64, joined: bool) -> Result {
     act::set_thread_joined(thread, joined)
+}
+
+/// Forwards a message to a channel the user can send in.
+pub fn forward_message(message: &MessageRef, to_channel: u64) -> Result {
+    act::forward_message(*message, to_channel)
+}
+
+/// Shows the user as typing in `channel` for a few seconds.
+pub fn set_typing(channel: u64) -> Result {
+    act::set_typing(channel)
+}
+
+/// With `add`, sends or accepts a friend request. Otherwise removes the
+/// friend, or cancels or declines the request.
+pub fn set_friend(user: u64, add: bool) -> Result {
+    act::set_friend(user, add)
+}
+
+/// Creates an invite to `channel` and returns its code. A `max_age_secs` or
+/// `max_uses` of 0 means no limit.
+pub fn create_invite(
+    channel: u64,
+    max_age_secs: u32,
+    max_uses: u32,
+) -> std::result::Result<String, ActionError> {
+    act::create_invite(channel, max_age_secs, max_uses)
+}
+
+/// Joins a guild from an invite code and returns the guild.
+pub fn join_guild(invite_code: &str) -> std::result::Result<u64, ActionError> {
+    act::join_guild(invite_code)
 }

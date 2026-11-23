@@ -13,7 +13,8 @@
 //   rekindle/http (network)             rekindle/clipboard (clipboard)
 //   rekindle/notify (notifications)     rekindle/audio, rekindle/files,
 //   rekindle/tweaks, rekindle/overlay (the capability of the same name)
-//   rekindle/compose-control (compose)
+//   rekindle/compose-control (compose)  rekindle/moderation (moderate)
+//   rekindle/history (history)          rekindle/view (view)
 //
 // This module and `rekindle/settings`, `rekindle/events`, `rekindle/timer`,
 // `rekindle/time`, `rekindle/elements`, `rekindle/compose` and
@@ -31,8 +32,8 @@
 //     },
 //   });
 
-import * as host from 'rekindle:plugin/host@0.8.0';
-import type { ClientInfo } from 'rekindle:plugin/host@0.8.0';
+import * as host from 'rekindle:plugin/host@0.9.0';
+import type { ClientInfo } from 'rekindle:plugin/host@0.9.0';
 import type {
   Capability,
   ChannelRef,
@@ -51,15 +52,15 @@ import type {
   UiEvent,
   UiValue,
   UserRef,
-} from 'rekindle:plugin/types@0.8.0';
-import type { Event, EventKind } from 'rekindle:plugin/events@0.8.0';
-import type { Message, User } from 'rekindle:plugin/records@0.8.0';
-import type { SlotClick, SlotEvent } from 'rekindle:plugin/ui-handler@0.8.0';
-import type { CommandReply, Invocation } from 'rekindle:plugin/command-types@0.8.0';
-import type { ComposeResult, Draft, Upload, UploadResult } from 'rekindle:plugin/compose-types@0.8.0';
-import type { RenderInput, Transform } from 'rekindle:plugin/render-types@0.8.0';
-import type { ClientNotification, NotificationDecision } from 'rekindle:plugin/notification-types@0.8.0';
-import type { Verdict } from 'rekindle:plugin/event-filter@0.8.0';
+} from 'rekindle:plugin/types@0.9.0';
+import type { Event, EventKind } from 'rekindle:plugin/events@0.9.0';
+import type { Message, User } from 'rekindle:plugin/records@0.9.0';
+import type { SlotClick, SlotEvent } from 'rekindle:plugin/ui-handler@0.9.0';
+import type { CommandReply, Invocation } from 'rekindle:plugin/command-types@0.9.0';
+import type { ComposeResult, Draft, Upload, UploadResult } from 'rekindle:plugin/compose-types@0.9.0';
+import type { RenderInput, Transform } from 'rekindle:plugin/render-types@0.9.0';
+import type { ClientNotification, NotificationDecision } from 'rekindle:plugin/notification-types@0.9.0';
+import type { Verdict } from 'rekindle:plugin/event-filter@0.9.0';
 
 export type {
   Capability,

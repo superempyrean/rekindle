@@ -1,4 +1,4 @@
-// rekindle:plugin@0.8.0 is the stable contract between the host (rekindle)
+// rekindle:plugin@0.9.0 is the stable contract between the host (rekindle)
 // and plugins.
 //
 // Plugins are WebAssembly components; this package is the ONLY thing they
@@ -29,7 +29,7 @@
 //   * Our own vocabulary (slot names, surface names, tweak ids, event kinds)
 //     is strings or enums we control.
 
-package rekindle:plugin@0.8.0;
+package rekindle:plugin@0.9.0;
 
 /// Shared types.
 interface types {
@@ -107,6 +107,23 @@ interface types {
         /// them (`event-filter`). Each kind also needs its own read
         /// capability.
         intercept,
+
+        // ---- added in 0.9.0 ----
+        /// Moderate other members on a gesture: kick, ban, time out, server
+        /// mute or deafen, move in voice, bulk-delete. Each call also needs
+        /// the Discord permission for it.
+        moderate,
+        /// Page through a channel's history past what the client has
+        /// loaded. Each call also needs `read-messages`.
+        history,
+        /// Change how this client shows users and members, the current
+        /// user included, and the user's own settings, locally. Nothing is
+        /// sent to Discord.
+        view,
+        /// The current user's email address, phone number and store
+        /// country, on `client-state.me`. Without it those fields are
+        /// `none`.
+        read-account,
     }
 
     /// 8-bit sRGB, straight alpha.
@@ -144,6 +161,41 @@ interface types {
         author: snowflake,
     }
 
+    // ---- Profile cosmetics, shared by users and members ----
+
+    /// An avatar decoration: its asset hash and the store item.
+    record avatar-decoration {
+        asset: string,
+        sku: snowflake,
+        expires-ms: option<u64>,
+    }
+
+    /// A nameplate behind the name in member and DM lists.
+    record nameplate {
+        asset: string,
+        /// The palette name ("crimson", "berry", ...).
+        palette: string,
+        label: string,
+        sku: snowflake,
+        expires-ms: option<u64>,
+    }
+
+    /// How a display name is drawn: a font, an effect and its colours.
+    record display-name-style {
+        font: u32,
+        effect: u32,
+        colors: list<color>,
+    }
+
+    /// The server tag shown next to a name.
+    record primary-guild {
+        guild: option<snowflake>,
+        tag: option<string>,
+        /// The badge's asset hash.
+        badge: option<string>,
+        enabled: bool,
+    }
+
     /// A guild member (GuildMemberStore record).
     record member {
         guild: snowflake,
@@ -155,6 +207,18 @@ interface types {
         timed-out-until-ms: option<u64>,
         /// Membership screening not yet passed.
         pending: bool,
+        /// Guild avatar and banner hashes, and the guild bio.
+        avatar: option<string>,
+        banner: option<string>,
+        bio: option<string>,
+        avatar-decoration: option<avatar-decoration>,
+        /// Guild member flag bits (SDK constants).
+        flag-bits: u32,
+        /// Server mute and deafen.
+        mute: bool,
+        deaf: bool,
+        /// Flagged for unusual DM activity until then, epoch ms.
+        unusual-dm-activity-until-ms: option<u64>,
     }
     record role-ref { id: snowflake, guild: snowflake, name: string }
 

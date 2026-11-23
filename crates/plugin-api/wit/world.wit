@@ -94,7 +94,7 @@ interface renderer {
 /// one before returned; the first `drop` ends it. Over the per-call budget,
 /// or if the plugin traps, the event passes unchanged.
 interface event-filter {
-    use events.{event};
+    use events.{event, event-patch};
 
     variant verdict {
         /// The client processes the event unchanged.
@@ -104,6 +104,9 @@ interface event-filter {
         /// The client processes this instead. It must be the same kind of
         /// event; anything else counts as `pass`.
         replace(event),
+        /// The client processes the event with these changes. Patches the
+        /// event's kind doesn't have are ignored.
+        patch(list<event-patch>),
     }
 
     on-intercept: func(event: event) -> verdict;
@@ -141,6 +144,9 @@ interface notification-filter {
 ///   tweaks            tweaks
 ///   files             files
 ///   compose-control   compose
+///   moderation        moderate
+///   history           history (each call also needs read-messages)
+///   view              view
 /// (`pointer` gates the pointer-moved event; `compose` also gates the
 /// compose-handler export and `command-reply.send`.)
 world plugin {
@@ -167,6 +173,9 @@ world plugin {
     import tweaks;
     import files;
     import compose-control;
+    import moderation;
+    import history;
+    import view;
 
     export lifecycle;
     export event-handler;

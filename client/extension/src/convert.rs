@@ -208,6 +208,7 @@ pub(crate) fn render_input(
             ephemeral: false,
             sending: false,
             failed: false,
+            ..Default::default()
         },
         author_roles: row.author_roles.clone(),
         grouped: row.grouped,

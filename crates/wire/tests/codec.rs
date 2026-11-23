@@ -168,18 +168,34 @@ fn malformed_input_is_an_error() {
 fn tag12_patches_an_earlier_words_list() {
     let v = Value::Array(vec![
         Value::U32Array(vec![1, 2, 3]),
-        Value::Sparse { list: 0, pairs: vec![(1, 20)] },
-        Value::Sparse { list: 1, pairs: vec![(2, 30)] },
+        Value::Sparse {
+            list: 0,
+            pairs: vec![(1, 20)],
+        },
+        Value::Sparse {
+            list: 1,
+            pairs: vec![(2, 30)],
+        },
     ]);
     let bytes = v.to_bytes();
     let mut cur = Cursor::new(&bytes);
     assert_eq!(cur.value().unwrap(), v);
-    assert_eq!(cur.words(), &[vec![1, 2, 3], vec![1, 20, 3], vec![1, 20, 30]]);
-    let lone = Value::Sparse { list: 0, pairs: vec![] }.to_bytes();
+    assert_eq!(
+        cur.words(),
+        &[vec![1, 2, 3], vec![1, 20, 3], vec![1, 20, 30]]
+    );
+    let lone = Value::Sparse {
+        list: 0,
+        pairs: vec![],
+    }
+    .to_bytes();
     assert_eq!(decode(&lone), Err(DecodeError::BadWordsRef));
     let past_end = Value::Array(vec![
         Value::U32Array(vec![1]),
-        Value::Sparse { list: 0, pairs: vec![(1, 5)] },
+        Value::Sparse {
+            list: 0,
+            pairs: vec![(1, 5)],
+        },
     ]);
     assert_eq!(decode(&past_end.to_bytes()), Err(DecodeError::BadWordsRef));
 }

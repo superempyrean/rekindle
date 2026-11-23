@@ -5,7 +5,7 @@
 //   time.format(time.snowflakeMs(user.id), 'relative');   // "3 years ago"
 //   time.duration(62_000);                                // "1:02"
 
-import * as host from 'rekindle:plugin/host@0.8.0';
+import * as host from 'rekindle:plugin/host@0.9.0';
 import { u64, type Id } from 'rekindle';
 
 export type TimeStyle = host.TimeStyle;

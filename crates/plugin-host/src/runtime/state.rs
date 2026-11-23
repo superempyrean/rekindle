@@ -143,6 +143,8 @@ pub(crate) struct PluginState {
     pub click_bindings: BTreeMap<String, ClickBinding>,
     pub sounds: BTreeSet<String>,
     pub rates: Rates,
+    /// This plugin's `view` overrides, sent whole to the backend.
+    pub view: crate::model::ViewOverrides,
     /// Settings keys changed by the plugin itself; `on-settings-changed`
     /// fires once the current call returns.
     pub pending_settings: Vec<String>,
@@ -172,6 +174,7 @@ pub(crate) struct Rates {
     pub speak: Rate,
     pub link: Rate,
     pub nav: Rate,
+    pub history: Rate,
 }
 
 /// One `on-compose` call (see [`PluginState::composing`]).

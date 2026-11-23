@@ -2,7 +2,7 @@
 //!
 //! Most plugin authors should use `rekindle-sdk`, which wraps these in an
 //! ergonomic API. This crate is the unadorned ABI: the WIT package in `wit/`
-//! (`rekindle:plugin@0.8.0`) is the source of truth, and the bindings are
+//! (`rekindle:plugin@0.9.0`) is the source of truth, and the bindings are
 //! generated from it at compile time.
 //!
 //! Generated layout:
@@ -34,7 +34,7 @@ mod impls;
 pub use bindings::*;
 
 /// The WIT package version this crate was generated from.
-pub const WIT_VERSION: &str = "0.8.0";
+pub const WIT_VERSION: &str = "0.9.0";
 
 #[cfg(test)]
 mod tests {

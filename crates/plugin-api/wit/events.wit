@@ -22,6 +22,19 @@ interface events {
     use types.{snowflake, user-ref, message-ref, member};
     use records.{message, presence, voice-state, relationship-kind, channel, guild, role, read-state, my-voice};
 
+    /// A field change an `event-filter` can make with `verdict.patch`. The
+    /// host applies each one to the kinds that have the field (today
+    /// `message-created` and `message-edited`) and ignores it on others.
+    variant event-patch {
+        /// The message's text. Checked like a compose rewrite.
+        content(string),
+        /// The message's flag bits (SDK constants).
+        flag-bits(u64),
+        remove-embeds,
+        remove-attachments,
+        remove-stickers,
+    }
+
     enum event-kind {
         // read-client
         selection-changed, connection, window, read-state, guild, channel,

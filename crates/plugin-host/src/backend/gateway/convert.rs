@@ -50,6 +50,112 @@ pub fn role(r: wire::Role, guild: u64) -> api::Role {
         mentionable: r.mentionable,
         managed: r.managed,
         unicode_emoji: r.unicode_emoji,
+        icon: r.icon,
+        flag_bits: r.flags,
+        bot: r.tags.as_ref().and_then(|t| tag_id(t, "bot_id")),
+        integration: r.tags.as_ref().and_then(|t| tag_id(t, "integration_id")),
+        premium_subscriber: r
+            .tags
+            .as_ref()
+            .is_some_and(|t| t.contains_key("premium_subscriber")),
+        subscription_listing: r
+            .tags
+            .as_ref()
+            .and_then(|t| tag_id(t, "subscription_listing_id")),
+        available_for_purchase: r
+            .tags
+            .as_ref()
+            .is_some_and(|t| t.contains_key("available_for_purchase")),
+        guild_connections: r
+            .tags
+            .as_ref()
+            .is_some_and(|t| t.contains_key("guild_connections")),
+    }
+}
+
+/// A snowflake in a role's `tags`.
+fn tag_id(tags: &serde_json::Map<String, serde_json::Value>, key: &str) -> Option<u64> {
+    tags.get(key)?.as_str()?.parse().ok()
+}
+
+pub fn decoration(d: &wire::AvatarDecoration) -> api::AvatarDecoration {
+    api::AvatarDecoration {
+        asset: d.asset.clone(),
+        sku: d.sku_id.unwrap_or(0),
+        expires_ms: d.expires_at.map(|s| s.saturating_mul(1000)),
+    }
+}
+
+/// The fields of a user a gateway payload carries beyond the basic ones.
+/// A field the payload leaves out keeps what `out` had.
+pub fn user_fields(u: &wire::User, out: &mut api::User) {
+    if let Some(d) = &u.discriminator {
+        out.discriminator.clone_from(d);
+    }
+    let set = |dst: &mut Option<String>, src: &Option<String>| {
+        if src.is_some() {
+            dst.clone_from(src);
+        }
+    };
+    set(&mut out.avatar, &u.avatar);
+    set(&mut out.banner, &u.banner);
+    set(&mut out.bio, &u.bio);
+    set(&mut out.pronouns, &u.pronouns);
+    set(&mut out.locale, &u.locale);
+    set(&mut out.email, &u.email);
+    set(&mut out.phone, &u.phone);
+    set(&mut out.store_country, &u.store_country);
+    if let Some(f) = u.flags {
+        out.flag_bits = f;
+    }
+    if let Some(p) = u.premium_type {
+        out.premium_type = p;
+    }
+    if let Some(d) = &u.avatar_decoration_data {
+        out.avatar_decoration = Some(decoration(d));
+    }
+    if let Some(n) = u.collectibles.as_ref().and_then(|c| c.nameplate.as_ref()) {
+        out.nameplate = Some(api::Nameplate {
+            asset: n.asset.clone(),
+            palette: n.palette.clone(),
+            label: n.label.clone(),
+            sku: n.sku_id.unwrap_or(0),
+            expires_ms: n.expires_at.map(|s| s.saturating_mul(1000)),
+        });
+    }
+    if let Some(s) = &u.display_name_styles {
+        out.display_name_style = Some(api::DisplayNameStyle {
+            font: s.font_id,
+            effect: s.effect_id,
+            colors: s.colors.iter().copied().map(rgb).collect(),
+        });
+    }
+    if let Some(g) = &u.primary_guild {
+        out.primary_guild = Some(api::PrimaryGuild {
+            guild: g.identity_guild_id,
+            tag: g.tag.clone(),
+            badge: g.badge.clone(),
+            enabled: g.identity_enabled.unwrap_or(false),
+        });
+    }
+    out.has_decoration = out.avatar_decoration.is_some() || out.nameplate.is_some();
+    if u.verified.is_some() {
+        out.verified = u.verified;
+    }
+    if u.mfa_enabled.is_some() {
+        out.mfa_enabled = u.mfa_enabled;
+    }
+    if u.nsfw_allowed.is_some() {
+        out.nsfw_allowed = u.nsfw_allowed;
+    }
+    if u.age_verification_status.is_some() {
+        out.age_verification_status = u.age_verification_status;
+    }
+    if u.purchased_flags.is_some() {
+        out.purchased_flags = u.purchased_flags;
+    }
+    if let Some(t) = &u.authenticator_types {
+        out.authenticator_types.clone_from(t);
     }
 }
 
@@ -384,6 +490,61 @@ pub fn message(
         ephemeral: flags & (1 << 6) != 0,
         sending: false,
         failed: false,
+        nonce: m
+            .nonce
+            .as_ref()
+            .and_then(|n| match n {
+                serde_json::Value::String(s) => Some(s.clone()),
+                serde_json::Value::Number(n) => Some(n.to_string()),
+                _ => None,
+            })
+            .or(old.and_then(|o| o.nonce.clone())),
+        webhook_id: m.webhook_id.or(old.and_then(|o| o.webhook_id)),
+        application_id: m.application_id.or(old.and_then(|o| o.application_id)),
+        interaction: m
+            .interaction_metadata
+            .as_ref()
+            .map(|i| api::MessageInteraction {
+                id: i.id.unwrap_or(0),
+                kind: i.kind,
+                user: i.user.as_ref().map_or(0, |u| u.id),
+                name: i.name.clone(),
+            })
+            .or(old.and_then(|o| o.interaction.clone())),
+        mention_channels: m
+            .mention_channels
+            .as_ref()
+            .map(|v| v.iter().map(|c| c.id).collect())
+            .or(old.map(|o| o.mention_channels.clone()))
+            .unwrap_or_default(),
+        position: m.position.or(old.and_then(|o| o.position)),
+        call: m
+            .call
+            .as_ref()
+            .map(|c| api::MessageCall {
+                participants: c.participants.clone(),
+                ended_ms: c.ended_timestamp.as_deref().and_then(iso_ms),
+            })
+            .or(old.and_then(|o| o.call.clone())),
+        components_json: m
+            .components
+            .as_ref()
+            .filter(|c| c.as_array().is_some_and(|a| !a.is_empty()))
+            .map(serde_json::Value::to_string)
+            .or(old.and_then(|o| o.components_json.clone())),
+        role_subscription: m
+            .role_subscription_data
+            .as_ref()
+            .map(|r| {
+                (
+                    r.role_subscription_listing_id.unwrap_or(0),
+                    r.tier_name.clone(),
+                    r.total_months_subscribed,
+                    r.is_renewal,
+                )
+            })
+            .or(old.and_then(|o| o.role_subscription.clone())),
+        ..Default::default()
     }
 }
 
@@ -428,5 +589,13 @@ pub fn member(guild: u64, m: &wire::Member) -> Option<api::Member> {
         boosting_since_ms: m.premium_since.as_deref().and_then(iso_ms),
         timed_out_until_ms: m.communication_disabled_until.as_deref().and_then(iso_ms),
         pending: m.pending,
+        avatar: m.avatar.clone(),
+        banner: m.banner.clone(),
+        bio: m.bio.clone(),
+        avatar_decoration: m.avatar_decoration_data.as_ref().map(decoration),
+        flag_bits: m.flags,
+        mute: m.mute,
+        deaf: m.deaf,
+        unusual_dm_activity_until_ms: m.unusual_dm_activity_until.as_deref().and_then(iso_ms),
     })
 }

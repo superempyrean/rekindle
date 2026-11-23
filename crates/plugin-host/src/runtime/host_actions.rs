@@ -8,7 +8,7 @@
 use crate::api;
 use crate::bindings::wit;
 use crate::capability::Capability;
-use crate::model::{Action, ActionError};
+use crate::model::{Action, ActionError, ActionValue};
 
 use super::convert::action_error_to_wit;
 use super::state::{Budget, PluginState, clean};
@@ -69,6 +69,50 @@ impl PluginState {
         Ok(r.map_err(action_error_to_wit))
     }
 
+    /// [`Self::act`] for an action that returns something, mapped by `pick`
+    /// to the host function's return value.
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "returns the host function's own type, so a call site is a plain `return`"
+    )]
+    fn act_value<T>(
+        &mut self,
+        budget: Budget,
+        action: Action,
+        pick: impl FnOnce(ActionValue) -> Option<T>,
+    ) -> wasmtime::Result<Result<T, wit::action_types::ActionError>> {
+        if !self.spend(budget) {
+            return Ok(Err(action_error_to_wit(ActionError::NoGesture)));
+        }
+        let now = self.now();
+        if matches!(budget, Budget::Outward) && !self.rates.outward.take(now, 5, 10_000) {
+            return Ok(Err(action_error_to_wit(ActionError::RateLimited)));
+        }
+        let r = self.backend.lock().unwrap().perform_value(&self.id, action);
+        Ok(match r {
+            Ok(v) => pick(v).ok_or(action_error_to_wit(ActionError::Failed)),
+            Err(e) => Err(action_error_to_wit(e)),
+        })
+    }
+
+    /// Send this plugin's `view` overrides to the backend.
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "returns the host function's own type, so a call site is a plain `return`"
+    )]
+    fn push_view(&mut self) -> ActResult {
+        let ok = self
+            .backend
+            .lock()
+            .unwrap()
+            .set_view(&self.id, self.view.clone());
+        Ok(if ok {
+            Ok(())
+        } else {
+            Err(action_error_to_wit(ActionError::Unavailable))
+        })
+    }
+
     #[expect(
         clippy::unnecessary_wraps,
         reason = "returns the host function's own type, so a call site is a plain `return`"
@@ -118,6 +162,17 @@ impl wit::local_actions::Host for PluginState {
             return Self::invalid();
         }
         self.act(Budget::Local, Action::InsertText { text })
+    }
+
+    fn open_dm(
+        &mut self,
+        user: u64,
+    ) -> wasmtime::Result<Result<u64, wit::action_types::ActionError>> {
+        self.require(Capability::ActLocal)?;
+        self.act_value(Budget::Local, Action::OpenDm { user }, |v| match v {
+            ActionValue::Id(id) => Some(id),
+            _ => None,
+        })
     }
 
     fn set_user_volume(&mut self, user: u64, percent: f32) -> ActResult {
@@ -270,6 +325,72 @@ impl wit::actions::Host for PluginState {
         self.act(Budget::Outward, Action::SetThreadJoined { thread, joined })
     }
 
+    fn forward_message(&mut self, message: api::MessageRef, to_channel: u64) -> ActResult {
+        self.require(Capability::Act)?;
+        self.act(
+            Budget::Outward,
+            Action::ForwardMessage {
+                message,
+                to_channel,
+            },
+        )
+    }
+
+    fn set_typing(&mut self, channel: u64) -> ActResult {
+        self.require(Capability::Act)?;
+        self.act(Budget::Outward, Action::SetTyping { channel })
+    }
+
+    fn set_friend(&mut self, user: u64, add: bool) -> ActResult {
+        self.require(Capability::Act)?;
+        self.act(Budget::Outward, Action::SetFriend { user, add })
+    }
+
+    fn create_invite(
+        &mut self,
+        channel: u64,
+        max_age_secs: u32,
+        max_uses: u32,
+    ) -> wasmtime::Result<Result<String, wit::action_types::ActionError>> {
+        self.require(Capability::Act)?;
+        // Discord's own limits: a week, and 100 uses.
+        if max_age_secs > 604_800 || max_uses > 100 {
+            return Ok(Err(action_error_to_wit(ActionError::Invalid)));
+        }
+        let action = Action::CreateInvite {
+            channel,
+            max_age_secs,
+            max_uses,
+        };
+        self.act_value(Budget::Outward, action, |v| match v {
+            ActionValue::Code(c) => Some(c),
+            _ => None,
+        })
+    }
+
+    fn join_guild(
+        &mut self,
+        invite_code: String,
+    ) -> wasmtime::Result<Result<u64, wit::action_types::ActionError>> {
+        self.require(Capability::Act)?;
+        let ok = !invite_code.is_empty()
+            && invite_code.len() <= 64
+            && invite_code
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-');
+        if !ok {
+            return Ok(Err(action_error_to_wit(ActionError::Invalid)));
+        }
+        self.act_value(
+            Budget::Outward,
+            Action::JoinGuild { invite_code },
+            |v| match v {
+                ActionValue::Id(id) => Some(id),
+                _ => None,
+            },
+        )
+    }
+
     fn send_message(
         &mut self,
         channel: u64,
@@ -365,6 +486,195 @@ impl wit::presence::Host for PluginState {
             }
         }
         self.set_activity(Action::SetRichPresence { activity })
+    }
+}
+
+/// An audit-log reason: up to 512 characters, no control characters.
+fn reason_ok(reason: Option<&str>) -> bool {
+    reason.is_none_or(|r| r.chars().count() <= 512 && !r.chars().any(char::is_control))
+}
+
+impl wit::moderation::Host for PluginState {
+    fn kick(&mut self, guild: u64, user: u64, reason: Option<String>) -> ActResult {
+        self.require(Capability::Moderate)?;
+        if !reason_ok(reason.as_deref()) {
+            return Self::invalid();
+        }
+        self.act(
+            Budget::Outward,
+            Action::Kick {
+                guild,
+                user,
+                reason,
+            },
+        )
+    }
+
+    fn ban(
+        &mut self,
+        guild: u64,
+        user: u64,
+        delete_message_secs: u32,
+        reason: Option<String>,
+    ) -> ActResult {
+        self.require(Capability::Moderate)?;
+        if delete_message_secs > 604_800 || !reason_ok(reason.as_deref()) {
+            return Self::invalid();
+        }
+        self.act(
+            Budget::Outward,
+            Action::Ban {
+                guild,
+                user,
+                delete_message_secs,
+                reason,
+            },
+        )
+    }
+
+    fn unban(&mut self, guild: u64, user: u64) -> ActResult {
+        self.require(Capability::Moderate)?;
+        self.act(Budget::Outward, Action::Unban { guild, user })
+    }
+
+    fn timeout(
+        &mut self,
+        guild: u64,
+        user: u64,
+        until_ms: Option<u64>,
+        reason: Option<String>,
+    ) -> ActResult {
+        self.require(Capability::Moderate)?;
+        // Discord allows up to 28 days.
+        let too_far = until_ms.is_some_and(|t| t > super::timefmt::now_ms() + 28 * 86_400_000);
+        if too_far || !reason_ok(reason.as_deref()) {
+            return Self::invalid();
+        }
+        self.act(
+            Budget::Outward,
+            Action::Timeout {
+                guild,
+                user,
+                until_ms,
+                reason,
+            },
+        )
+    }
+
+    fn set_voice_mute(&mut self, guild: u64, user: u64, muted: bool) -> ActResult {
+        self.require(Capability::Moderate)?;
+        self.act(Budget::Outward, Action::SetVoiceMute { guild, user, muted })
+    }
+
+    fn set_voice_deaf(&mut self, guild: u64, user: u64, deafened: bool) -> ActResult {
+        self.require(Capability::Moderate)?;
+        self.act(
+            Budget::Outward,
+            Action::SetVoiceDeaf {
+                guild,
+                user,
+                deafened,
+            },
+        )
+    }
+
+    fn move_member(&mut self, guild: u64, user: u64, channel: Option<u64>) -> ActResult {
+        self.require(Capability::Moderate)?;
+        self.act(
+            Budget::Outward,
+            Action::MoveMember {
+                guild,
+                user,
+                channel,
+            },
+        )
+    }
+
+    fn bulk_delete(&mut self, channel: u64, messages: Vec<u64>) -> ActResult {
+        self.require(Capability::Moderate)?;
+        if !(2..=100).contains(&messages.len()) {
+            return Self::invalid();
+        }
+        self.act(Budget::Outward, Action::BulkDelete { channel, messages })
+    }
+}
+
+/// A short single-line string a view override may set.
+fn short(s: &str, max: usize) -> bool {
+    s.chars().count() <= max && !s.chars().any(char::is_control)
+}
+
+fn user_field_ok(f: &crate::api::UserField) -> bool {
+    use crate::api::UserField as F;
+    let opt = |s: &Option<String>, max| s.as_deref().is_none_or(|s| short(s, max));
+    match f {
+        F::Username(s) | F::Discriminator(s) => !s.trim().is_empty() && short(s, 32),
+        F::GlobalName(s) | F::Pronouns(s) => opt(s, 40),
+        F::Avatar(s) | F::Banner(s) | F::Locale(s) => opt(s, 64),
+        F::Bio(s) => s.as_deref().is_none_or(|b| b.chars().count() <= 400),
+        F::ThemeColors(c) => c.len() <= 2,
+        _ => true,
+    }
+}
+
+fn member_field_ok(f: &crate::api::MemberField) -> bool {
+    use crate::api::MemberField as F;
+    match f {
+        F::Nick(s) => s.as_deref().is_none_or(|s| short(s, 32)),
+        F::Avatar(s) | F::Banner(s) => s.as_deref().is_none_or(|s| short(s, 64)),
+        F::Bio(s) => s.as_deref().is_none_or(|b| b.chars().count() <= 400),
+        F::Roles(r) => r.len() <= 250,
+        _ => true,
+    }
+}
+
+impl wit::view::Host for PluginState {
+    fn set_users(&mut self, who: wit::view::Users, fields: Vec<wit::view::UserField>) -> ActResult {
+        self.require(Capability::View)?;
+        if fields.len() > 32 || !fields.iter().all(user_field_ok) {
+            return Self::invalid();
+        }
+        for f in fields {
+            self.view.set_user(who, f);
+        }
+        self.push_view()
+    }
+
+    fn set_members(
+        &mut self,
+        guild: Option<u64>,
+        who: wit::view::Users,
+        fields: Vec<wit::view::MemberField>,
+    ) -> ActResult {
+        self.require(Capability::View)?;
+        if fields.len() > 16 || !fields.iter().all(member_field_ok) {
+            return Self::invalid();
+        }
+        for f in fields {
+            self.view.set_member(guild, who, f);
+        }
+        self.push_view()
+    }
+
+    fn set_my_setting(&mut self, key: String, value: Option<String>) -> ActResult {
+        self.require(Capability::View)?;
+        if !super::host_state::setting_allowed(&key)
+            || value.as_deref().is_some_and(|v| v.len() > 4096)
+        {
+            return Self::invalid();
+        }
+        match value {
+            Some(v) => self.view.settings.insert(key, v),
+            None => self.view.settings.remove(&key),
+        };
+        self.push_view()
+    }
+
+    fn reset(&mut self) -> wasmtime::Result<()> {
+        self.require(Capability::View)?;
+        self.view = crate::model::ViewOverrides::default();
+        let _ = self.push_view()?;
+        Ok(())
     }
 }
 

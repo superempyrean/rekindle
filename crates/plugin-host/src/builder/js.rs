@@ -106,7 +106,7 @@ const ENTRY: &str = include_str!("../../templates/js/entry.mjs");
 /// by the editor through the scaffolded tsconfig's `paths`. One module per
 /// contract interface that needs a capability, so importing a module is what
 /// imports the interface.
-const SDK: [(&str, &str); 31] = [
+const SDK: [(&str, &str); 34] = [
     ("index.ts", include_str!("../../templates/sdk/js/index.ts")),
     (
         "globals.d.ts",
@@ -148,6 +148,15 @@ const SDK: [(&str, &str); 31] = [
         "presence.ts",
         include_str!("../../templates/sdk/js/presence.ts"),
     ),
+    (
+        "moderation.ts",
+        include_str!("../../templates/sdk/js/moderation.ts"),
+    ),
+    (
+        "history.ts",
+        include_str!("../../templates/sdk/js/history.ts"),
+    ),
+    ("view.ts", include_str!("../../templates/sdk/js/view.ts")),
     ("ui.ts", include_str!("../../templates/sdk/js/ui.ts")),
     ("slots.ts", include_str!("../../templates/sdk/js/slots.ts")),
     (

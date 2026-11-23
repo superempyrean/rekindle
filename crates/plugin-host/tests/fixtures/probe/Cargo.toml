@@ -1,0 +1,20 @@
+[package]
+name = "probe"
+version = "0.0.0"
+edition = "2024"
+description = "Test fixture: calls the 0.9.0 additions on command and reports what they returned."
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[package.metadata.rekindle]
+id = "test.rekindle.probe"
+name = "Probe"
+capabilities = ["ui", "read-client", "read-messages", "act", "act-local", "moderate", "history", "view", "intercept", "read-users"]
+
+[dependencies]
+rekindle-sdk = { path = "../../../../sdk" }
+
+[lints]
+workspace = true

@@ -2,7 +2,7 @@
 // only during a user gesture). You never see a path: the user picks, the
 // client reads or writes.
 
-import * as raw from 'rekindle:plugin/files@0.8.0';
+import * as raw from 'rekindle:plugin/files@0.9.0';
 import { call } from 'rekindle';
 
 export type Picked = raw.Picked;

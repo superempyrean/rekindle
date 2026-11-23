@@ -222,6 +222,7 @@ impl ClientBackend for DetourBackend {
             member_count: Some(g.members),
             joined_ms: None,
             muted: false,
+            ..Default::default()
         })
     }
 
@@ -593,6 +594,7 @@ fn user_record(u: &client::UserRead) -> rekindle_plugin_host::api::User {
         public_flags: 0,
         accent: None,
         has_decoration: false,
+        ..Default::default()
     }
 }
 
@@ -615,6 +617,7 @@ fn role_record(guild: u64, r: client::RoleRead) -> rekindle_plugin_host::api::Ro
         mentionable: false,
         managed: false,
         unicode_emoji: None,
+        ..Default::default()
     }
 }
 
@@ -628,5 +631,6 @@ fn member_record(guild: u64, m: client::MemberRead) -> rekindle_plugin_host::api
         boosting_since_ms: None,
         timed_out_until_ms: None,
         pending: false,
+        ..Default::default()
     }
 }

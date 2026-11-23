@@ -231,6 +231,7 @@ impl Runtime {
             click_bindings: BTreeMap::new(),
             sounds: BTreeSet::new(),
             rates: Rates::default(),
+            view: crate::model::ViewOverrides::default(),
             pending_settings: Vec::new(),
             pending_invalidate: Vec::new(),
             locale,

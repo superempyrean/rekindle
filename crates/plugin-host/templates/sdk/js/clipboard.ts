@@ -4,7 +4,7 @@
 // command, a panel interaction); otherwise it throws a RekindleError with
 // code 'no-gesture'. The clipboard is never readable.
 
-import * as raw from 'rekindle:plugin/clipboard@0.8.0';
+import * as raw from 'rekindle:plugin/clipboard@0.9.0';
 import { call } from 'rekindle';
 
 export function writeText(text: string): void {

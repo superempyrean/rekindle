@@ -35,6 +35,19 @@ pub(super) fn setting_allowed(key: &str) -> bool {
     PREFIXES.iter().any(|p| key.starts_with(p)) && !NEVER.iter().any(|n| key.contains(n))
 }
 
+impl PluginState {
+    /// `user` without the account fields `read-account` covers, unless the
+    /// plugin has it.
+    fn account_fields(&self, mut user: api::User) -> api::User {
+        if !self.grants.has(Capability::ReadAccount) {
+            user.email = None;
+            user.phone = None;
+            user.store_country = None;
+        }
+        user
+    }
+}
+
 impl wit::client_state::Host for PluginState {
     fn get_selection(&mut self) -> wasmtime::Result<api::Selection> {
         self.require(Capability::ReadClient)?;
@@ -43,16 +56,8 @@ impl wit::client_state::Host for PluginState {
 
     fn me(&mut self) -> wasmtime::Result<api::User> {
         self.require(Capability::ReadClient)?;
-        Ok(self.backend.lock().unwrap().me().unwrap_or(api::User {
-            id: 0,
-            username: String::new(),
-            global_name: None,
-            bot: false,
-            system: false,
-            public_flags: 0,
-            accent: None,
-            has_decoration: false,
-        }))
+        let me = self.backend.lock().unwrap().me().unwrap_or_default();
+        Ok(self.account_fields(me))
     }
 
     fn my_status(&mut self) -> wasmtime::Result<String> {
@@ -67,7 +72,8 @@ impl wit::client_state::Host for PluginState {
 
     fn get_user(&mut self, id: u64) -> wasmtime::Result<Option<api::User>> {
         self.require(Capability::ReadClient)?;
-        Ok(self.backend.lock().unwrap().user(id))
+        let user = self.backend.lock().unwrap().user(id);
+        Ok(user.map(|u| self.account_fields(u)))
     }
 
     fn get_guild(&mut self, id: u64) -> wasmtime::Result<Option<api::Guild>> {
@@ -359,6 +365,41 @@ pub(super) fn parse_message_link(url: &str) -> Option<(Option<u64>, u64, u64)> {
     let channel = parts.next()?.parse().ok()?;
     let message = parts.next()?.parse().ok()?;
     parts.next().is_none().then_some((guild, channel, message))
+}
+
+impl wit::history::Host for PluginState {
+    fn query(
+        &mut self,
+        q: wit::history::HistoryQuery,
+    ) -> wasmtime::Result<Result<wit::history::Page, wit::history::HistoryError>> {
+        use wit::history::HistoryError as E;
+        self.require(Capability::History)?;
+        if !self.grants.has(Capability::ReadMessages) {
+            return Ok(Err(E::NotGranted));
+        }
+        if q.channel == 0 || q.limit == 0 {
+            return Ok(Err(E::Invalid));
+        }
+        let now = self.now();
+        if !self.rates.history.take(now, 30, 60_000) {
+            return Ok(Err(E::RateLimited));
+        }
+        let limit = q.limit.min(1000);
+        let after = q.after.filter(|_| q.before.is_none());
+        let Some(mut messages) = self
+            .backend
+            .lock()
+            .unwrap()
+            .history(q.channel, q.before, after, limit)
+        else {
+            return Ok(Err(E::Unavailable));
+        };
+        messages.truncate(limit as usize);
+        let cursor = (messages.len() == limit as usize)
+            .then(|| messages.last().map(|m| m.id))
+            .flatten();
+        Ok(Ok(wit::history::Page { messages, cursor }))
+    }
 }
 
 impl wit::messages::Host for PluginState {

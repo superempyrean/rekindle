@@ -17,6 +17,7 @@ members = [
     "crates/launcher",
     "plugins/rust/*",
     "crates/plugin-host/tests/fixtures/misbehave",
+    "crates/plugin-host/tests/fixtures/probe",
 ]
 
 [workspace.package]

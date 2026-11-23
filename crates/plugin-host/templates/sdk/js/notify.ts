@@ -6,9 +6,9 @@
 // runs in the render isolate (like `render`): it sees the notification's text,
 // and its only output is the decision built here.
 
-import * as raw from 'rekindle:plugin/notify@0.8.0';
-import type { Target } from 'rekindle:plugin/types@0.8.0';
-import type { ClientNotification, NotificationDecision, NotificationKind } from 'rekindle:plugin/notification-types@0.8.0';
+import * as raw from 'rekindle:plugin/notify@0.9.0';
+import type { Target } from 'rekindle:plugin/types@0.9.0';
+import type { ClientNotification, NotificationDecision, NotificationKind } from 'rekindle:plugin/notification-types@0.9.0';
 import { call } from 'rekindle';
 
 export type { ClientNotification, NotificationDecision, NotificationKind };

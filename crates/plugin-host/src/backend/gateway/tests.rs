@@ -381,3 +381,76 @@ fn timestamps() {
     assert_eq!(iso_ms("2026-11-10T00:00:03Z"), Some(1_794_268_803_000));
     assert_eq!(iso_ms("yesterday"), None);
 }
+
+/// The fields the client's own models have beyond the basic ones, as a
+/// READY user and a guild message carry them.
+#[test]
+fn profile_cosmetics_account_fields_and_message_extras_decode() {
+    use super::{convert, wire};
+    use serde_json::json;
+
+    let u: wire::User = serde_json::from_value(json!({
+        "id": "100", "username": "me", "discriminator": "0", "avatar": "a1",
+        "banner": "b1", "premium_type": 2, "flags": 64,
+        "avatar_decoration_data": { "asset": "d1", "sku_id": "7", "expires_at": 10 },
+        "collectibles": { "nameplate": { "asset": "n1", "palette": "berry", "label": "x", "sku_id": "8" } },
+        "display_name_styles": { "font_id": 3, "effect_id": 2, "colors": [16711680] },
+        "primary_guild": { "identity_guild_id": "1000", "identity_enabled": true, "tag": "RK", "badge": "g1" },
+        "email": "me@example.com", "mfa_enabled": true, "nsfw_allowed": false,
+        "age_verification_status": 1, "locale": "en-US", "verified": true
+    }))
+    .unwrap();
+    let mut user = api::User::default();
+    convert::user_fields(&u, &mut user);
+    assert_eq!(user.premium_type, 2);
+    assert_eq!(user.flag_bits, 64);
+    assert_eq!(
+        user.avatar_decoration.as_ref().unwrap().expires_ms,
+        Some(10_000)
+    );
+    assert_eq!(user.nameplate.as_ref().unwrap().palette, "berry");
+    assert_eq!(user.display_name_style.as_ref().unwrap().font, 3);
+    assert_eq!(
+        user.primary_guild.as_ref().unwrap().tag.as_deref(),
+        Some("RK")
+    );
+    assert!(user.has_decoration);
+    assert_eq!(user.email.as_deref(), Some("me@example.com"));
+    assert_eq!(user.age_verification_status, Some(1));
+
+    // A partial user leaves what was known.
+    let partial: wire::User = serde_json::from_value(json!({ "id": "100" })).unwrap();
+    convert::user_fields(&partial, &mut user);
+    assert_eq!(user.avatar.as_deref(), Some("a1"));
+
+    let m: wire::Message = serde_json::from_value(json!({
+        "id": "5", "channel_id": "1002", "content": "hi", "nonce": 1234,
+        "application_id": "9", "position": 4,
+        "mention_channels": [{ "id": "1003" }],
+        "interaction_metadata": { "id": "11", "type": 2, "user": { "id": "101" }, "name": "ping" },
+        "components": [{ "type": 1 }]
+    }))
+    .unwrap();
+    let msg = convert::message(&m, Some(1000), None, &|_, _| String::new(), &|_, _| None);
+    assert_eq!(msg.nonce.as_deref(), Some("1234"));
+    assert_eq!(msg.application_id, Some(9));
+    assert_eq!(msg.position, Some(4));
+    assert_eq!(msg.mention_channels, vec![1003]);
+    assert_eq!(msg.interaction.as_ref().unwrap().user, 101);
+    assert!(
+        msg.components_json
+            .as_deref()
+            .unwrap()
+            .contains("\"type\":1")
+    );
+
+    let r: wire::Role = serde_json::from_value(json!({
+        "id": "3", "name": "Booster", "icon": "i1",
+        "tags": { "premium_subscriber": null, "bot_id": "77" }
+    }))
+    .unwrap();
+    let role = convert::role(r, 1000);
+    assert!(role.premium_subscriber);
+    assert_eq!(role.bot, Some(77));
+    assert!(!role.guild_connections);
+}

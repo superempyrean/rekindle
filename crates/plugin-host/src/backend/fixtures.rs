@@ -59,6 +59,7 @@ fn user(id: u64, username: &str, global: Option<&str>, bot: bool) -> User {
         public_flags: 0,
         accent: None,
         has_decoration: false,
+        ..Default::default()
     }
 }
 
@@ -93,6 +94,7 @@ fn channel(
         forum_tags: vec![],
         muted: false,
         visible: true,
+        ..Default::default()
     }
 }
 
@@ -111,6 +113,7 @@ fn guild(id: u64, name: &str, owner: u64, members: u32) -> Guild {
         member_count: Some(members),
         joined_ms: Some(T0 - 400 * 86_400_000),
         muted: false,
+        ..Default::default()
     }
 }
 
@@ -134,6 +137,7 @@ fn role(
         mentionable: false,
         managed: false,
         unicode_emoji: None,
+        ..Default::default()
     }
 }
 
@@ -147,6 +151,7 @@ fn member(guild: u64, user: u64, nick: Option<&str>, roles: Vec<u64>) -> api::Me
         boosting_since_ms: None,
         timed_out_until_ms: None,
         pending: false,
+        ..Default::default()
     }
 }
 
@@ -184,6 +189,7 @@ pub fn message(
         ephemeral: false,
         sending: false,
         failed: false,
+        ..Default::default()
     }
 }
 
