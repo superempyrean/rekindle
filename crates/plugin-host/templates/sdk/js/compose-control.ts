@@ -11,7 +11,7 @@
 // from the same call is ignored. If a plugin after yours changes the text,
 // the split is dropped and that text goes as one message.
 
-import * as raw from 'rekindle:plugin/compose-control@0.9.0';
+import * as raw from 'rekindle:plugin/compose-control@0.10.0';
 import { call } from 'rekindle';
 
 export type SplitError = raw.SplitError;

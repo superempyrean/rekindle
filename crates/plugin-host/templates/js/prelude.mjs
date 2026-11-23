@@ -18,7 +18,7 @@
 //   (the engine's own seed is fixed at build time). Not cryptographic.
 // - `crypto.getRandomValues()`/`randomUUID()` throw: there's no entropy source.
 
-import { clearTimer, log, nowMillis, setTimer } from 'rekindle:plugin/host@0.9.0';
+import { clearTimer, log, nowMillis, setTimer } from 'rekindle:plugin/host@0.10.0';
 
 let live = false;
 const held = [];

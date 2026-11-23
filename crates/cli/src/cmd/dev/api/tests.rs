@@ -570,3 +570,28 @@ fn origin_guard() {
     );
     assert!(!allowed_origin(Some("127.0.0.1:7778"), None, 7777));
 }
+
+#[test]
+fn rest_requests_name_a_method_and_a_path() {
+    assert_eq!(
+        post(
+            "/api/rest",
+            r#"{"method":"post","path":"/channels/1002/messages","body":"{\"content\":\"hi\"}"}"#
+        ),
+        Ok(Route::Api(Action::Rest {
+            method: "POST".into(),
+            path: "/channels/1002/messages".into(),
+            body: Some(r#"{"content":"hi"}"#.into()),
+        }))
+    );
+    assert_eq!(
+        post("/api/rest", r#"{"method":"GET","path":"/channels/1002"}"#),
+        Ok(Route::Api(Action::Rest {
+            method: "GET".into(),
+            path: "/channels/1002".into(),
+            body: None,
+        }))
+    );
+    assert_eq!(status("/api/rest", r#"{"method":"TRACE","path":"/x"}"#), 400);
+    assert_eq!(status("/api/rest", r#"{"method":"GET","path":"x"}"#), 400);
+}

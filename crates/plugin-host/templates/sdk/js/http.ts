@@ -8,7 +8,7 @@
 // refused or failed request throws a RekindleError ('host-not-allowed',
 // 'insecure-scheme', 'invalid-url', 'timeout', 'too-large', 'transport').
 
-import * as raw from 'rekindle:plugin/http@0.9.0';
+import * as raw from 'rekindle:plugin/http@0.10.0';
 import { call } from 'rekindle';
 
 export type Method = raw.Method;

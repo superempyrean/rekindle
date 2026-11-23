@@ -1,4 +1,4 @@
-// rekindle:plugin@0.9.0 is the stable contract between the host (rekindle)
+// rekindle:plugin@0.10.0 is the stable contract between the host (rekindle)
 // and plugins.
 //
 // Plugins are WebAssembly components; this package is the ONLY thing they
@@ -29,7 +29,7 @@
 //   * Our own vocabulary (slot names, surface names, tweak ids, event kinds)
 //     is strings or enums we control.
 
-package rekindle:plugin@0.9.0;
+package rekindle:plugin@0.10.0;
 
 /// Shared types.
 interface types {
@@ -124,6 +124,12 @@ interface types {
         /// country, on `client-state.me`. Without it those fields are
         /// `none`.
         read-account,
+
+        // ---- added in 0.10.0 ----
+        /// See the client's REST requests to Discord and their answers, for
+        /// the kinds the plugin can read, and drop or rewrite them
+        /// (`http-filter`). Never their headers.
+        intercept-http,
     }
 
     /// 8-bit sRGB, straight alpha.

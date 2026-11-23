@@ -197,4 +197,12 @@ interface host-events {
     /// member, relationship, guild, channel, role and emoji kinds); the
     /// others come back `unavailable`.
     intercept: func(kinds: list<event-kind>) -> list<tuple<event-kind, result<_, subscribe-error>>>;
+
+    /// Replace the kinds of REST request the plugin's `http-filter` sees
+    /// with `kinds`. It sees none until this is called. Needs
+    /// `intercept-http` and each kind's own capability. The host knows the
+    /// routes of the message, reaction, poll-vote, pins, typing, member,
+    /// relationship, guild, channel, role and emoji kinds; the others come
+    /// back `unavailable`.
+    intercept-http: func(kinds: list<event-kind>) -> list<tuple<event-kind, result<_, subscribe-error>>>;
 }

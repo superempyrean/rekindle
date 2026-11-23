@@ -222,6 +222,7 @@ impl Runtime {
             gesture: None,
             subscriptions: None,
             intercepts: BTreeSet::new(),
+            http_intercepts: BTreeSet::new(),
             decorations: BTreeSet::new(),
             accessories: BTreeSet::new(),
             ghosts: BTreeMap::new(),
@@ -269,6 +270,7 @@ impl Runtime {
                 load!(timer, timer_handler, None);
                 load!(compose, compose_handler, Some(Capability::Compose));
                 load!(filter, event_filter, Some(Capability::Intercept));
+                load!(http, http_filter, Some(Capability::InterceptHttp));
             }
             Role::Render => {
                 load!(renderer, renderer, Some(Capability::RenderMessages));

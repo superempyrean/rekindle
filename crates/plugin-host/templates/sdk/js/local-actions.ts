@@ -12,11 +12,11 @@
 //
 // Reactions are `rekindle/reactions`; visible actions `rekindle/actions`.
 
-import * as raw from 'rekindle:plugin/local-actions@0.9.0';
-import type { MessageRef } from 'rekindle:plugin/types@0.9.0';
+import * as raw from 'rekindle:plugin/local-actions@0.10.0';
+import type { MessageRef } from 'rekindle:plugin/types@0.10.0';
 import { call, u64, type Id } from 'rekindle';
 
-export type ActionError = import('rekindle:plugin/action-types@0.9.0').ActionError;
+export type ActionError = import('rekindle:plugin/action-types@0.10.0').ActionError;
 
 export function markRead(channel: Id): void {
   call('localActions.markRead', () => raw.markRead(u64(channel)));

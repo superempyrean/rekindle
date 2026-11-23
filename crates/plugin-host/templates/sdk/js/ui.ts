@@ -18,8 +18,8 @@
 // Slots (menus, buttons) are `rekindle/slots`; badges and accessories
 // `rekindle/decorations`; slash commands `rekindle/commands`.
 
-import * as raw from 'rekindle:plugin/ui@0.9.0';
-import type { Target, UiEvent } from 'rekindle:plugin/types@0.9.0';
+import * as raw from 'rekindle:plugin/ui@0.10.0';
+import type { Target, UiEvent } from 'rekindle:plugin/types@0.10.0';
 import { __registry, call, u64, type Id } from 'rekindle';
 import { Elements, on, toElements, type Element } from 'rekindle/elements';
 

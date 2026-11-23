@@ -45,6 +45,7 @@ mod host_core;
 mod host_services;
 mod host_state;
 mod host_ui;
+mod http;
 mod inspect;
 mod isolate;
 mod load;
@@ -58,6 +59,7 @@ mod timefmt;
 pub use events::event_kind;
 pub use gestures::message_predicate;
 pub use host_state::redact;
+pub use http::{CALLS_PER_MINUTE, MAX_BODY, RequestOutcome, RestRequest, route_kind};
 pub use inspect::{
     HOOKS, Inspection, engine, hook_capability, inspect, inspect_artifact, inspect_artifact_cached,
     inspect_cached,
@@ -205,6 +207,7 @@ struct Hooks {
     renderer: Option<ex::renderer::Guest>,
     notifications: Option<ex::notification_filter::Guest>,
     filter: Option<ex::event_filter::Guest>,
+    http: Option<ex::http_filter::Guest>,
 }
 
 /// A plugin's render isolate ([`isolate`]).

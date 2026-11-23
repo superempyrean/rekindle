@@ -15,7 +15,7 @@ use crate::manifest::{self, Manifest};
 use crate::theme;
 
 /// The hook exports (design doc §3.2).
-pub const HOOKS: [&str; 8] = [
+pub const HOOKS: [&str; 9] = [
     "lifecycle",
     "event-handler",
     "ui-handler",
@@ -24,6 +24,7 @@ pub const HOOKS: [&str; 8] = [
     "renderer",
     "notification-filter",
     "event-filter",
+    "http-filter",
 ];
 
 /// The capability a hook export needs before the host calls it.
@@ -33,6 +34,7 @@ pub fn hook_capability(hook: &str) -> Option<Capability> {
         "renderer" => Some(Capability::RenderMessages),
         "notification-filter" => Some(Capability::Notifications),
         "event-filter" => Some(Capability::Intercept),
+        "http-filter" => Some(Capability::InterceptHttp),
         _ => None,
     }
 }

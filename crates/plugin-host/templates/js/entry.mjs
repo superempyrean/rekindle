@@ -44,6 +44,8 @@ const HANDLERS = [
   'render',
   'onNotification',
   'onIntercept',
+  'onRequest',
+  'onResponse',
 ];
 
 /** Handlers the client calls only with a capability, and the export that carries them. */
@@ -53,6 +55,8 @@ const GATED = {
   render: ['renderer', 'render-messages'],
   onNotification: ['notification-filter', 'notifications'],
   onIntercept: ['event-filter', 'intercept'],
+  onRequest: ['http-filter', 'intercept-http'],
+  onResponse: ['http-filter', 'intercept-http'],
 };
 
 // Checked at build time (this module runs during `rekindle build`), so a
@@ -239,6 +243,15 @@ const notificationFilter = {
 const eventFilter = {
   onIntercept(event) {
     return orDefault(handle('onIntercept', [event]), { tag: 'pass' });
+  },
+};
+
+const httpFilter = {
+  onRequest(req) {
+    return orDefault(handle('onRequest', [req]), { tag: 'pass' });
+  },
+  onResponse(res) {
+    return orDefault(handle('onResponse', [res]), { tag: 'pass' });
   },
 };
 

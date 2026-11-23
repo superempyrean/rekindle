@@ -8,7 +8,7 @@
 //     { tag: 'nameplate', val: undefined },
 //   ]);
 
-import * as raw from 'rekindle:plugin/view@0.9.0';
+import * as raw from 'rekindle:plugin/view@0.10.0';
 import { call, optU64, type Id } from 'rekindle';
 
 export type Users = raw.Users;

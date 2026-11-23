@@ -920,6 +920,37 @@ impl Harness {
         self.watch("event-filter", |h| h.runtime.intercept(ev))
     }
 
+    /// The client makes a REST request. It runs past the plugins'
+    /// `http-filter`s, the mock answers it
+    /// ([`MockBackend::rest`](crate::backend::MockBackend::rest)), and the
+    /// response runs past them on the way back. Returns the status and the
+    /// body the client reads, or `None` when a filter dropped the request.
+    #[track_caller]
+    pub fn rest(
+        &mut self,
+        method: &str,
+        path: &str,
+        body: Option<&str>,
+    ) -> Option<(u16, Option<String>)> {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        let req = crate::runtime::RestRequest {
+            id: NEXT.fetch_add(1, Ordering::Relaxed),
+            method: method.to_string(),
+            path: path.to_string(),
+            body: body.map(str::to_string),
+        };
+        let body = match self.watch("http-filter", |h| h.runtime.filter_request(&req)) {
+            crate::runtime::RequestOutcome::Drop => return None,
+            crate::runtime::RequestOutcome::Send(body) => body,
+        };
+        let (status, answer) = self.backend().rest(method, path, body.as_deref());
+        let answer = self.watch("http-filter", |h| {
+            h.runtime.filter_response(&req, status, answer)
+        });
+        Some((status, answer))
+    }
+
     /// A message arrives in `channel` from `author`: added to the world (and
     /// the screen) and delivered as `message-created`. Returns it.
     #[track_caller]

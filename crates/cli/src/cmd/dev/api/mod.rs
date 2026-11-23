@@ -59,6 +59,14 @@ pub(crate) enum Action {
     SetPresence {
         status: String,
     },
+    /// The client makes a REST request to Discord: it runs past the
+    /// plugins' `http-filter`s, the mock answers, and the answer runs past
+    /// them back. The result is `last_rest` in the state.
+    Rest {
+        method: String,
+        path: String,
+        body: Option<String>,
+    },
     /// Someone else's message arrives: `message-created`.
     Receive {
         channel: u64,
@@ -167,6 +175,7 @@ const POSTS: &[(&str, Parser)] = &[
     ("/api/select", bodies::parse_select),
     ("/api/presence", bodies::parse_presence),
     ("/api/receive", bodies::parse_receive),
+    ("/api/rest", bodies::parse_rest),
     ("/api/message/edit", bodies::parse_edit),
     ("/api/message/delete", bodies::parse_delete),
     ("/api/reload", bodies::parse_reload),

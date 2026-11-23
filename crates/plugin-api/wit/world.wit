@@ -112,6 +112,61 @@ interface event-filter {
     on-intercept: func(event: event) -> verdict;
 }
 
+/// Requires `intercept-http`. Called for each REST request the client
+/// makes to Discord on a route of a kind registered with
+/// `host-events.intercept-http`, before it is sent, and for its response,
+/// before the client reads it. In the main instance, in load order, each
+/// plugin getting what the one before returned. Over the per-call budget,
+/// or if the plugin traps, the request or response passes unchanged.
+interface http-filter {
+    use events.{event-kind};
+
+    /// A request, without its headers.
+    record http-request {
+        /// Pairs the request with its response.
+        id: u64,
+        /// `GET`, `POST`, `PATCH`, `PUT` or `DELETE`.
+        method: string,
+        /// The path below the API version, with the query:
+        /// `/channels/1/messages?limit=50`.
+        path: string,
+        /// What the route is about.
+        kind: event-kind,
+        /// JSON. `none` for a request without a body.
+        body: option<string>,
+    }
+
+    /// The answer to a request, without its headers.
+    record http-response {
+        id: u64,
+        method: string,
+        path: string,
+        kind: event-kind,
+        /// The HTTP status, 0 when the request failed.
+        status: u16,
+        body: option<string>,
+    }
+
+    variant request-verdict {
+        /// Sent as it is.
+        pass,
+        /// Never sent; the client sees a failed request.
+        drop,
+        /// Sent with this body, which must be JSON. The method and path
+        /// stay.
+        replace(string),
+    }
+
+    variant response-verdict {
+        pass,
+        /// The client reads this body, which must be JSON. The status stays.
+        replace(string),
+    }
+
+    on-request: func(req: http-request) -> request-verdict;
+    on-response: func(res: http-response) -> response-verdict;
+}
+
 /// Requires `notifications`. Runs in the render isolate: it sees the
 /// notification's text, and its only output is the decision.
 interface notification-filter {
@@ -185,4 +240,5 @@ world plugin {
     export renderer;
     export notification-filter;
     export event-filter;
+    export http-filter;
 }

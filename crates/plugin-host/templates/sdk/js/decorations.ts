@@ -12,8 +12,8 @@
 // [guild]; MESSAGE_TRAILING [message]. Up to 5000 per plugin. Clicks on a
 // `clickable` one arrive as `onSlot` `decoration-clicked` (or `onClick`).
 
-import * as raw from 'rekindle:plugin/ui@0.9.0';
-import type { Color, Icon, MessageRef, Span, UserRef } from 'rekindle:plugin/types@0.9.0';
+import * as raw from 'rekindle:plugin/ui@0.10.0';
+import type { Color, Icon, MessageRef, Span, UserRef } from 'rekindle:plugin/types@0.10.0';
 import { __registry, call, span, u64, type Id } from 'rekindle';
 import { toElements, type Element, type Elements } from 'rekindle/elements';
 

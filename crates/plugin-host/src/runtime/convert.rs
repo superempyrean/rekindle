@@ -73,6 +73,7 @@ pub(super) fn cap_to_wit(c: Capability) -> wit::types::Capability {
         Capability::History => W::History,
         Capability::View => W::View,
         Capability::ReadAccount => W::ReadAccount,
+        Capability::InterceptHttp => W::InterceptHttp,
     }
 }
 

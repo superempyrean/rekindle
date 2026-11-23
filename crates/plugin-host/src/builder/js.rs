@@ -573,7 +573,7 @@ fn entry_module(plugin: &str, exports: &[&str]) -> String {
 
 /// The plugin's handlers (checked for `async` in the source). The entry
 /// module has the same list.
-const HANDLERS: [&str; 18] = [
+const HANDLERS: [&str; 20] = [
     "activate",
     "deactivate",
     "onSettingsChanged",
@@ -592,6 +592,8 @@ const HANDLERS: [&str; 18] = [
     "render",
     "onNotification",
     "onIntercept",
+    "onRequest",
+    "onResponse",
 ];
 
 /// A handler declared `async` in the entry file (`export async function

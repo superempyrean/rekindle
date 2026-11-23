@@ -7,6 +7,7 @@
 
 mod dispatch;
 mod inspect;
+mod rest;
 #[cfg(test)]
 mod tests;
 mod world;

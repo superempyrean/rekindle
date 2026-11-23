@@ -6,6 +6,7 @@ use std::cell::{Cell, RefCell};
 pub use rekindle_plugin_api::exports::rekindle::plugin::compose_handler::Guest as ComposeHandler;
 pub use rekindle_plugin_api::exports::rekindle::plugin::event_filter::Guest as EventFilter;
 pub use rekindle_plugin_api::exports::rekindle::plugin::event_handler::Guest as EventHandler;
+pub use rekindle_plugin_api::exports::rekindle::plugin::http_filter::Guest as HttpFilter;
 pub use rekindle_plugin_api::exports::rekindle::plugin::lifecycle::Guest as Lifecycle;
 pub use rekindle_plugin_api::exports::rekindle::plugin::notification_filter::Guest as NotificationFilter;
 pub use rekindle_plugin_api::exports::rekindle::plugin::renderer::Guest as Renderer;

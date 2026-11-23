@@ -51,10 +51,12 @@ pub enum Capability {
     History,
     View,
     ReadAccount,
+    // added in 0.10.0
+    InterceptHttp,
 }
 
 impl Capability {
-    pub const ALL: [Capability; 25] = [
+    pub const ALL: [Capability; 26] = [
         Capability::ReadClient,
         Capability::ReadUsers,
         Capability::ReadMessages,
@@ -80,6 +82,7 @@ impl Capability {
         Capability::History,
         Capability::View,
         Capability::ReadAccount,
+        Capability::InterceptHttp,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -109,6 +112,7 @@ impl Capability {
             Capability::History => "history",
             Capability::View => "view",
             Capability::ReadAccount => "read-account",
+            Capability::InterceptHttp => "intercept-http",
         }
     }
 
@@ -171,6 +175,9 @@ impl Capability {
                 "change how this client shows people, you included, and your settings (only on this device)"
             }
             Capability::ReadAccount => "see your email address, phone number and account country",
+            Capability::InterceptHttp => {
+                "see and change what the client asks Discord for and what comes back, for what it can read (never your login)"
+            }
         }
     }
 
@@ -200,12 +207,14 @@ impl Capability {
             Capability::Moderate => Some("moderation"),
             Capability::History => Some("history"),
             Capability::View => Some("view"),
-            // `intercept` gates an export (`event-filter`); `host-events.intercept`
-            // needs no import of its own.
+            // `intercept` gates an export (`event-filter`) and `intercept-http`
+            // another (`http-filter`); `host-events.intercept` and
+            // `intercept-http` need no import of their own.
             // `read-account` gates fields of `client-state.me`.
             Capability::Pointer
             | Capability::Compose
             | Capability::Intercept
+            | Capability::InterceptHttp
             | Capability::ReadAccount => None,
         }
     }

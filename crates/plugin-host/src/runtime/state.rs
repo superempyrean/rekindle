@@ -132,6 +132,9 @@ pub(crate) struct PluginState {
     pub subscriptions: Option<BTreeSet<u8>>,
     /// Event kinds the plugin's `event-filter` sees (`host-events.intercept`).
     pub intercepts: BTreeSet<u8>,
+    /// Kinds of REST route the plugin's `http-filter` sees
+    /// (`host-events.intercept-http`).
+    pub http_intercepts: BTreeSet<u8>,
     pub decorations: BTreeSet<(String, u64)>,
     pub accessories: BTreeSet<u64>,
     /// channel -> ghost ids.
@@ -175,6 +178,8 @@ pub(crate) struct Rates {
     pub link: Rate,
     pub nav: Rate,
     pub history: Rate,
+    /// `http-filter` calls.
+    pub http: Rate,
 }
 
 /// One `on-compose` call (see [`PluginState::composing`]).

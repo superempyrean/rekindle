@@ -167,6 +167,12 @@ pub fn screen(
         headline
             .push("It can hide or change messages and other things before you see them.".into());
     }
+    if has(Capability::InterceptHttp) {
+        headline.push(
+            "It can change what the client asks Discord for and what comes back, for what it can read."
+                .into(),
+        );
+    }
     if has(Capability::Act) {
         headline
             .push("It can pin, delete, edit and vote as you when you click its buttons.".into());

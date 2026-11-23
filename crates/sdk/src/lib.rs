@@ -163,7 +163,8 @@ impl Granted {
 ///
 /// The host calls a hook only if the plugin has its capability:
 /// [`on_compose`] needs `compose`, [`render`] `render-messages`,
-/// [`on_notification`] `notifications`, [`on_intercept`] `intercept`.
+/// [`on_notification`] `notifications`, [`on_intercept`] `intercept`,
+/// [`on_request`] and [`on_response`] `intercept-http`.
 /// Events arrive only for kinds the capabilities cover, and after
 /// [`events::subscribe`], only for the kinds listed.
 ///
@@ -172,6 +173,8 @@ impl Granted {
 /// [`render`]: Plugin::render
 /// [`on_notification`]: Plugin::on_notification
 /// [`on_intercept`]: Plugin::on_intercept
+/// [`on_request`]: Plugin::on_request
+/// [`on_response`]: Plugin::on_response
 pub trait Plugin: Sized + 'static {
     /// Builds the plugin's state, once, after the host loads it. An `Err`
     /// fails the load, and the host shows the message.
@@ -278,6 +281,23 @@ pub trait Plugin: Sized + 'static {
     /// path with the render budget; over the budget, the event passes.
     fn on_intercept(&mut self, _event: &Event) -> events::Verdict {
         events::Verdict::Pass
+    }
+
+    /// A REST request the client is about to send, on a route of a kind
+    /// registered with [`events::intercept_http`]. It carries the method,
+    /// path and body, never the headers. Return
+    /// [`events::RequestVerdict::Pass`], `Drop` (the client sees a failed
+    /// request) or `Replace` with another JSON body. Budgeted like
+    /// [`Plugin::on_intercept`]; over the budget, the request goes as it is.
+    fn on_request(&mut self, _request: &events::HttpRequest) -> events::RequestVerdict {
+        events::RequestVerdict::Pass
+    }
+
+    /// The response to a request [`Plugin::on_request`] saw, before the
+    /// client reads it. Return [`events::ResponseVerdict::Pass`] or
+    /// `Replace` with another JSON body; the status stays.
+    fn on_response(&mut self, _response: &events::HttpResponse) -> events::ResponseVerdict {
+        events::ResponseVerdict::Pass
     }
 }
 
@@ -418,6 +438,17 @@ macro_rules! plugin {
             fn on_intercept(ev: $crate::Event) -> $crate::events::Verdict {
                 $crate::__private::with_ret::<$ty, _>(|p| $crate::Plugin::on_intercept(p, &ev))
                     .unwrap_or($crate::events::Verdict::Pass)
+            }
+        }
+
+        impl $crate::__private::HttpFilter for __RekindleExport {
+            fn on_request(req: $crate::events::HttpRequest) -> $crate::events::RequestVerdict {
+                $crate::__private::with_ret::<$ty, _>(|p| $crate::Plugin::on_request(p, &req))
+                    .unwrap_or($crate::events::RequestVerdict::Pass)
+            }
+            fn on_response(res: $crate::events::HttpResponse) -> $crate::events::ResponseVerdict {
+                $crate::__private::with_ret::<$ty, _>(|p| $crate::Plugin::on_response(p, &res))
+                    .unwrap_or($crate::events::ResponseVerdict::Pass)
             }
         }
 

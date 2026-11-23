@@ -8,7 +8,7 @@
 // `Panel` (`rekindle/ui`) is an `Elements` with an id and a title. Read the
 // value an `onUi` event carries with `uiValue`.
 
-import type { Color, Element, Icon, Span, UiEvent, UiValue } from 'rekindle:plugin/types@0.9.0';
+import type { Color, Element, Icon, Span, UiEvent, UiValue } from 'rekindle:plugin/types@0.10.0';
 import { __registry, u64, type Id } from 'rekindle';
 
 export type { Element };

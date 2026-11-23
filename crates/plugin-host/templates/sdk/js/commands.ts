@@ -9,9 +9,9 @@
 // composer), `send` (as your message; needs `compose`, and still passes every
 // compose hook), or nothing.
 
-import * as raw from 'rekindle:plugin/ui@0.9.0';
-import type { CommandOption, CommandReply, Invocation, OptionKind, OptionValue } from 'rekindle:plugin/command-types@0.9.0';
-import type { Span } from 'rekindle:plugin/types@0.9.0';
+import * as raw from 'rekindle:plugin/ui@0.10.0';
+import type { CommandOption, CommandReply, Invocation, OptionKind, OptionValue } from 'rekindle:plugin/command-types@0.10.0';
+import type { Span } from 'rekindle:plugin/types@0.10.0';
 import { __registry, call, span } from 'rekindle';
 
 export type { CommandReply, Invocation, OptionKind, OptionValue };

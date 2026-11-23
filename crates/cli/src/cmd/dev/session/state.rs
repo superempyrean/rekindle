@@ -104,6 +104,7 @@ impl Session {
             "features": features,
             "last_send": self.last_send,
             "last_slash": self.last_slash,
+            "last_rest": self.last_rest,
         });
         js_safe(&mut v);
         v

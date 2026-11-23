@@ -1,5 +1,5 @@
-version 0.9.0
-wit-sha256 b703c801ee1a2c73fea046cd326d177c70e30aba8939f4c8d701303cbd513dc2
+version 0.10.0
+wit-sha256 0d9b438a3f384e2b66f4ff49a01624eb51c4242ba033ac92235ea4632fb365a0
 func actions.create-invite
 func actions.delete-message
 func actions.edit-message
@@ -60,6 +60,7 @@ func files.open
 func files.save
 func history.query
 func host-events.intercept
+func host-events.intercept-http
 func host-events.subscribe
 func host.clear-timer
 func host.client
@@ -72,6 +73,8 @@ func host.now-millis
 func host.set-timer
 func host.snowflake-ms
 func host.tr
+func http-filter.on-request
+func http-filter.on-response
 func http.fetch
 func inspect.raw-json
 func lifecycle.activate
@@ -233,6 +236,7 @@ capability moderate
 capability history
 capability view
 capability read-account
+capability intercept-http
 slot message.context-menu Menu
 slot message.hover-bar Button
 slot user.context-menu Menu

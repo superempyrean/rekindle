@@ -33,6 +33,10 @@ impl Session {
             Action::Event(ev) => self.apply_event(*ev),
             Action::SelectChannel { channel } => self.select_channel(channel),
             Action::SetPresence { status } => self.apply_event(Event::MyPresence(status)),
+            Action::Rest { method, path, body } => {
+                self.rest(&method, &path, body);
+                Ok(())
+            }
             Action::Receive {
                 channel,
                 author,
@@ -69,6 +73,29 @@ impl Session {
                 channel,
             } => self.run_slash(&plugin, &command, &options, channel),
         }
+    }
+
+    fn rest(&mut self, method: &str, path: &str, body: Option<String>) {
+        use rekindle_plugin_host::runtime::{RequestOutcome, RestRequest};
+        let req = RestRequest {
+            id: now_ms(),
+            method: method.to_string(),
+            path: path.to_string(),
+            body,
+        };
+        let result = match self.runtime.filter_request(&req) {
+            RequestOutcome::Drop => json!({ "method": method, "path": path, "dropped": true }),
+            RequestOutcome::Send(sent) => {
+                let (status, answer) =
+                    self.backend
+                        .lock()
+                        .unwrap()
+                        .rest(method, path, sent.as_deref());
+                let read = self.runtime.filter_response(&req, status, answer);
+                json!({ "method": method, "path": path, "sent": sent, "status": status, "body": read })
+            }
+        };
+        self.last_rest = Some(result);
     }
 
     fn ui_event(&mut self, plugin: &str, event: &UiEvent) -> Result<(), ApiError> {

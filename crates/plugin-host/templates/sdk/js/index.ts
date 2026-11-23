@@ -32,8 +32,8 @@
 //     },
 //   });
 
-import * as host from 'rekindle:plugin/host@0.9.0';
-import type { ClientInfo } from 'rekindle:plugin/host@0.9.0';
+import * as host from 'rekindle:plugin/host@0.10.0';
+import type { ClientInfo } from 'rekindle:plugin/host@0.10.0';
 import type {
   Capability,
   ChannelRef,
@@ -52,15 +52,21 @@ import type {
   UiEvent,
   UiValue,
   UserRef,
-} from 'rekindle:plugin/types@0.9.0';
-import type { Event, EventKind } from 'rekindle:plugin/events@0.9.0';
-import type { Message, User } from 'rekindle:plugin/records@0.9.0';
-import type { SlotClick, SlotEvent } from 'rekindle:plugin/ui-handler@0.9.0';
-import type { CommandReply, Invocation } from 'rekindle:plugin/command-types@0.9.0';
-import type { ComposeResult, Draft, Upload, UploadResult } from 'rekindle:plugin/compose-types@0.9.0';
-import type { RenderInput, Transform } from 'rekindle:plugin/render-types@0.9.0';
-import type { ClientNotification, NotificationDecision } from 'rekindle:plugin/notification-types@0.9.0';
-import type { Verdict } from 'rekindle:plugin/event-filter@0.9.0';
+} from 'rekindle:plugin/types@0.10.0';
+import type { Event, EventKind } from 'rekindle:plugin/events@0.10.0';
+import type { Message, User } from 'rekindle:plugin/records@0.10.0';
+import type { SlotClick, SlotEvent } from 'rekindle:plugin/ui-handler@0.10.0';
+import type { CommandReply, Invocation } from 'rekindle:plugin/command-types@0.10.0';
+import type { ComposeResult, Draft, Upload, UploadResult } from 'rekindle:plugin/compose-types@0.10.0';
+import type { RenderInput, Transform } from 'rekindle:plugin/render-types@0.10.0';
+import type { ClientNotification, NotificationDecision } from 'rekindle:plugin/notification-types@0.10.0';
+import type { Verdict } from 'rekindle:plugin/event-filter@0.10.0';
+import type {
+  HttpRequest,
+  HttpResponse,
+  RequestVerdict,
+  ResponseVerdict,
+} from 'rekindle:plugin/http-filter@0.10.0';
 
 export type {
   Capability,
@@ -107,7 +113,8 @@ export type Id = bigint | number;
  *
  * The client calls a hook only if the manifest's capabilities cover it:
  * `onCompose`/`onUpload` need `compose`, `render` needs `render-messages`,
- * `onNotification` needs `notifications`, `onIntercept` needs `intercept`.
+ * `onNotification` needs `notifications`, `onIntercept` needs `intercept`,
+ * `onRequest` and `onResponse` need `intercept-http`.
  * The build refuses such a hook without its capability, since it would never
  * run.
  */
@@ -163,6 +170,15 @@ export interface Plugin {
    * nothing to let it pass. Runs on the client's hot path: decide quickly.
    */
   onIntercept?(event: Event): Verdict | undefined | null | void;
+  /**
+   * A REST request the client is about to send to Discord, on a route of a
+   * kind registered with `events.interceptHttp`: method, path and body, never
+   * the headers. Return `{ tag: 'drop' }`, `{ tag: 'replace', val: body }`
+   * (JSON) or nothing to let it go.
+   */
+  onRequest?(req: HttpRequest): RequestVerdict | undefined | null | void;
+  /** The response to a request `onRequest` saw. Return `{ tag: 'replace', val: body }` or nothing. */
+  onResponse?(res: HttpResponse): ResponseVerdict | undefined | null | void;
 }
 
 /**

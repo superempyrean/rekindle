@@ -11,8 +11,8 @@
 // By default the plugin receives every kind it's granted; `subscribe`
 // narrows that to the kinds it handles.
 
-import * as raw from 'rekindle:plugin/host-events@0.9.0';
-import type { Event, EventKind } from 'rekindle:plugin/events@0.9.0';
+import * as raw from 'rekindle:plugin/host-events@0.10.0';
+import type { Event, EventKind } from 'rekindle:plugin/events@0.10.0';
 import { __registry } from 'rekindle';
 
 export type { Event, EventKind };
@@ -23,7 +23,7 @@ export type {
   ReactionChange,
   RelationshipChange,
   SelectionChange,
-} from 'rekindle:plugin/events@0.9.0';
+} from 'rekindle:plugin/events@0.10.0';
 export type SubscribeError = raw.SubscribeError;
 
 /** An event's tag (`'message-created'`, `'typing'`, ...). */
@@ -60,5 +60,16 @@ export function subscribe(kinds: EventKind[]): Array<[EventKind, SubscribeError]
 export function intercept(kinds: EventKind[]): Array<[EventKind, SubscribeError]> {
   const refused: Array<[EventKind, SubscribeError]> = [];
   for (const [kind, r] of raw.intercept(kinds)) if (r.tag === 'err') refused.push([kind, r.val]);
+  return refused;
+}
+
+/**
+ * Has `onRequest` and `onResponse` see the client's REST requests on routes
+ * of these kinds (needs `intercept-http`, and each kind's own capability).
+ * Returns the kinds that were refused.
+ */
+export function interceptHttp(kinds: EventKind[]): Array<[EventKind, SubscribeError]> {
+  const refused: Array<[EventKind, SubscribeError]> = [];
+  for (const [kind, r] of raw.interceptHttp(kinds)) if (r.tag === 'err') refused.push([kind, r.val]);
   return refused;
 }

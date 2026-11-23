@@ -1,5 +1,5 @@
-//! Calls the 0.9.0 additions on command and logs what they returned. Used by
-//! `plugin-host/tests/moderation_history_view.rs`.
+//! Calls the 0.9.0 and 0.10.0 additions on command and logs what they returned. Used by
+//! `plugin-host/tests/moderation_history_view.rs` and `http_filter.rs`.
 
 use rekindle_sdk::prelude::*;
 use rekindle_sdk::view::{MemberField, UserField, Users};
@@ -18,6 +18,10 @@ impl Plugin for Probe {
             moderation::timeout(LAB, ALICE, None, None)
         );
         let _ = events::intercept(&[EventKind::Message]);
+        info!(
+            "activate intercept-http: {:?}",
+            events::intercept_http(&[EventKind::Message, EventKind::Typing, EventKind::Presence])
+        );
         for id in [
             "open-dm",
             "invite",
@@ -135,6 +139,29 @@ impl Plugin for Probe {
                 events::Verdict::Patch(vec![events::EventPatch::Content(String::new())])
             }
             _ => events::Verdict::Pass,
+        }
+    }
+
+    fn on_request(&mut self, req: &events::HttpRequest) -> events::RequestVerdict {
+        let body = req.body.as_deref().unwrap_or("");
+        if body.contains("drop me") {
+            events::RequestVerdict::Drop
+        } else if body.contains("rewrite me") {
+            events::RequestVerdict::Replace(r#"{"content":"rewritten"}"#.into())
+        } else if body.contains("break me") {
+            events::RequestVerdict::Replace("not json".into())
+        } else {
+            events::RequestVerdict::Pass
+        }
+    }
+
+    fn on_response(&mut self, res: &events::HttpResponse) -> events::ResponseVerdict {
+        info!("response {} {} {} {}", res.method, res.path, res.status, res.id);
+        match &res.body {
+            Some(b) if res.method == "GET" && b.contains("secret") => {
+                events::ResponseVerdict::Replace("[]".into())
+            }
+            _ => events::ResponseVerdict::Pass,
         }
     }
 }

@@ -4,8 +4,8 @@
 //
 // `emoji` is Unicode (`'👍'`) or `name:id` for a custom one.
 
-import * as raw from 'rekindle:plugin/reactions@0.9.0';
-import type { MessageRef } from 'rekindle:plugin/types@0.9.0';
+import * as raw from 'rekindle:plugin/reactions@0.10.0';
+import type { MessageRef } from 'rekindle:plugin/types@0.10.0';
 import { call } from 'rekindle';
 
 export function react(message: MessageRef, emoji: string): void {

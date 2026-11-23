@@ -5,7 +5,7 @@
 //   let page = history.before(channel, undefined, 500);
 //   while (page.cursor !== undefined) page = history.before(channel, page.cursor, 500);
 
-import * as raw from 'rekindle:plugin/history@0.9.0';
+import * as raw from 'rekindle:plugin/history@0.10.0';
 import { call, optU64, u64, type Id } from 'rekindle';
 
 export type Page = raw.Page;

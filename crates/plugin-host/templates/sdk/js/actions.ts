@@ -7,9 +7,9 @@
 //
 //   actions.sendMessage(channel, '', [actions.file('pet.gif', 'image/gif', gif)]);
 
-import * as raw from 'rekindle:plugin/actions@0.9.0';
-import type { OutgoingFile } from 'rekindle:plugin/action-types@0.9.0';
-import type { MessageRef } from 'rekindle:plugin/types@0.9.0';
+import * as raw from 'rekindle:plugin/actions@0.10.0';
+import type { OutgoingFile } from 'rekindle:plugin/action-types@0.10.0';
+import type { MessageRef } from 'rekindle:plugin/types@0.10.0';
 import { call, optU64, u64, type Id } from 'rekindle';
 
 export type { OutgoingFile };

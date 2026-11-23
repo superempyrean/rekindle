@@ -70,6 +70,9 @@ pub(super) struct Session {
     last_send: Option<Value>,
     /// The last slash command run, and its reply.
     last_slash: Option<Value>,
+    /// The last REST request run through the `http-filter`s, and what the
+    /// client read.
+    last_rest: Option<Value>,
     /// What happened, for the page (also echoed to the terminal).
     activity: VecDeque<(u64, String)>,
     activity_seq: u64,
@@ -114,6 +117,7 @@ impl Session {
             last_poll: Instant::now(),
             last_send: None,
             last_slash: None,
+            last_rest: None,
             activity: VecDeque::new(),
             activity_seq: 0,
             changes: 0,
@@ -157,6 +161,7 @@ impl Session {
         self.profile = None;
         self.last_send = None;
         self.last_slash = None;
+        self.last_rest = None;
         self.activity.clear();
         self.log_seq = 0;
         for (id, map) in &self.maps {

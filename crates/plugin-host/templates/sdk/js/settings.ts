@@ -17,8 +17,8 @@
 // page masks, such as an API key; read it with `text`. Changes arrive in `onSettingsChanged(key)`
 // (and `onChange` callbacks); renders re-run by themselves.
 
-import * as raw from 'rekindle:plugin/settings@0.9.0';
-import type { Color } from 'rekindle:plugin/types@0.9.0';
+import * as raw from 'rekindle:plugin/settings@0.10.0';
+import type { Color } from 'rekindle:plugin/types@0.10.0';
 import { __registry, call } from 'rekindle';
 
 export type SettingValue = raw.SettingValue;

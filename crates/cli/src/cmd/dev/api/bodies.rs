@@ -282,6 +282,35 @@ pub(super) fn parse_presence(body: &[u8]) -> Result<Action, ApiError> {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct RestBody {
+    method: String,
+    path: String,
+    #[serde(default)]
+    body: Option<String>,
+}
+
+pub(super) fn parse_rest(body: &[u8]) -> Result<Action, ApiError> {
+    let b: RestBody = json(body)?;
+    let method = b.method.to_ascii_uppercase();
+    if !["GET", "POST", "PATCH", "PUT", "DELETE"].contains(&method.as_str()) {
+        return Err(ApiError::bad(format!(
+            "`method` is {method}, not GET, POST, PATCH, PUT or DELETE"
+        )));
+    }
+    if !b.path.starts_with('/') {
+        return Err(ApiError::bad(
+            "`path` starts with `/`, below the API version",
+        ));
+    }
+    Ok(Action::Rest {
+        method,
+        path: b.path,
+        body: b.body,
+    })
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ReceiveBody {
     #[serde(deserialize_with = "snowflake")]
     channel: u64,

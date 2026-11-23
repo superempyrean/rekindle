@@ -175,6 +175,35 @@ impl wit::host_events::Host for PluginState {
         self.intercepts = set;
         Ok(out)
     }
+
+    fn intercept_http(
+        &mut self,
+        kinds: Vec<wit::events::EventKind>,
+    ) -> wasmtime::Result<
+        Vec<(
+            wit::events::EventKind,
+            Result<(), wit::host_events::SubscribeError>,
+        )>,
+    > {
+        use wit::host_events::SubscribeError as E;
+        self.main_only("host-events.intercept-http")?;
+        let filtering = self.grants.has(Capability::InterceptHttp);
+        let mut set = std::collections::BTreeSet::new();
+        let mut out = Vec::new();
+        for k in kinds {
+            let r = if !filtering || !self.grants.has(convert::kind_capability(k)) {
+                Err(E::NotGranted)
+            } else if !super::http::routable(k) {
+                Err(E::Unavailable)
+            } else {
+                set.insert(k as u8);
+                Ok(())
+            };
+            out.push((k, r));
+        }
+        self.http_intercepts = set;
+        Ok(out)
+    }
 }
 
 impl wit::settings::Host for PluginState {

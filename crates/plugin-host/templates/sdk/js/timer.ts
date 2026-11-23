@@ -4,7 +4,7 @@
 // caps you at 16 active timers, 50 ms minimum, and clears them on unload. A
 // timer is never a user gesture: actions from one fail with 'no-gesture'.
 
-import * as host from 'rekindle:plugin/host@0.9.0';
+import * as host from 'rekindle:plugin/host@0.10.0';
 import { __registry, call, u64, type Id } from 'rekindle';
 
 /**

@@ -1,4 +1,4 @@
-//! wasmtime bindings for `rekindle:plugin@0.9.0`, generated from the WIT in
+//! wasmtime bindings for `rekindle:plugin@0.10.0`, generated from the WIT in
 //! `crates/plugin-api/wit`. Crate-private; backends see the shared records
 //! through [`crate::api`].
 
