@@ -5,10 +5,11 @@
 //! reaches the guest as one buffer from the host. [`Engine`] rewrites both
 //! before the other side sees them, as a [`Work`] value says:
 //!
-//! - **Mounts.** Subtrees rekindle creates from the fixed element set and
-//!   mounts under a node of the guest's. The root is spliced into the
-//!   guest's own `SetChildren` op when a later turn rewrites that list, so
-//!   the host's keyed diff keeps its node across turns.
+//! - **Mounts.** Subtrees rekindle creates and mounts under a node of the
+//!   guest's. The root is spliced into the guest's own Children op when a
+//!   later turn rewrites that list, so the host's keyed diff keeps its node
+//!   across turns. A node with a press handler lists `press` in its `on`
+//!   (320) cell, since a platform raises only the events a node lists.
 //! - **Cells.** Cells written by `PropId` on the nodes a selector finds, after
 //!   the guest's ops. A cell is written again only when the host's tree holds
 //!   a different value, which happens when the guest writes its own.
@@ -36,12 +37,16 @@
 //! rewritten node is still found by what the guest said. Mounts and cells are
 //! placed from the mirror.
 //!
+//! The turns are `rekindle_wire::turn` and the events
+//! `rekindle_wire::event`, both read from Phoenix's Android host. A
+//! `ChildEdits` op of the guest's is read as the Children op it amounts to,
+//! and a turn the engine rewrites carries whole child lists. Host frames and
+//! UI events other than an event on a node pass unchanged, and so does a
+//! BATCH frame, so a press inside a batch isn't filtered.
+//!
 //! # Modelled
 //!
-//! The framing the engine decodes and re-encodes is `rekindle_wire::turn`,
-//! and the event layout is `rekindle_wire::event::Event`, both modelled. A
-//! desktop build's framing replaces them there, and the engine follows. The
-//! node ids rekindle takes ([`RESERVED`] and up) assume the guest never
+//! The node ids rekindle takes ([`RESERVED`] and up) assume the guest never
 //! reaches them. The real client should supply how its guest allocates ids,
 //! or a range the host never hands out.
 
@@ -52,7 +57,8 @@ mod work;
 use std::collections::{BTreeMap, BTreeSet};
 
 use rekindle_wire::a11y::ids as a11y;
-use rekindle_wire::event::{Event, EventKind};
+use rekindle_wire::event::{self, Event, UiEvent};
+use rekindle_wire::turn::{ON, create_props};
 use rekindle_wire::{DecodeError, NodeId, NodeOp, PropId, Tree, Turn, Value};
 
 pub use select::{Selector, TEXT};
@@ -71,7 +77,11 @@ pub const COLOR_PROPS: &[PropId] = &[
     rekindle_wire::ids::COLOR,
     rekindle_wire::ids::BORDER_COLOR,
     rekindle_wire::ids::TINT,
+    rekindle_wire::ids::SCRIM,
     rekindle_wire::ids::SCRIM_COLOR,
+    rekindle_wire::ids::FOCUS_BORDER_COLOR,
+    rekindle_wire::ids::ELEVATION_COLOR,
+    rekindle_wire::ids::NAV_SCRIM_COLOR,
     rekindle_wire::ids::PLACEHOLDER_COLOR,
     rekindle_wire::ids::SELECTION_COLOR,
     rekindle_wire::ids::HANDLE_COLOR,
@@ -79,11 +89,10 @@ pub const COLOR_PROPS: &[PropId] = &[
     rekindle_wire::ids::ACTIVE_BORDER_COLOR,
 ];
 
-/// A colour as the wire carries it: RGBA in a tag-9 `Vec4`, from
+/// A colour as the wire carries it, an integer `0xAARRGGBB`, from
 /// `0xRRGGBBAA`.
 pub fn rgba(hex: u32) -> Value {
-    let b = |shift: u32| f32::from(((hex >> shift) & 0xff) as u8) / 255.0;
-    Value::Vec4([b(24), b(16), b(8), b(0)])
+    Value::color(hex.rotate_right(8))
 }
 
 /// What [`Engine::event`] does with an event.
@@ -174,7 +183,7 @@ impl Engine {
     /// A mount the new work keeps with the same shape stays in the host's
     /// tree, and only its cells change. A mount it leaves out, or changes
     /// the shape of, is taken out in the next turn: its root out of its
-    /// parent's children, then a `Remove` for each of its nodes. A new
+    /// parent's children, then a Delete of its nodes. A new
     /// mount is created as in the first turn.
     pub fn set_work(&mut self, work: Work) -> Result<(), WorkError> {
         work.check()?;
@@ -265,16 +274,22 @@ impl Engine {
         }
     }
 
-    /// Decide what happens to one event before the guest sees it.
+    /// Decide what happens to one event before the guest sees it. A host
+    /// frame and a UI event that isn't on a node pass.
     pub fn event(&mut self, bytes: &[u8]) -> Result<Verdict, DecodeError> {
-        let ev = Event::from_bytes(bytes)?;
+        if !event::is_ui(bytes) {
+            return Ok(Verdict::Pass);
+        }
+        let UiEvent::Node(ev) = UiEvent::from_bytes(bytes)? else {
+            return Ok(Verdict::Pass);
+        };
         if ev.node >= RESERVED {
             let handler = self
                 .handlers()
                 .find(|(id, _)| *id == ev.node)
                 .map(|(_, h)| h.clone());
             match handler {
-                Some(Handler::Count { .. }) if ev.kind == EventKind::Press => {
+                Some(Handler::Count { .. }) if ev.is_press() => {
                     let n = self.count(ev.node).saturating_add(1);
                     self.counts.insert(ev.node, n);
                     self.show_count(ev.node);
@@ -286,7 +301,7 @@ impl Engine {
                     plugin,
                     surface,
                     element,
-                }) if ev.kind == EventKind::Press => self.presses.push(PluginPress {
+                }) if ev.is_press() => self.presses.push(PluginPress {
                     plugin,
                     surface,
                     element,
@@ -295,7 +310,7 @@ impl Engine {
             }
             return Ok(Verdict::Consume(None));
         }
-        if ev.kind != EventKind::Press {
+        if !ev.is_press() {
             return Ok(Verdict::Pass);
         }
         let guest = select::View::new(&self.guest);
@@ -317,7 +332,7 @@ impl Engine {
 
     /// Rewrite one turn's bytes. `None` when the turn goes through unchanged.
     pub fn filter(&mut self, guest: &[u8]) -> Result<Option<Vec<u8>>, DecodeError> {
-        let original = Turn::from_bytes(guest)?;
+        let original = self.guest.resolve(&Turn::from_bytes(guest)?)?;
         self.guest.apply(&original);
         let mut turn = self.intercept(&original);
         let mut front = self.unmount();
@@ -385,43 +400,52 @@ impl Engine {
 
         let mut ops = Vec::new();
         for &n in &restored {
-            let Some(kind) = self.guest.node(n).map(|g| g.kind) else {
+            let Some(kind) = self.guest.node(n).map(|g| g.kind.clone()) else {
                 continue;
             };
-            ops.push(NodeOp::Create { node: n, kind });
             let mut props: Vec<(PropId, Value)> = self
                 .guest
                 .props()
                 .node_props(n)
-                .filter(|(_, v)| **v != Value::Null)
                 .map(|(p, v)| (p, v.clone()))
                 .collect();
             rewrite(n, &mut props);
-            if !props.is_empty() {
-                ops.push(NodeOp::SetProps { node: n, props });
-            }
+            ops.push(NodeOp::Create {
+                node: n,
+                kind,
+                props: create_props(props),
+            });
         }
         for &n in &restored {
             let children: Vec<NodeId> = guest.children(n).iter().copied().filter(kept).collect();
             if !children.is_empty() {
-                ops.push(NodeOp::SetChildren { node: n, children });
+                ops.push(NodeOp::Children { node: n, children });
             }
         }
 
         for op in &original.ops {
             let mut op = op.clone();
             let node = match &mut op {
-                NodeOp::Create { node, .. } | NodeOp::Remove { node } => *node,
-                NodeOp::SetProps { node, props } => {
+                NodeOp::Create { node, props, .. } | NodeOp::Update { node, props } => {
                     rewrite(*node, props);
-                    *node
+                    Some(*node)
                 }
-                NodeOp::SetChildren { node, children } => {
+                NodeOp::Children { node, children } => {
                     children.retain(kept);
-                    *node
+                    Some(*node)
                 }
+                NodeOp::Delete { nodes } => {
+                    nodes.retain(kept);
+                    if nodes.is_empty() {
+                        continue;
+                    }
+                    None
+                }
+                NodeOp::ScrollTo { node, .. } | NodeOp::Root { node } => Some(*node),
+                NodeOp::Focus { node } => *node,
+                NodeOp::ChildEdits { .. } | NodeOp::RequestFrame | NodeOp::Motion { .. } => None,
             };
-            if kept(&node) {
+            if node.is_none_or(|n| kept(&n)) {
                 ops.push(op);
             }
         }
@@ -437,13 +461,15 @@ impl Engine {
         for p in parents {
             if !ops
                 .iter()
-                .any(|op| matches!(op, NodeOp::SetChildren { node, .. } if *node == p))
+                .any(|op| matches!(op, NodeOp::Children { node, .. } if *node == p))
             {
                 let children = guest.children(p).iter().copied().filter(kept).collect();
-                ops.push(NodeOp::SetChildren { node: p, children });
+                ops.push(NodeOp::Children { node: p, children });
             }
         }
-        ops.extend(removed.into_iter().map(|node| NodeOp::Remove { node }));
+        if !removed.is_empty() {
+            ops.push(NodeOp::Delete { nodes: removed });
+        }
         self.dropped = drop;
         Turn { ops }
     }
@@ -464,17 +490,20 @@ impl Engine {
                     .copied()
                     .filter(|c| *c != m.root)
                     .collect();
-                out.push(NodeOp::SetChildren {
+                out.push(NodeOp::Children {
                     node: parent,
                     children,
                 });
             }
-            out.extend(
-                m.nodes
-                    .iter()
-                    .filter(|n| self.mirror.node(n.id).is_some())
-                    .map(|n| NodeOp::Remove { node: n.id }),
-            );
+            let nodes: Vec<NodeId> = m
+                .nodes
+                .iter()
+                .filter(|n| self.mirror.node(n.id).is_some())
+                .map(|n| n.id)
+                .collect();
+            if !nodes.is_empty() {
+                out.push(NodeOp::Delete { nodes });
+            }
             self.mirror.apply(&Turn { ops: out.clone() });
             ops.append(&mut out);
             // What the earlier work wrote on its nodes went with them.
@@ -513,15 +542,15 @@ impl Engine {
         for (node, cells) in writes {
             let props: Vec<_> = cells
                 .into_iter()
-                .filter(|(p, v)| self.mirror.props().get(node, *p) != Some(v))
+                .filter(|(p, v)| self.mirror.props().get(node, *p).unwrap_or(&Value::Null) != v)
                 .collect();
             if !props.is_empty() {
-                back.push(NodeOp::SetProps { node, props });
+                back.push(NodeOp::Update { node, props });
             }
         }
         let sets = back
             .iter()
-            .filter(|op| matches!(op, NodeOp::SetProps { .. }))
+            .filter(|op| matches!(op, NodeOp::Update { .. }))
             .cloned()
             .collect();
         self.mirror.apply(&Turn { ops: sets });
@@ -546,19 +575,20 @@ impl Engine {
             let mut ops: Vec<NodeOp> = mount
                 .nodes
                 .iter()
-                .map(|n| NodeOp::Create {
-                    node: n.id,
-                    kind: n.kind,
+                .map(|n| {
+                    let mut props = self.cells.get(&n.id).cloned().unwrap_or_default();
+                    if n.on_press.is_some() {
+                        props.push((ON, Value::Array(vec![Value::Str("press".into())])));
+                    }
+                    NodeOp::Create {
+                        node: n.id,
+                        kind: n.kind.clone(),
+                        props: create_props(props),
+                    }
                 })
                 .collect();
-            for n in &mount.nodes {
-                let props = self.cells.get(&n.id).cloned().unwrap_or_default();
-                if !props.is_empty() {
-                    ops.push(NodeOp::SetProps { node: n.id, props });
-                }
-            }
             for n in mount.nodes.iter().filter(|n| !n.children.is_empty()) {
-                ops.push(NodeOp::SetChildren {
+                ops.push(NodeOp::Children {
                     node: n.id,
                     children: n.children.clone(),
                 });
@@ -577,18 +607,18 @@ impl Engine {
             // Splice into the guest's own op when this turn rewrote the list,
             // so the host diffs the list once and keeps the mount.
             let own = turn.ops.iter_mut().find_map(|op| match op {
-                NodeOp::SetChildren { node, children } if *node == under => Some(children),
+                NodeOp::Children { node, children } if *node == under => Some(children),
                 _ => None,
             });
             match own {
                 Some(c) => c.clone_from(&mounted),
-                None => back.push(NodeOp::SetChildren {
+                None => back.push(NodeOp::Children {
                     node: under,
                     children: mounted.clone(),
                 }),
             }
             self.mirror.apply(&Turn {
-                ops: vec![NodeOp::SetChildren {
+                ops: vec![NodeOp::Children {
                     node: under,
                     children: mounted,
                 }],
@@ -671,9 +701,10 @@ impl Engine {
             let cells: Vec<(PropId, Value)> = COLOR_PROPS
                 .iter()
                 .filter(|p| !ruled.contains(&(n.id, **p)))
-                .filter_map(|p| match self.guest.props().get(n.id, *p) {
-                    Some(Value::Vec4(c)) => to.get(&rgb8(*c)).map(|t| (*p, recolored(c[3], *t))),
-                    _ => None,
+                .filter_map(|p| {
+                    let c = self.guest.props().get(n.id, *p)?.as_color()?;
+                    to.get(&(c & 0x00ff_ffff))
+                        .map(|t| (*p, recolored(c >> 24, *t)))
                 })
                 .collect();
             if !cells.is_empty() {
@@ -684,16 +715,11 @@ impl Engine {
     }
 }
 
-/// A colour's red, green and blue as `0xRRGGBB`, each rounded to a byte.
-fn rgb8([r, g, b, _]: [f32; 4]) -> u32 {
-    let byte = |v: f32| u32::from((v.clamp(0.0, 1.0) * 255.0).round() as u8);
-    (byte(r) << 16) | (byte(g) << 8) | byte(b)
-}
-
-/// `to` (`0xRRGGBBAA`) with its alpha multiplied by `alpha`.
-fn recolored(alpha: f32, to: u32) -> Value {
-    let byte = |shift: u32| f32::from(((to >> shift) & 0xff) as u8) / 255.0;
-    Value::Vec4([byte(24), byte(16), byte(8), byte(0) * alpha])
+/// `to` (`0xRRGGBBAA`) with its alpha multiplied by `alpha` (0 to 255), as
+/// the wire's `0xAARRGGBB`.
+fn recolored(alpha: u32, to: u32) -> Value {
+    let a = ((to & 0xff) * alpha + 127) / 255;
+    Value::color((a << 24) | (to >> 8))
 }
 
 /// A [`RowAction::Replace`], with the nodes it applies to this turn.

@@ -206,8 +206,8 @@ pub struct LabelRule {
 
 /// Every colour cell of the guest's that holds `from` gets `to` in the
 /// host's tree. A cell is one of [`COLOR_PROPS`](crate::COLOR_PROPS) holding
-/// a `vec4`, and it matches when its red, green and blue round to `from`'s
-/// bytes. The cell's alpha is kept, multiplied by `to`'s. When two recolours
+/// an integer colour, `0xAARRGGBB`, and it matches when its red, green and
+/// blue are `from`. The cell's alpha is kept, multiplied by `to`'s. When two recolours
 /// have the same `from`, the later one applies. A cell a `cells`, `labels`
 /// or row rule writes keeps the rule's value.
 ///

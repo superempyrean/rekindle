@@ -5,7 +5,7 @@
 //!
 //! ```text
 //! header   "RKWIRECP"  8 bytes, magic
-//!          u32 LE      version (1)
+//!          u32 LE      version (2)
 //! record   u64 LE      turn index, from 0
 //!          u64 LE      microseconds since the capture started
 //!          u32 LE      length of the turn's bytes
@@ -21,8 +21,10 @@ use std::time::Instant;
 
 /// The first eight bytes of a capture file.
 pub const MAGIC: [u8; 8] = *b"RKWIRECP";
-/// The format version [`Writer`] writes and [`parse`] reads.
-pub const VERSION: u32 = 1;
+/// The format version [`Writer`] writes and [`parse`] reads. Version 1
+/// held turns in the framing rekindle modelled before the real one was
+/// read, so this reader refuses it.
+pub const VERSION: u32 = 2;
 /// Bytes in the file header.
 pub const HEADER_LEN: usize = 12;
 /// Bytes in a record's header, before the turn's bytes.

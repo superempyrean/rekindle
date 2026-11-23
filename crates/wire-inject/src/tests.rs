@@ -38,7 +38,7 @@ fn tag(t: &str) -> Selector {
 /// The feed: the `list` holding a `head` or a `post`.
 fn feed() -> Selector {
     Selector::All(vec![
-        Selector::Kind(ElementKind::List),
+        Selector::Kind(ElementKind::LIST),
         Selector::Any(vec![tag("head"), tag("post")]).parent_of(),
     ])
 }
@@ -68,21 +68,21 @@ fn mounts() -> Work {
             nodes: vec![
                 MountNode {
                     id: BOX,
-                    kind: ElementKind::Div,
+                    kind: ElementKind::VIEW,
                     cells: vec![Cell::new(ids::BACKGROUND, rgba(0x222222ff))],
                     children: vec![BOX_TEXT, BUTTON],
                     on_press: None,
                 },
                 MountNode {
                     id: BOX_TEXT,
-                    kind: ElementKind::Text,
+                    kind: ElementKind::TEXT,
                     cells: vec![Cell::new(TEXT, str("hello from rekindle"))],
                     children: vec![],
                     on_press: None,
                 },
                 MountNode {
                     id: BUTTON,
-                    kind: ElementKind::Div,
+                    kind: ElementKind::VIEW,
                     cells: vec![Cell::new(a11y::LABEL, str("count"))],
                     children: vec![BUTTON_TEXT],
                     on_press: Some(Handler::Count {
@@ -94,7 +94,7 @@ fn mounts() -> Work {
                 },
                 MountNode {
                     id: BUTTON_TEXT,
-                    kind: ElementKind::Text,
+                    kind: ElementKind::TEXT,
                     cells: vec![],
                     children: vec![],
                     on_press: None,
@@ -158,40 +158,44 @@ fn everything() -> Work {
 fn first() -> Turn {
     let mut t = Turn::new();
     for (node, kind) in [
-        (PAGE, ElementKind::Div),
-        (FEED, ElementKind::List),
-        (HEAD, ElementKind::Div),
-        (RULE, ElementKind::Div),
-        (30, ElementKind::Div),
-        (31, ElementKind::Div),
+        (PAGE, ElementKind::VIEW),
+        (FEED, ElementKind::LIST),
+        (HEAD, ElementKind::VIEW),
+        (RULE, ElementKind::VIEW),
+        (30, ElementKind::VIEW),
+        (31, ElementKind::VIEW),
     ] {
-        t.push(NodeOp::Create { node, kind });
+        t.push(NodeOp::Create {
+            node,
+            kind,
+            props: vec![],
+        });
     }
-    t.push(NodeOp::SetProps {
+    t.push(NodeOp::Update {
         node: PAGE,
         props: vec![(ids::BACKGROUND, rgba(0x313338ff))],
     });
-    t.push(NodeOp::SetProps {
+    t.push(NodeOp::Update {
         node: HEAD,
         props: vec![(TAG, str("head"))],
     });
-    t.push(NodeOp::SetProps {
+    t.push(NodeOp::Update {
         node: RULE,
         props: vec![(TAG, str("rule")), (ids::COLOR, rgba(0x949ba4ff))],
     });
-    t.push(NodeOp::SetProps {
+    t.push(NodeOp::Update {
         node: 30,
         props: vec![(TAG, str("post"))],
     });
-    t.push(NodeOp::SetProps {
+    t.push(NodeOp::Update {
         node: 31,
         props: vec![(TAG, str("post"))],
     });
-    t.push(NodeOp::SetChildren {
+    t.push(NodeOp::Children {
         node: PAGE,
         children: vec![FEED],
     });
-    t.push(NodeOp::SetChildren {
+    t.push(NodeOp::Children {
         node: FEED,
         children: vec![HEAD, RULE, 30, 31],
     });
@@ -203,33 +207,36 @@ fn first() -> Turn {
 fn post(t: &mut Turn, id: NodeId, text: &str) {
     t.push(NodeOp::Create {
         node: id,
-        kind: ElementKind::Div,
+        kind: ElementKind::VIEW,
+        props: vec![],
     });
     t.push(NodeOp::Create {
         node: id + 1,
-        kind: ElementKind::Text,
+        kind: ElementKind::TEXT,
+        props: vec![],
     });
     t.push(NodeOp::Create {
         node: id + 2,
-        kind: ElementKind::Text,
+        kind: ElementKind::TEXT,
+        props: vec![],
     });
-    t.push(NodeOp::SetProps {
+    t.push(NodeOp::Update {
         node: id,
         props: vec![(TAG, str("post"))],
     });
-    t.push(NodeOp::SetProps {
+    t.push(NodeOp::Update {
         node: id + 1,
         props: vec![(TAG, str("body"))],
     });
-    t.push(NodeOp::SetProps {
+    t.push(NodeOp::Update {
         node: id + 2,
         props: vec![(TAG, str("span")), (TEXT, str(text))],
     });
-    t.push(NodeOp::SetChildren {
+    t.push(NodeOp::Children {
         node: id,
         children: vec![id + 1],
     });
-    t.push(NodeOp::SetChildren {
+    t.push(NodeOp::Children {
         node: id + 1,
         children: vec![id + 2],
     });
@@ -244,17 +251,20 @@ fn bodies() -> Turn {
     let mut t = Turn::new();
     t.push(NodeOp::Create {
         node: PAGE,
-        kind: ElementKind::Div,
+        kind: ElementKind::VIEW,
+        props: vec![],
     });
     t.push(NodeOp::Create {
         node: FEED,
-        kind: ElementKind::List,
+        kind: ElementKind::LIST,
+        props: vec![],
     });
     t.push(NodeOp::Create {
         node: HEAD,
-        kind: ElementKind::Div,
+        kind: ElementKind::VIEW,
+        props: vec![],
     });
-    t.push(NodeOp::SetProps {
+    t.push(NodeOp::Update {
         node: HEAD,
         props: vec![(TAG, str("head"))],
     });
@@ -262,11 +272,11 @@ fn bodies() -> Turn {
     post(&mut t, REPLACED, "the old value");
     post(&mut t, MARKED, "mark me green");
     post(&mut t, PLAIN, "nothing to see");
-    t.push(NodeOp::SetChildren {
+    t.push(NodeOp::Children {
         node: PAGE,
         children: vec![FEED],
     });
-    t.push(NodeOp::SetChildren {
+    t.push(NodeOp::Children {
         node: FEED,
         children: vec![HEAD, DROPPED, REPLACED, MARKED, PLAIN],
     });
@@ -285,11 +295,17 @@ fn send(e: &mut Engine, host: &mut Tree, turn: &Turn) -> (Turn, TurnReport) {
 
 fn mentions(turn: &Turn, id: NodeId) -> bool {
     turn.ops.iter().any(|op| match op {
-        NodeOp::Create { node, .. } | NodeOp::SetProps { node, .. } | NodeOp::Remove { node } => {
-            *node == id
-        }
-        NodeOp::SetChildren { node, children } => *node == id || children.contains(&id),
+        NodeOp::Create { node, .. } | NodeOp::Update { node, .. } => *node == id,
+        NodeOp::Delete { nodes } => nodes.contains(&id),
+        NodeOp::Children { node, children } => *node == id || children.contains(&id),
+        _ => false,
     })
+}
+
+fn creates(turn: &Turn, id: NodeId) -> bool {
+    turn.ops
+        .iter()
+        .any(|op| matches!(op, NodeOp::Create { node, .. } if *node == id))
 }
 
 fn engine(work: Work) -> (Engine, Tree) {
@@ -300,10 +316,7 @@ fn engine(work: Work) -> (Engine, Tree) {
 fn a_mount_is_created_under_its_node_and_cells_are_written() {
     let (mut e, mut host) = engine(mounts());
     let (applied, _) = send(&mut e, &mut host, &first());
-    assert!(applied.ops.contains(&NodeOp::Create {
-        node: BOX,
-        kind: ElementKind::Div
-    }));
+    assert!(creates(&applied, BOX));
     assert_eq!(
         host.node(FEED).unwrap().children,
         vec![HEAD, RULE, 30, 31, BOX]
@@ -328,13 +341,14 @@ fn a_mount_survives_the_guests_next_list() {
     let mut t = Turn::new();
     t.push(NodeOp::Create {
         node: 32,
-        kind: ElementKind::Div,
+        kind: ElementKind::VIEW,
+        props: vec![],
     });
-    t.push(NodeOp::SetProps {
+    t.push(NodeOp::Update {
         node: 32,
         props: vec![(TAG, str("post"))],
     });
-    t.push(NodeOp::SetChildren {
+    t.push(NodeOp::Children {
         node: FEED,
         children: vec![HEAD, RULE, 30, 31, 32],
     });
@@ -343,7 +357,7 @@ fn a_mount_survives_the_guests_next_list() {
     let lists = applied
         .ops
         .iter()
-        .filter(|op| matches!(op, NodeOp::SetChildren { node: FEED, .. }))
+        .filter(|op| matches!(op, NodeOp::Children { node: FEED, .. }))
         .count();
     assert_eq!(lists, 1);
     let diff = &report.child_ops.iter().find(|(n, _)| *n == FEED).unwrap().1;
@@ -357,7 +371,7 @@ fn a_guest_write_is_written_over_and_a_quiet_turn_passes() {
     send(&mut e, &mut host, &first());
     assert_eq!(e.filter(&Turn::new().to_bytes()).unwrap(), None);
     let mut t = Turn::new();
-    t.push(NodeOp::SetProps {
+    t.push(NodeOp::Update {
         node: PAGE,
         props: vec![(ids::BACKGROUND, rgba(0xffffffff))],
     });
@@ -375,7 +389,7 @@ fn the_node_coming_back_gets_the_mount_again() {
     send(&mut e, &mut host, &first());
     let mut t = Turn::new();
     for node in [PAGE, FEED, HEAD, RULE, 30, 31] {
-        t.push(NodeOp::Remove { node });
+        t.push(NodeOp::Delete { nodes: vec![node] });
     }
     send(&mut e, &mut host, &t);
     assert!(host.node(FEED).is_none());
@@ -406,11 +420,11 @@ fn a_dropped_node_never_reaches_the_host() {
     );
 
     let mut t = Turn::new();
-    t.push(NodeOp::SetProps {
+    t.push(NodeOp::Update {
         node: DROPPED,
         props: vec![(ids::BACKGROUND, rgba(0x00000026))],
     });
-    t.push(NodeOp::SetChildren {
+    t.push(NodeOp::Children {
         node: FEED,
         children: vec![HEAD, DROPPED, REPLACED, PLAIN, MARKED],
     });
@@ -432,22 +446,21 @@ fn a_node_that_stops_matching_comes_back_and_one_that_starts_is_removed() {
     let (mut e, mut host) = engine(everything());
     send(&mut e, &mut host, &bodies());
     let mut t = Turn::new();
-    t.push(NodeOp::SetProps {
+    t.push(NodeOp::Update {
         node: DROPPED + 2,
         props: vec![(TEXT, str("edited"))],
     });
-    t.push(NodeOp::SetProps {
+    t.push(NodeOp::Update {
         node: PLAIN + 2,
         props: vec![(TEXT, str("now drop me"))],
     });
     let (applied, _) = send(&mut e, &mut host, &t);
-    assert!(applied.ops.contains(&NodeOp::Create {
-        node: DROPPED,
-        kind: ElementKind::Div
-    }));
+    assert!(creates(&applied, DROPPED));
     assert_eq!(host.props().get(DROPPED + 2, TEXT), Some(&str("edited")));
     assert_eq!(host.node(DROPPED).unwrap().children, vec![DROPPED + 1]);
-    assert!(applied.ops.contains(&NodeOp::Remove { node: PLAIN }));
+    assert!(applied.ops.contains(&NodeOp::Delete {
+        nodes: vec![PLAIN, PLAIN + 1, PLAIN + 2]
+    }));
     assert_eq!(
         host.node(FEED).unwrap().children,
         vec![HEAD, DROPPED, REPLACED, MARKED, BOX]
@@ -461,18 +474,18 @@ fn replaced_text_is_rewritten_inside_the_guests_own_op() {
     let sets: Vec<_> = applied
         .ops
         .iter()
-        .filter(|op| matches!(op, NodeOp::SetProps { node, .. } if *node == REPLACED + 2))
+        .filter(|op| matches!(op, NodeOp::Update { node, .. } if *node == REPLACED + 2))
         .collect();
     assert_eq!(
         sets,
-        vec![&NodeOp::SetProps {
+        vec![&NodeOp::Update {
             node: REPLACED + 2,
             props: vec![(TAG, str("span")), (TEXT, str("the new value"))]
         }]
     );
     // The post's tag isn't a span's, so its cells are left alone.
     let mut t = Turn::new();
-    t.push(NodeOp::SetProps {
+    t.push(NodeOp::Update {
         node: REPLACED,
         props: vec![(TEXT, str("old"))],
     });
@@ -497,14 +510,15 @@ fn an_unlabelled_node_gets_a_label_and_a_labelled_one_keeps_its_own() {
         let mut t = first();
         t.push(NodeOp::Create {
             node: 32,
-            kind: ElementKind::Div,
+            kind: ElementKind::VIEW,
+            props: vec![],
         });
         let mut props = vec![(TAG, str("file")), (FILE, str("notes.txt"))];
         if let Some(l) = label {
             props.push((a11y::LABEL, str(l)));
         }
-        t.push(NodeOp::SetProps { node: 32, props });
-        t.push(NodeOp::SetChildren {
+        t.push(NodeOp::Update { node: 32, props });
+        t.push(NodeOp::Children {
             node: 30,
             children: vec![32],
         });
@@ -532,7 +546,7 @@ fn a_press_on_a_counting_button_is_consumed_and_the_next_turn_shows_it() {
     let (applied, _) = send(&mut e, &mut host, &Turn::new());
     assert_eq!(
         applied.ops,
-        vec![NodeOp::SetProps {
+        vec![NodeOp::Update {
             node: BUTTON_TEXT,
             props: vec![(TEXT, str("1 press"))]
         }]
@@ -555,14 +569,15 @@ fn presses_on_the_guests_nodes_are_dropped_retargeted_or_passed() {
         for (node, label) in [(80, "Stop"), (81, "Swap"), (82, "Other")] {
             t.push(NodeOp::Create {
                 node,
-                kind: ElementKind::Div,
+                kind: ElementKind::VIEW,
+                props: vec![],
             });
-            t.push(NodeOp::SetProps {
+            t.push(NodeOp::Update {
                 node,
                 props: vec![(a11y::LABEL, str(label))],
             });
         }
-        t.push(NodeOp::SetChildren {
+        t.push(NodeOp::Children {
             node: PAGE,
             children: vec![FEED, 80, 81, 82],
         });
@@ -580,8 +595,14 @@ fn presses_on_the_guests_nodes_are_dropped_retargeted_or_passed() {
     );
     assert_eq!(e.event(&Event::press(82).to_bytes()), Ok(Verdict::Pass));
     assert_eq!(
-        e.event(&[1, 2]),
+        e.event(&[0, 0, 0, 0, 1]),
         Err(rekindle_wire::DecodeError::UnexpectedEof)
+    );
+    assert_eq!(e.event(&[1, 0, 0, 0]), Ok(Verdict::Pass), "a host frame");
+    assert_eq!(
+        e.event(&[0, 0, 0, 0, 1, 7]),
+        Ok(Verdict::Pass),
+        "not an event on a node"
     );
 
     let (mut e, mut host) = engine(mounts());
@@ -648,13 +669,13 @@ fn a_recolour_replaces_the_guests_colour_wherever_it_is_written() {
         Some(&rgba(0x0b0d_12ff))
     );
     // Half the alpha, from `to`'s.
-    let Some(Value::Vec4([r, _, _, a])) = host.props().get(RULE, ids::COLOR) else {
-        panic!("the rule has no colour");
-    };
-    assert!((r - 1.0).abs() < f32::EPSILON && (a - 128.0 / 255.0).abs() < 1e-6);
+    assert_eq!(
+        host.props().get(RULE, ids::COLOR).and_then(Value::as_color),
+        Some(0x80ff_0000)
+    );
     // A colour no recolour names is left alone.
     let mut t = Turn::new();
-    t.push(NodeOp::SetProps {
+    t.push(NodeOp::Update {
         node: HEAD,
         props: vec![(ids::BACKGROUND, rgba(0x1234_56ff))],
     });
@@ -666,20 +687,17 @@ fn a_recolour_replaces_the_guests_colour_wherever_it_is_written() {
 }
 
 #[test]
-fn a_recolour_matches_a_colour_off_by_less_than_a_byte() {
+fn a_recolour_keeps_the_guests_alpha() {
     let (mut e, mut host) = engine(recolours());
     let mut t = first();
-    let Value::Vec4([r, g, b, a]) = rgba(0x3133_38ff) else {
-        unreachable!()
-    };
-    t.push(NodeOp::SetProps {
+    t.push(NodeOp::Update {
         node: HEAD,
-        props: vec![(ids::BORDER_COLOR, Value::Vec4([r + 0.001, g, b - 0.001, a]))],
+        props: vec![(ids::BORDER_COLOR, Value::color(0x4031_3338))],
     });
     send(&mut e, &mut host, &t);
     assert_eq!(
         host.props().get(HEAD, ids::BORDER_COLOR),
-        Some(&rgba(0x0b0d_12ff))
+        Some(&Value::I32(0x400b_0d12))
     );
 }
 
@@ -692,7 +710,7 @@ fn new_work_sets_back_what_the_old_work_wrote() {
     e.set_work(only_rule).unwrap();
     // The next turn, whatever it holds, carries the page's own colour.
     let mut t = Turn::new();
-    t.push(NodeOp::SetProps {
+    t.push(NodeOp::Update {
         node: HEAD,
         props: vec![(TAG, str("head"))],
     });
@@ -707,7 +725,7 @@ fn new_work_sets_back_what_the_old_work_wrote() {
 /// A quiet turn: the guest writes the head's tag again.
 fn quiet() -> Turn {
     let mut t = Turn::new();
-    t.push(NodeOp::SetProps {
+    t.push(NodeOp::Update {
         node: HEAD,
         props: vec![(TAG, str("head"))],
     });
@@ -775,7 +793,7 @@ fn plugin_button(root: NodeId, label: &str) -> Mount {
         nodes: vec![
             MountNode {
                 id: root,
-                kind: ElementKind::Div,
+                kind: ElementKind::VIEW,
                 cells: vec![Cell::new(a11y::LABEL, str(label))],
                 children: vec![root + 1],
                 on_press: Some(Handler::Plugin {
@@ -786,7 +804,7 @@ fn plugin_button(root: NodeId, label: &str) -> Mount {
             },
             MountNode {
                 id: root + 1,
-                kind: ElementKind::Text,
+                kind: ElementKind::TEXT,
                 cells: vec![Cell::new(TEXT, str(label))],
                 children: vec![],
                 on_press: None,
@@ -861,8 +879,10 @@ fn a_mount_left_out_of_new_work_is_taken_out_of_the_host() {
         host.node(FEED).unwrap().children,
         vec![HEAD, RULE, 30, 31, PLUGIN]
     );
+    assert!(applied.ops.contains(&NodeOp::Delete {
+        nodes: vec![PLUGIN + 0x10, PLUGIN + 0x11]
+    }));
     for n in [PLUGIN + 0x10, PLUGIN + 0x11] {
-        assert!(applied.ops.contains(&NodeOp::Remove { node: n }));
         assert!(host.node(n).is_none());
     }
     // The kept one stays as it was, and a quiet turn after passes.
@@ -888,13 +908,14 @@ fn a_mount_taken_out_while_the_guest_relists_its_node_stays_out() {
     let mut t = Turn::new();
     t.push(NodeOp::Create {
         node: 32,
-        kind: ElementKind::Div,
+        kind: ElementKind::VIEW,
+        props: vec![],
     });
-    t.push(NodeOp::SetProps {
+    t.push(NodeOp::Update {
         node: 32,
         props: vec![(TAG, str("post"))],
     });
-    t.push(NodeOp::SetChildren {
+    t.push(NodeOp::Children {
         node: FEED,
         children: vec![HEAD, RULE, 30, 31, 32],
     });
@@ -919,13 +940,13 @@ fn a_kept_mount_changes_only_its_cells() {
         !applied
             .ops
             .iter()
-            .any(|op| matches!(op, NodeOp::Create { .. } | NodeOp::Remove { .. })),
+            .any(|op| matches!(op, NodeOp::Create { .. } | NodeOp::Delete { .. })),
         "{:?}",
         applied.ops
     );
     assert_eq!(host.props().get(PLUGIN + 1, TEXT), Some(&str("opened")));
     // A cell is cleared by writing it null, as the guest clears its own.
-    assert_eq!(host.props().get(PLUGIN, a11y::LABEL), Some(&Value::Null));
+    assert_eq!(host.props().get(PLUGIN, a11y::LABEL), None);
 }
 
 #[test]
@@ -937,13 +958,10 @@ fn a_mount_whose_shape_changes_is_made_again() {
     bare.nodes.truncate(1);
     e.set_work(with_mounts(vec![bare])).unwrap();
     let (applied, _) = send(&mut e, &mut host, &Turn::new());
-    let at = |want: &NodeOp| applied.ops.iter().position(|op| op == want).unwrap();
+    let at = |want: &dyn Fn(&NodeOp) -> bool| applied.ops.iter().position(want).unwrap();
     assert!(
-        at(&NodeOp::Remove { node: PLUGIN })
-            < at(&NodeOp::Create {
-                node: PLUGIN,
-                kind: ElementKind::Div
-            })
+        at(&|op| matches!(op, NodeOp::Delete { nodes } if nodes.contains(&PLUGIN)))
+            < at(&|op| matches!(op, NodeOp::Create { node, .. } if *node == PLUGIN))
     );
     assert!(host.node(PLUGIN + 1).is_none());
     assert!(host.node(PLUGIN).unwrap().children.is_empty());
@@ -963,4 +981,37 @@ fn recolours_read_back_from_their_json() {
     );
     assert_eq!(Work::from_json(&json).unwrap(), work);
     assert!(Work::from_json(r#"{"recolors": [{"from": "31333", "to": "0b0d12ff"}]}"#).is_err());
+}
+
+#[test]
+fn a_guests_child_edits_are_read_as_its_list() {
+    let (mut e, mut host) = engine(mounts());
+    let (applied, _) = send(&mut e, &mut host, &first());
+    let button = applied.ops.iter().find_map(|op| match op {
+        NodeOp::Create { node, props, .. } if *node == BUTTON => Some(props),
+        _ => None,
+    });
+    assert_eq!(
+        button.and_then(|p| p.last()),
+        Some(&(rekindle_wire::turn::ON, Value::Array(vec![str("press")]))),
+        "a node with a handler listens for presses"
+    );
+    let old = [HEAD, RULE, 30, 31];
+    let new = [HEAD, RULE, 30, 31, 32];
+    let mut t = Turn::new();
+    t.push(NodeOp::Create {
+        node: 32,
+        kind: ElementKind::VIEW,
+        props: vec![],
+    });
+    t.push(NodeOp::ChildEdits {
+        node: FEED,
+        edits: rekindle_wire::turn::child_edits(&old, &new).unwrap(),
+    });
+    send(&mut e, &mut host, &t);
+    assert_eq!(
+        host.node(FEED).unwrap().children,
+        vec![HEAD, RULE, 30, 31, 32, BOX]
+    );
+    assert_eq!(e.guest().node(FEED).unwrap().children, new);
 }

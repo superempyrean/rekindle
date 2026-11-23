@@ -1,64 +1,67 @@
-//! The fixed element set. Kinds are interned name strings, not numeric opcodes.
+//! Element kinds: the platform view name a Create op carries.
 //!
-//! RECOVERED: the host renders a fixed, small set of primitives, and a node
-//! carries its kind as an interned name string (the reconcile path compares a
-//! 4-byte field against `"list"`). The guest cannot define a new native
-//! element. The set is read from the module paths
-//! (`crates/gpui-native/src/elements/*.rs`): `canvas`, `div`, `input`, `list`,
-//! `motion_events`, `navigator`, `text`. `navigator` and `motion_events` are new
-//! versus upstream gpui; `list` is far richer than `uniform_list`.
+//! A kind crosses the wire as a `u16`-length UTF-8 string, not a number. The
+//! names are the platform's views, not `gpui-native`'s element modules:
+//! `0x1759430` compares a node's kind against `view`, `flow`, `text`, `ring`,
+//! `stack`, `image` and `spinner`, and the reconcile at `0x17367d8` against
+//! `list`. The guest's app code chooses the kinds, and the full set isn't read
+//! yet, so a decoder takes any string.
 
-/// One of Phoenix's fixed host-rendered primitives.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum ElementKind {
-    Canvas,
-    Div,
-    Input,
-    List,
-    MotionEvents,
-    Navigator,
-    Text,
-}
+use std::borrow::Cow;
+use std::fmt;
+
+/// The kind of a node, as its Create op names it.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ElementKind(Cow<'static, str>);
 
 impl ElementKind {
-    /// Every kind, so a renderer can assert it handles the whole fixed set.
-    pub const ALL: [ElementKind; 7] = [
-        ElementKind::Canvas,
-        ElementKind::Div,
-        ElementKind::Input,
-        ElementKind::List,
-        ElementKind::MotionEvents,
-        ElementKind::Navigator,
-        ElementKind::Text,
+    pub const VIEW: ElementKind = ElementKind::fixed("view");
+    pub const FLOW: ElementKind = ElementKind::fixed("flow");
+    pub const TEXT: ElementKind = ElementKind::fixed("text");
+    pub const RING: ElementKind = ElementKind::fixed("ring");
+    pub const STACK: ElementKind = ElementKind::fixed("stack");
+    pub const IMAGE: ElementKind = ElementKind::fixed("image");
+    pub const SPINNER: ElementKind = ElementKind::fixed("spinner");
+    pub const LIST: ElementKind = ElementKind::fixed("list");
+    /// A text field. Not among the kinds `gpui-native` compares against,
+    /// though its `elements/input.rs` exists, so the name is the mock's.
+    pub const INPUT: ElementKind = ElementKind::fixed("input");
+
+    /// The kinds read from `gpui-native`'s comparisons, in the order above.
+    pub const SEEN: [ElementKind; 8] = [
+        ElementKind::VIEW,
+        ElementKind::FLOW,
+        ElementKind::TEXT,
+        ElementKind::RING,
+        ElementKind::STACK,
+        ElementKind::IMAGE,
+        ElementKind::SPINNER,
+        ElementKind::LIST,
     ];
 
-    /// The interned name string the host keys on.
-    #[must_use]
-    pub fn name(self) -> &'static str {
-        match self {
-            ElementKind::Canvas => "canvas",
-            ElementKind::Div => "div",
-            ElementKind::Input => "input",
-            ElementKind::List => "list",
-            ElementKind::MotionEvents => "motion_events",
-            ElementKind::Navigator => "navigator",
-            ElementKind::Text => "text",
-        }
+    const fn fixed(name: &'static str) -> ElementKind {
+        ElementKind(Cow::Borrowed(name))
     }
 
-    /// Parse a kind from its name. `None` for any name outside the fixed set —
-    /// the guest cannot invent a new element.
+    /// A kind by name. Any string is a kind.
+    pub fn new(name: impl Into<String>) -> ElementKind {
+        ElementKind(Cow::Owned(name.into()))
+    }
+
     #[must_use]
-    pub fn from_name(name: &str) -> Option<ElementKind> {
-        Some(match name {
-            "canvas" => ElementKind::Canvas,
-            "div" => ElementKind::Div,
-            "input" => ElementKind::Input,
-            "list" => ElementKind::List,
-            "motion_events" => ElementKind::MotionEvents,
-            "navigator" => ElementKind::Navigator,
-            "text" => ElementKind::Text,
-            _ => return None,
-        })
+    pub fn name(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for ElementKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl From<&str> for ElementKind {
+    fn from(name: &str) -> Self {
+        ElementKind::new(name)
     }
 }

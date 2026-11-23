@@ -44,10 +44,10 @@
 //! A test run can also name a JSON file holding fixed `Work` in
 //! `REKINDLE_HOST_WIRE_WORK`, which the plugins' work is added to.
 //!
-//! The engine reads turns in the framing `rekindle_wire::turn` models and
-//! events in the layout `rekindle_wire::event` models. A real client should
-//! supply both, recovered from its own build, along with its entries'
-//! signatures, and the wire map for that build: where its guest puts each
+//! The engine reads turns and events as `rekindle_wire` has them, read
+//! from Phoenix's Android host. A desktop build should be checked against
+//! both, and should supply its entries' signatures and the wire map for
+//! that build: where its guest puts each
 //! slot and each named surface, and which cells a pressable node needs.
 //! Which value tag the renderer reads in `opacity` (322) and `radius`
 //! (388) is modelled as `f64`. A hidden surface is dropped from the tree
@@ -486,7 +486,7 @@ fn button_root(plugin: &str, key: &str) -> Option<NodeId> {
     Some(root)
 }
 
-/// One mount per chat-bar button under the slot's node: a `div` with the
+/// One mount per chat-bar button under the slot's node: a `view` with the
 /// `button` role, the button's tooltip as its label and a plugin handler,
 /// holding a `text` with its glyph.
 fn button_mounts(buttons: &[(String, Button)], slot: &SlotMap) -> Vec<Mount> {
@@ -511,7 +511,7 @@ fn button_mounts(buttons: &[(String, Button)], slot: &SlotMap) -> Vec<Mount> {
                 nodes: vec![
                     MountNode {
                         id: root,
-                        kind: ElementKind::Div,
+                        kind: ElementKind::VIEW,
                         cells,
                         children: vec![root + 1],
                         on_press: Some(Handler::Plugin {
@@ -522,7 +522,7 @@ fn button_mounts(buttons: &[(String, Button)], slot: &SlotMap) -> Vec<Mount> {
                     },
                     MountNode {
                         id: root + 1,
-                        kind: ElementKind::Text,
+                        kind: ElementKind::TEXT,
                         cells: vec![Cell::new(TEXT, Value::Str(b.glyph.clone()))],
                         children: Vec::new(),
                         on_press: None,
@@ -608,8 +608,8 @@ fn shown_palette(
     let mut sent = std::collections::BTreeMap::<u32, usize>::new();
     for n in guest.nodes() {
         for p in rekindle_wire_inject::COLOR_PROPS {
-            if let Some(rekindle_wire::Value::Vec4([r, g, b, _])) = guest.props().get(n.id, *p) {
-                *sent.entry(rgb8([*r, *g, *b])).or_default() += 1;
+            if let Some(c) = guest.props().get(n.id, *p).and_then(Value::as_color) {
+                *sent.entry(c & 0x00ff_ffff).or_default() += 1;
             }
         }
     }

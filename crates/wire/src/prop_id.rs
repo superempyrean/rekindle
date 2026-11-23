@@ -57,8 +57,9 @@ impl core::fmt::Debug for PropId {
 }
 
 /// The recolour ids rekindle writes, observed and stable in the host binary,
-/// where recolouring a view is writing these cells. Named constants so
-/// theming code reads by meaning, not by magic number.
+/// where recolouring a view is writing these cells. Every one `gpui-native`
+/// has a setter for holds an integer colour, `0xAARRGGBB`. The gradients
+/// hold arrays, and the guest's app code writes the `active*` mirrors.
 pub mod ids {
     use super::PropId;
 
@@ -75,4 +76,7 @@ pub mod ids {
     pub const HANDLE_COLOR: PropId = PropId(229);
     pub const ACTIVE_BACKGROUND: PropId = PropId(21);
     pub const ACTIVE_BORDER_COLOR: PropId = PropId(25);
+    pub const FOCUS_BORDER_COLOR: PropId = PropId(201);
+    pub const ELEVATION_COLOR: PropId = PropId(760);
+    pub const NAV_SCRIM_COLOR: PropId = PropId(813);
 }

@@ -9,8 +9,11 @@
 //! `Result`.
 //!
 //! This module copies that shape exactly. Tag numbers, operand widths and the
-//! recursion in tags 7/8/10 are all observed. The name "Vec4" for tag 9 is
-//! the analyst's label for an observed shape.
+//! recursion in tags 7/8/10 are all observed. The encoder at VA `0x1751a88`
+//! writes the same tags from the guest's in-memory value, and its output was
+//! emulated byte for byte. An integer goes out as tag 3 when it fits an `i32`
+//! and as tag 4 otherwise ([`Value::int`]). Colours are integers,
+//! `0xAARRGGBB` ([`Value::color`]), so an opaque colour is a tag 4.
 //!
 //! Tags 11 and 12 share a words table that lives with the decoder, one per
 //! buffer. Each tag-11 value appends its `u32`s to it as a new list. A tag-12
@@ -45,8 +48,10 @@ pub enum Value {
     /// tag 8 — the element property set: `u32` count + count × (`u16` `PropId`,
     /// Value). This is the `view_props` write.
     Object(Vec<(PropId, Value)>),
-    /// tag 9 — four `f32`s (an RGBA colour, four edges, four corners).
-    Vec4([f32; 4]),
+    /// tag 9 — four `f32`s: the edge insets of `padding` (332), `margin`
+    /// (287) and `hitSlopEdges` (809), the only `PropIds` `gpui-native` writes
+    /// it for. The order of the edges isn't read from the binary.
+    Quad([f32; 4]),
     /// tag 10 — `u32` count + count × (string key, Value). Insertion order is
     /// preserved so encoding is byte-exact.
     Map(Vec<(String, Value)>),
@@ -73,7 +78,7 @@ pub(crate) fn tag_of(value: &Value) -> u8 {
         Value::Str(_) => 6,
         Value::Array(_) => 7,
         Value::Object(_) => 8,
-        Value::Vec4(_) => 9,
+        Value::Quad(_) => 9,
         Value::Map(_) => 10,
         Value::U32Array(_) => 11,
         Value::Sparse { .. } => 12,
@@ -95,9 +100,9 @@ pub enum DecodeError {
     BadWordsRef,
     /// A length or count that cannot fit the remaining bytes.
     LengthOverflow,
-    /// A turn-framing op named an element kind outside the fixed set, or a
-    /// property set that was not a tag-8 object. (Turn framing is modelled; see
-    /// `turn.rs`.)
+    /// A turn without its version byte, an op code outside 1 to 10, a
+    /// `ChildEdits` op that runs past its parent's list, or an event or host
+    /// frame whose body doesn't end where the buffer does.
     BadFraming,
     /// Value nesting exceeded the decoder's depth limit, so the buffer is
     /// treated as hostile rather than recursed into.
@@ -112,7 +117,7 @@ impl core::fmt::Display for DecodeError {
             DecodeError::BadUtf8 => f.write_str("string was not valid UTF-8"),
             DecodeError::BadWordsRef => f.write_str("tag 12 named a missing words list or index"),
             DecodeError::LengthOverflow => f.write_str("length exceeds remaining bytes"),
-            DecodeError::BadFraming => f.write_str("malformed turn framing"),
+            DecodeError::BadFraming => f.write_str("malformed turn, event or frame"),
             DecodeError::TooDeep => f.write_str("value nesting exceeded the depth limit"),
         }
     }
@@ -121,6 +126,37 @@ impl core::fmt::Display for DecodeError {
 impl std::error::Error for DecodeError {}
 
 impl Value {
+    /// An integer as the guest's encoder writes it: tag 3 when it fits an
+    /// `i32`, tag 4 otherwise.
+    #[must_use]
+    pub fn int(v: i64) -> Value {
+        i32::try_from(v).map_or(Value::I64(v), Value::I32)
+    }
+
+    /// A colour as `0xAARRGGBB`, through [`Value::int`]. A colour with
+    /// alpha below `0x80` is a tag 3, any other a tag 4.
+    #[must_use]
+    pub fn color(argb: u32) -> Value {
+        Value::int(i64::from(argb))
+    }
+
+    /// The integer in a tag-3 or tag-4 value.
+    #[must_use]
+    pub fn as_int(&self) -> Option<i64> {
+        match self {
+            Value::I32(v) => Some(i64::from(*v)),
+            Value::I64(v) => Some(*v),
+            _ => None,
+        }
+    }
+
+    /// The `0xAARRGGBB` colour in an integer value. `None` for any other
+    /// value and for an integer outside `u32`.
+    #[must_use]
+    pub fn as_color(&self) -> Option<u32> {
+        u32::try_from(self.as_int()?).ok()
+    }
+
     /// Append this value's wire bytes to `out`.
     pub fn encode(&self, out: &mut Vec<u8>) {
         out.push(tag_of(self));
@@ -143,7 +179,7 @@ impl Value {
                     value.encode(out);
                 }
             }
-            Value::Vec4(quad) => {
+            Value::Quad(quad) => {
                 for f in quad {
                     out.extend_from_slice(&f.to_le_bytes());
                 }
@@ -224,7 +260,7 @@ impl<'a> Cursor<'a> {
         self.buf.len() - self.pos
     }
 
-    fn take(&mut self, n: usize) -> Result<&'a [u8], DecodeError> {
+    pub(crate) fn take(&mut self, n: usize) -> Result<&'a [u8], DecodeError> {
         let end = self.pos.checked_add(n).ok_or(DecodeError::LengthOverflow)?;
         let slice = self
             .buf
@@ -238,7 +274,7 @@ impl<'a> Cursor<'a> {
         Ok(self.take(1)?[0])
     }
 
-    fn u16(&mut self) -> Result<u16, DecodeError> {
+    pub(crate) fn u16(&mut self) -> Result<u16, DecodeError> {
         Ok(u16::from_le_bytes(self.take(2)?.try_into().unwrap()))
     }
 
@@ -306,7 +342,7 @@ impl<'a> Cursor<'a> {
                 for (i, slot) in quad.iter_mut().enumerate() {
                     *slot = f32::from_le_bytes(bytes[i * 4..i * 4 + 4].try_into().unwrap());
                 }
-                Value::Vec4(quad)
+                Value::Quad(quad)
             }
             10 => {
                 // Each entry is at least a u32-len (>= 4) key + a one-byte value.

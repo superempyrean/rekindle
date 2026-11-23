@@ -19,9 +19,12 @@
 //!   the element's role byte (`0xff` is none);
 //! - `liveRegion` (281) is `"polite"` or `"assertive"`, [`LiveRegion`].
 //!
-//! MODELLED: the wire value each kind travels as (a bool as tag 1/2, a string
-//! as tag 6, a number as tag 4), since this crate leaves `PropIds` untyped
-//! (see `prop_id.rs`); and [`semantics`], the walk from cells to a tree. The
+//! The wire value of each is read from `gpui-native`'s setter calls too: a
+//! flag or tri-state is a bool (tag 1 or 2), a label, hint or role a string
+//! (tag 6), `accessibilityFocus` (6) an int (tag 3 when it fits an `i32`)
+//! or an object, and `accessibilityValue` (16) an object.
+//!
+//! MODELLED: [`semantics`], the walk from cells to a tree. The
 //! platform's tree builder is obfuscated Kotlin. Its const-string tables show
 //! which props it reads, not how it merges children, so the rules in
 //! [`semantics`] are the usual ones (a hidden node drops its subtree, a node
@@ -60,6 +63,8 @@ pub mod ids {
     pub const EXPANDED: PropId = PropId(5);
     pub const DISABLED: PropId = PropId(4);
     pub const BUSY: PropId = PropId(2);
+    /// A tag-8 object.
+    pub const VALUE: PropId = PropId(16);
 }
 
 /// The role enum `gpui-native` writes into `role` (414), in the order of the
@@ -502,6 +507,7 @@ mod tests {
             (ids::EXPANDED, "accessibilityExpanded"),
             (ids::DISABLED, "accessibilityDisabled"),
             (ids::BUSY, "accessibilityBusy"),
+            (ids::VALUE, "accessibilityValue"),
         ] {
             assert_eq!(id.name(), Some(name));
         }
@@ -523,38 +529,45 @@ mod tests {
         let t = tree(vec![
             NodeOp::Create {
                 node: 1,
-                kind: ElementKind::Div,
+                kind: ElementKind::VIEW,
+                props: vec![],
             },
             NodeOp::Create {
                 node: 2,
-                kind: ElementKind::List,
+                kind: ElementKind::LIST,
+                props: vec![],
             },
             NodeOp::Create {
                 node: 3,
-                kind: ElementKind::Div,
+                kind: ElementKind::VIEW,
+                props: vec![],
             },
             NodeOp::Create {
                 node: 4,
-                kind: ElementKind::Div,
+                kind: ElementKind::VIEW,
+                props: vec![],
             },
             NodeOp::Create {
                 node: 5,
-                kind: ElementKind::Text,
+                kind: ElementKind::TEXT,
+                props: vec![],
             },
             NodeOp::Create {
                 node: 6,
-                kind: ElementKind::Div,
+                kind: ElementKind::VIEW,
+                props: vec![],
             },
             NodeOp::Create {
                 node: 7,
-                kind: ElementKind::Text,
+                kind: ElementKind::TEXT,
+                props: vec![],
             },
-            NodeOp::SetProps {
+            NodeOp::Update {
                 node: 2,
                 props: vec![(ids::ROLE, s("list")), (ids::LABEL, s("Messages"))],
             },
             // A wrapper with nothing to say: its button moves up to the list.
-            NodeOp::SetProps {
+            NodeOp::Update {
                 node: 4,
                 props: vec![
                     (ids::ROLE, s("button")),
@@ -562,31 +575,31 @@ mod tests {
                     (ids::SELECTED, Value::Bool(false)),
                 ],
             },
-            NodeOp::SetProps {
+            NodeOp::Update {
                 node: 5,
                 props: vec![(ids::HIDDEN, Value::Bool(true)), (ids::LABEL, s("decor"))],
             },
-            NodeOp::SetProps {
+            NodeOp::Update {
                 node: 6,
                 props: vec![(ids::LIVE_REGION, s("polite")), (ids::LABELLED_BY, s("t"))],
             },
-            NodeOp::SetProps {
+            NodeOp::Update {
                 node: 7,
                 props: vec![(ids::ID, s("t")), (ids::TEXT, s("Alice is typing"))],
             },
-            NodeOp::SetChildren {
+            NodeOp::Children {
                 node: 1,
                 children: vec![2, 6],
             },
-            NodeOp::SetChildren {
+            NodeOp::Children {
                 node: 2,
                 children: vec![3],
             },
-            NodeOp::SetChildren {
+            NodeOp::Children {
                 node: 3,
                 children: vec![4, 5],
             },
-            NodeOp::SetChildren {
+            NodeOp::Children {
                 node: 6,
                 children: vec![7],
             },
@@ -604,9 +617,10 @@ mod tests {
         let t = tree(vec![
             NodeOp::Create {
                 node: 1,
-                kind: ElementKind::Div,
+                kind: ElementKind::VIEW,
+                props: vec![],
             },
-            NodeOp::SetProps {
+            NodeOp::Update {
                 node: 1,
                 props: vec![(ids::ROLE, s("listitem"))],
             },
@@ -623,32 +637,35 @@ mod tests {
         let t = tree(vec![
             NodeOp::Create {
                 node: 1,
-                kind: ElementKind::Div,
+                kind: ElementKind::VIEW,
+                props: vec![],
             },
             NodeOp::Create {
                 node: 2,
-                kind: ElementKind::Text,
+                kind: ElementKind::TEXT,
+                props: vec![],
             },
             NodeOp::Create {
                 node: 3,
-                kind: ElementKind::Text,
+                kind: ElementKind::TEXT,
+                props: vec![],
             },
-            NodeOp::SetProps {
+            NodeOp::Update {
                 node: 1,
                 props: vec![
                     (ids::ROLE, s("button")),
                     (ids::NAMED_BY_CHILDREN, Value::Bool(true)),
                 ],
             },
-            NodeOp::SetProps {
+            NodeOp::Update {
                 node: 2,
                 props: vec![(ids::LABEL, s("Alice"))],
             },
-            NodeOp::SetProps {
+            NodeOp::Update {
                 node: 3,
                 props: vec![(ids::LABEL, s("Online"))],
             },
-            NodeOp::SetChildren {
+            NodeOp::Children {
                 node: 1,
                 children: vec![2, 3],
             },

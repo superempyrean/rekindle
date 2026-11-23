@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
-description = "The wire a split GPUI client speaks between guest and host: the recovered 13-tag value codec and 855-entry PropId table, a view_props store, a keyed child diff, and the modelled turn framing, events and motion around them."
+description = "The wire a split GPUI client speaks between guest and host, as recovered from Phoenix's Android host: the 13-tag value codec, the 855-entry PropId table, the turn's ten ops, UI events and host frames, with a view_props store, a keyed child diff and a model of the motion engine."
 publish = false
 
 # No third-party crates: the codec is pure std. The PropId table is

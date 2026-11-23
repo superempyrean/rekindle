@@ -1,9 +1,9 @@
 //! `view_props`: the host's retained per-`(node, PropId)` value store.
 //!
 //! RECOVERED (shape): the host keeps mutable visual state keyed by
-//! `(view, PropId)` and the guest sends only what changed, as a tag-8 object
-//! (`view_props.rs`, setter fn `0x1723148`, store fn `0x175f270`). The property
-//! set on the wire is exactly [`Value::Object`].
+//! `(view, PropId)` and the guest sends only what changed, as the property
+//! list of a Create or Update op (`view_props.rs`, setter fn `0x1723148`,
+//! store fn `0x175f270`). A removed property crosses as Null.
 //!
 //! MODELLED: the in-memory representation here is a plain map. The host packs
 //! each value into a 32-byte tagged union inside 64-byte records and carries a
@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 use crate::tree::NodeId;
 use crate::{PropId, Value};
 
-/// A property set as it crosses the wire: the tag-8 object's contents.
+/// A property list as a Create or Update op carries it.
 pub type PropSet = Vec<(PropId, Value)>;
 
 /// Modelled. The host store of per-node property values. The keying by
@@ -38,11 +38,16 @@ impl ViewProps {
         self.values.insert((node, prop), value);
     }
 
-    /// Apply a decoded tag-8 property set to a node: each `(PropId, Value)` is
-    /// one cell write. This is the sparse-update path the guest uses.
+    /// Apply a property list to a node: each `(PropId, Value)` is one cell
+    /// write, and Null removes the cell. This is the sparse-update path the
+    /// guest uses.
     pub fn apply_set(&mut self, node: NodeId, props: PropSet) {
         for (prop, value) in props {
-            self.set(node, prop, value);
+            if value == Value::Null {
+                self.values.remove(&(node, prop));
+            } else {
+                self.set(node, prop, value);
+            }
         }
     }
 

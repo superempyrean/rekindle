@@ -54,4 +54,7 @@ fn named_recolour_constants_match() {
     assert_eq!(ids::BORDER_COLOR, PropId(104));
     assert_eq!(ids::SELECTION_COLOR.name(), Some("selectionColor"));
     assert_eq!(ids::ACTIVE_BACKGROUND.name(), Some("activeBackground"));
+    assert_eq!(ids::FOCUS_BORDER_COLOR.name(), Some("focusBorderColor"));
+    assert_eq!(ids::ELEVATION_COLOR.name(), Some("elevationColor"));
+    assert_eq!(ids::NAV_SCRIM_COLOR.name(), Some("navScrimColor"));
 }

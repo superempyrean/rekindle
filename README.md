@@ -37,7 +37,7 @@ GPUI like Zed and test applications of our own.
 | `crates/install`      | `rekindle-install` | The install's layout and `state.json`: which version runs, and the fallback from one that doesn't come up. Shared by the launcher, the shim and the host. |
 | `crates/release`      | `rekindle-release` | Signing, the release channel's `framework` and `launcher` sections, and updating an install from the channel. Shared by the plugin host, the host and the launcher. |
 | `crates/launcher`     | `rekindle-launcher` | The setup program and the installed `rekindle.exe`: installs, repairs and updates rekindle beside the client. |
-| `crates/wire`         | `rekindle-wire` | The wire a split GPUI client speaks between guest and host: the recovered value codec and PropId table, and the modelled turn framing around them ([crates/wire/README.md](crates/wire/README.md)). |
+| `crates/wire`         | `rekindle-wire` | The wire a split GPUI client speaks between guest and host, as read from Phoenix's Android host: the value codec, the PropId table, the turn's ten ops, UI events and host frames ([crates/wire/README.md](crates/wire/README.md)). |
 | `crates/wire-inject`  | `rekindle-wire-inject` | rekindle's transforms on that wire, which the host runs from its detours: subtrees of its own mounted under the client's nodes, cells written by PropId, the guest's nodes dropped or rewritten, presses intercepted, and colours recoloured where the guest writes them, as a `Work` value says. |
 | `client/`             | | What rekindle ships into the client (separate workspace): the side-load shim, the host DLL and the in-client runtime. [client/README.md](client/README.md). |
 | **Finding hook points** | | |

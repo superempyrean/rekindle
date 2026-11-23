@@ -31,9 +31,10 @@
 //!
 //! # Modelled
 //!
-//! - The spec's grammar, on the wire and in words ([`Spec`]). The real
-//!   `view_motion` spec and the 32-opcode `apply` stream are located but not
-//!   decoded, so a guest module replaces this format.
+//! - What a `viewMotion` array holds, and the words made from it
+//!   ([`Spec`]). The cell is an array, and `view_motion` takes the same
+//!   32-opcode stream as `apply`, but which elements the guest writes isn't
+//!   read.
 //! - The interpolation: an eased duration and a damped spring
 //!   ([`Curve`]), and when a transition counts as settled.
 //! - What a resting-value change does under a spec (it animates from the
@@ -64,6 +65,8 @@ pub mod ids {
 
     /// A view's motion spec, the cell the platform passes to `view_motion`.
     pub const VIEW_MOTION: PropId = PropId(740);
+    /// Which channel an element of a `viewMotion` array is for. Modelled.
+    pub const PROPERTY: PropId = PropId(386);
     /// The value a channel animates in from.
     pub const ENTER_FROM: PropId = PropId(180);
     pub const SPRING: PropId = PropId(470);
@@ -308,16 +311,17 @@ pub struct Entry {
     pub curve: Curve,
 }
 
-/// Modelled. A view's motion spec: which channels animate, and how. The real
-/// `view_motion` spec is located but not decoded, so a recovered guest module
-/// would replace how it is carried.
+/// Modelled. A view's motion spec: which channels animate, and how.
 ///
-/// On the wire it is the `viewMotion` (740) cell, a tag-8 object keyed by
-/// each channel's `PropId`. Each entry is a tag-8 object holding `enterFrom`
-/// (180, `F64`) when it animates in, and either `timing` (521) with `ms`,
-/// `delay` and `easing`, or `spring` (470) with `stiffness`, `damping` and
-/// `mass`. The platform turns it into the `u32` words `view_motion` takes
-/// ([`Spec::to_words`]).
+/// On the wire it is the `viewMotion` (740) cell. `gpui-native` writes that
+/// cell as an array (six setter calls, all `Array`), and the platform passes
+/// it to `view_motion`, which takes the engine's op stream. What each
+/// element holds isn't read, so the rest is rekindle's: each element is a
+/// tag-8 object holding `property` (386, the channel's `PropId` as an int),
+/// `enterFrom` (180, `F64`) when it animates in, and either `timing` (521)
+/// with `ms`, `delay` and `easing`, or `spring` (470) with `stiffness`,
+/// `damping` and `mass`. The platform turns it into the `u32` words
+/// `view_motion` takes ([`Spec::to_words`]).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Spec {
     pub entries: Vec<Entry>,
@@ -367,7 +371,7 @@ impl Spec {
     pub fn to_value(&self) -> Value {
         let f = |v: f32| Value::F64(f64::from(v));
         let entries = self.entries.iter().filter_map(|e| {
-            let mut fields = Vec::new();
+            let mut fields = vec![(ids::PROPERTY, Value::int(i64::from(e.channel.prop()?.0)))];
             if let Some(from) = e.enter_from {
                 fields.push((ids::ENTER_FROM, f(from)));
             }
@@ -393,16 +397,16 @@ impl Spec {
                     ]),
                 ),
             });
-            Some((e.channel.prop()?, Value::Object(fields)))
+            Some(Value::Object(fields))
         });
-        Value::Object(entries.collect())
+        Value::Array(entries.collect())
     }
 
-    /// Read a `viewMotion` cell. Entries whose `PropId` names no channel, or
-    /// that carry neither curve, are skipped. `None` if the cell isn't an
-    /// object.
+    /// Read a `viewMotion` cell. Entries whose `property` names no channel,
+    /// or that carry neither curve, are skipped. `None` if the cell isn't an
+    /// array.
     pub fn from_value(value: &Value) -> Option<Spec> {
-        let Value::Object(entries) = value else {
+        let Value::Array(entries) = value else {
             return None;
         };
         let num = |fields: &[(PropId, Value)], id: PropId, default: f32| match fields
@@ -414,11 +418,18 @@ impl Spec {
             _ => default,
         };
         let mut spec = Spec::new();
-        for (prop, fields) in entries {
-            let (Some(channel), Value::Object(fields)) = (
-                Channel::ALL.into_iter().find(|c| c.prop() == Some(*prop)),
-                fields,
-            ) else {
+        for entry in entries {
+            let Value::Object(fields) = entry else {
+                continue;
+            };
+            let prop = fields.iter().find_map(|(p, v)| match v {
+                Value::I32(n) if *p == ids::PROPERTY => u16::try_from(*n).ok().map(PropId),
+                _ => None,
+            });
+            let Some(channel) = Channel::ALL
+                .into_iter()
+                .find(|c| prop.is_some() && c.prop() == prop)
+            else {
                 continue;
             };
             let enter_from = match fields.iter().find(|(p, _)| *p == ids::ENTER_FROM) {

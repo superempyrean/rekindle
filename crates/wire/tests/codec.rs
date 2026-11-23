@@ -20,10 +20,10 @@ fn every_tag_roundtrips() {
         Value::Str("héllo wörld \u{1f600}".to_string()),
         Value::Array(vec![Value::Null, Value::Bool(true), Value::I32(7)]),
         Value::Object(vec![
-            (PropId(90), Value::Vec4([0.1, 0.2, 0.3, 1.0])),
+            (PropId(90), Value::Quad([0.1, 0.2, 0.3, 1.0])),
             (PropId(129), Value::I32(5)),
         ]),
-        Value::Vec4([1.0, 2.5, -3.0, 0.0]),
+        Value::Quad([1.0, 2.5, -3.0, 0.0]),
         Value::Map(vec![
             ("one".to_string(), Value::I32(1)),
             ("two".to_string(), Value::Array(vec![Value::F64(2.0)])),
@@ -54,7 +54,7 @@ fn nested_roundtrips() {
             PropId(90),
             Value::Map(vec![(
                 "k".to_string(),
-                Value::Array(vec![Value::Vec4([0.0; 4])]),
+                Value::Array(vec![Value::Quad([0.0; 4])]),
             )]),
         )]),
         Value::U32Array(vec![]),
@@ -62,44 +62,34 @@ fn nested_roundtrips() {
     assert_eq!(v, decode(&v.to_bytes()).unwrap());
 }
 
-/// The worked tag-8 recolour example: an object
-/// setting background (id 90) and borderColor (id 104) to vec4 colours. The
-/// exact byte layout is asserted, structure byte-for-byte and colours by their
-/// f32 little-endian encodings.
+/// The worked tag-8 recolour example: an object setting background (id 90)
+/// and borderColor (id 104) to integer colours, `0xAARRGGBB`. Both are
+/// opaque, so both are tag 4.
 #[test]
 fn tag8_recolour_bytes_are_exact() {
-    let bg = [0.1f32, 0.2, 0.3, 1.0];
-    let border = [0.4f32, 0.5, 0.6, 1.0];
     let v = Value::Object(vec![
-        (PropId(90), Value::Vec4(bg)),
-        (PropId(104), Value::Vec4(border)),
+        (PropId(90), Value::color(0xFF33_6699)),
+        (PropId(104), Value::color(0xFF00_0000)),
     ]);
+    let expected = [
+        0x08, 0x02, 0x00, 0x00, 0x00, // tag 8, count 2
+        0x5a, 0x00, 0x04, 0x99, 0x66, 0x33, 0xff, 0, 0, 0, 0, // background
+        0x68, 0x00, 0x04, 0x00, 0x00, 0x00, 0xff, 0, 0, 0, 0, // borderColor
+    ];
+    assert_eq!(v.to_bytes(), expected);
+    assert_eq!(decode(&expected).unwrap(), v);
+}
 
-    let mut expected = Vec::new();
-    expected.push(0x08); //                         tag 8, object by PropId
-    expected.extend_from_slice(&2u32.to_le_bytes()); // count = 2  -> 02 00 00 00
-    expected.extend_from_slice(&90u16.to_le_bytes()); // prop_id 90 (background) -> 5a 00
-    expected.push(0x09); //                         value: tag 9, Vec4<f32>
-    for f in bg {
-        expected.extend_from_slice(&f.to_le_bytes());
-    }
-    expected.extend_from_slice(&104u16.to_le_bytes()); // prop_id 104 (borderColor) -> 68 00
-    expected.push(0x09);
-    for f in border {
-        expected.extend_from_slice(&f.to_le_bytes());
-    }
-
-    let actual = v.to_bytes();
-    assert_eq!(actual, expected, "tag-8 recolour bytes differ");
-
-    // Spot-check the structural bytes the doc spells out, independent of the
-    // f32 encodings: 08 | 02 00 00 00 | 5a 00 | 09 | ...16... | 68 00 | 09
-    assert_eq!(&actual[0..7], &[0x08, 0x02, 0x00, 0x00, 0x00, 0x5a, 0x00]);
-    assert_eq!(actual[7], 0x09);
-    assert_eq!(&actual[24..27], &[0x68, 0x00, 0x09]);
-    assert_eq!(actual.len(), 1 + 4 + 2 + 17 + 2 + 17);
-
-    assert_eq!(decode(&actual).unwrap(), v);
+/// An integer goes out as tag 3 when it fits an `i32`, so a colour with
+/// alpha below `0x80` is four bytes and an opaque one eight.
+#[test]
+fn integers_take_the_narrower_tag() {
+    assert_eq!(Value::int(7), Value::I32(7));
+    assert_eq!(Value::int(-1), Value::I32(-1));
+    assert_eq!(Value::int(1 << 31), Value::I64(1 << 31));
+    assert_eq!(Value::color(0x4033_6699), Value::I32(0x4033_6699));
+    assert_eq!(Value::color(0xFF33_6699).as_color(), Some(0xFF33_6699));
+    assert_eq!(Value::I32(-1).as_color(), None);
 }
 
 /// Known fixed-width encodings, asserted literally.

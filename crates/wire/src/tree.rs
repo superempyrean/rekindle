@@ -1,20 +1,17 @@
 //! The retained element tree and the keyed sibling diff (`ops.rs` apply shape).
 //!
-//! RECOVERED (shape): `ops.rs` apply (VA `0x174d124`) is not a byte decoder. It
-//! takes two already-decoded `&[u32]` child-id lists (old children, new
-//! children), builds a set from each, and walks them emitting insert / move /
-//! remove against a retained tree keyed on `u32` node ids, with `-1` as the
-//! absent sentinel. Element *kind* is carried as an interned name string on the
-//! node record (the reconcile path compares a 4-byte field against
-//! `"list"` = `0x7473696c`), not as a numeric tag. The element set is fixed:
-//! `div`, `text`, `input`, `list`, `canvas`, `navigator`, `motion_events`.
+//! RECOVERED (shape): `0x174d124` is not a byte decoder. It takes two
+//! already-decoded `&[u32]` child-id lists (old children, new children) and
+//! diffs them, with `-1` as the absent sentinel. The turn writer runs it to
+//! choose between a Children and a `ChildEdits` op (`crate::turn`), keeping a
+//! longest increasing subsequence of the old positions in place. A node
+//! carries its kind as a string (the reconcile path compares a 4-byte field
+//! against `"list"` = `0x7473696c`), not as a numeric tag.
 //!
-//! MODELLED: the exact `element_pool` recycling, the structural hash-skip and
-//! the transition records are not reproduced; [`diff_children`] computes the
-//! same insert/move/remove vocabulary with a minimal-move (LIS) reconciliation,
-//! which is what a keyed sibling diff does. The host's precise move minimisation
-//! is not observable from the binary, so "minimal" here is rekindle's model, not
-//! a recovered guarantee.
+//! MODELLED: the platform's `element_pool` recycling, the structural
+//! hash-skip and the transition records are not reproduced. [`diff_children`]
+//! reports the same diff as insert, move and remove ops, which is the
+//! vocabulary a keyed sibling diff uses.
 
 use crate::ElementKind;
 
@@ -36,11 +33,12 @@ pub enum ChildOp {
     Remove { id: NodeId },
 }
 
-/// Modelled. Diff two keyed child-id lists into the minimal insert / move /
-/// remove set. The vocabulary is the host's. Its move minimisation isn't
-/// observable from the binary, so the minimal (LIS) set here is rekindle's.
+/// Diff two keyed child-id lists into the minimal insert / move / remove
+/// set. The guest's diff at `0x174d124` keeps a longest increasing
+/// subsequence of old positions in place too. The insert, move and remove
+/// ops are rekindle's way of reporting it.
 ///
-/// Mirrors `ops.rs` apply: old and new are `&[u32]` id lists. Removals come
+/// Old and new are `&[u32]` id lists. Removals come
 /// first (old ids absent from new), then the new list is walked; ids absent from
 /// old are inserts, and ids present in both but outside the longest increasing
 /// run of retained positions are moves. Keeping the longest increasing

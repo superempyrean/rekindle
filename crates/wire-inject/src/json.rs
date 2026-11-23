@@ -2,9 +2,10 @@
 //! JSON.
 //!
 //! A `PropId` is its name from the recovered table (`"background"`), or its
-//! number when it has none. A kind is its name (`"div"`). A value is an
-//! object with one key, its variant: `{"str": "Mute"}`, `{"i32": 3}`,
-//! `{"vec4": [1, 0.5, 0, 1]}`, `{"rgba": "ff7a18ff"}` (read as a `vec4`),
+//! number when it has none. A kind is its name (`"view"`), and any name is
+//! a kind. A value is an object with one key, its variant: `{"str":
+//! "Mute"}`, `{"i32": 3}`, `{"quad": [8, 12, 8, 12]}`, `{"rgba":
+//! "ff7a18ff"}` (read as the integer colour `0xFFFF7A18`),
 //! `{"object": [["opacity", {"f64": 0}]]}`, and `"null"`. A
 //! [`Recolor`](crate::Recolor)'s colours are hex strings: `"1e1f22"` and
 //! `"050609ff"`.
@@ -55,22 +56,14 @@ pub(crate) mod prop {
 
 /// `#[serde(with)]` for an [`ElementKind`].
 pub(crate) mod kind {
-    use serde::de::Error as _;
-
     use super::{Deserialize, Deserializer, ElementKind, Serialize, Serializer};
 
-    #[expect(
-        clippy::trivially_copy_pass_by_ref,
-        reason = "serde's `with` passes a reference"
-    )]
     pub(crate) fn serialize<S: Serializer>(kind: &ElementKind, s: S) -> Result<S::Ok, S::Error> {
         kind.name().serialize(s)
     }
 
     pub(crate) fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<ElementKind, D::Error> {
-        let name = String::deserialize(d)?;
-        ElementKind::from_name(&name)
-            .ok_or_else(|| D::Error::custom(format!("no element kind {name:?}")))
+        Ok(ElementKind::new(String::deserialize(d)?))
     }
 }
 
@@ -86,8 +79,8 @@ enum Json {
     Str(String),
     Array(Vec<Json>),
     Object(Vec<(Prop, Json)>),
-    Vec4([f32; 4]),
-    /// `0xRRGGBBAA` as eight hex digits, read as a `vec4`.
+    Quad([f32; 4]),
+    /// `0xRRGGBBAA` as eight hex digits, read as the integer `0xAARRGGBB`.
     Rgba(String),
     Map(Vec<(String, Json)>),
     U32Array(Vec<u32>),
@@ -110,7 +103,7 @@ impl Json {
             Value::Object(o) => {
                 Json::Object(o.iter().map(|(p, v)| (Prop::of(*p), Json::of(v))).collect())
             }
-            Value::Vec4(v) => Json::Vec4(*v),
+            Value::Quad(v) => Json::Quad(*v),
             Value::Map(m) => Json::Map(m.iter().map(|(k, v)| (k.clone(), Json::of(v))).collect()),
             Value::U32Array(a) => Json::U32Array(a.clone()),
             Value::Sparse { list, pairs } => Json::Sparse {
@@ -136,7 +129,7 @@ impl Json {
                     .map(|(p, v)| Ok((p.id()?, v.value()?)))
                     .collect::<Result<_, E>>()?,
             ),
-            Json::Vec4(v) => Value::Vec4(v),
+            Json::Quad(v) => Value::Quad(v),
             Json::Rgba(hex) => {
                 let n = u32::from_str_radix(&hex, 16)
                     .ok()
