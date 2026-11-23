@@ -379,8 +379,8 @@ mod tests {
         assert!(is_ui(&bytes));
     }
 
-    /// Bytes from `uc_event_decoder.out`: the Android platform's writers'
-    /// bytes, run through the guest's decoder under emulation.
+    /// The Android platform's writers' bytes, which the guest's decoder
+    /// accepted under emulation.
     fn hex(s: &str) -> Vec<u8> {
         s.split_whitespace()
             .map(|b| u8::from_str_radix(b, 16).unwrap())
