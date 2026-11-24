@@ -64,6 +64,10 @@ without synthesising any OS input and without an account. `--live --selftest`
 adds a refused host and a login with an address under `.invalid`, which
 reaches no real account. Both are what CI runs when the APK is present.
 
+`--export-assets <dir>` writes the drawables that the `--from` captures name,
+and the APK's fonts, into `<dir>` and quits. The theme playground
+(`playground/`) reads them there, since a browser can't read an APK.
+
 ## This is an unofficial client
 
 phoenix-view runs Discord's client code outside Discord's official app.

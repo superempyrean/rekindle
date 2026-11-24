@@ -12,6 +12,7 @@ mod axml;
 mod capture;
 mod device;
 mod drawable;
+mod export;
 mod guest;
 mod input;
 mod motion;
@@ -78,6 +79,11 @@ usage: phoenix-view [options]
   --no-motion        leave the guest's motion unrun, so nothing animates
   --capture <file>   append each turn the guest sends to <file>, in the
                      wire capture format
+  --export-assets <dir>
+                     write the drawables the --from captures name, and the
+                     APK's fonts, into <dir> for the theme playground, and quit
+  --from <capture>   with --export-assets: a capture to read; may repeat
+  --day              with --export-assets: the drawables' day configuration
   --selftest         drive the window off the desktop and check it; with
                      --live, also a refused host and a login with a fake
                      address, in a scratch Storage file
@@ -104,6 +110,9 @@ pub struct Args {
     capabilities: Vec<String>,
     size: Size<Pixels>,
     capture: Option<PathBuf>,
+    export: Option<PathBuf>,
+    export_from: Vec<PathBuf>,
+    day: bool,
 }
 
 fn args() -> Result<Args, String> {
@@ -132,6 +141,9 @@ fn args() -> Result<Args, String> {
         capabilities: vec![],
         size: PHONE,
         capture: None,
+        export: None,
+        export_from: vec![],
+        day: false,
     };
     // Live unless told otherwise: a plain run reaches Discord. `--selftest`
     // and `--snapshot` stay offline by default, since that is their contract.
@@ -167,6 +179,9 @@ fn args() -> Result<Args, String> {
             "--offline" => live_flag = Some(false),
             "--no-motion" => a.motion = false,
             "--capture" => a.capture = Some(val()?),
+            "--export-assets" => a.export = Some(val()?),
+            "--from" => a.export_from.push(val()?),
+            "--day" => a.day = true,
             "--storage" => a.storage = Some(val()?),
             "--selftest" => a.selftest = true,
             "--snapshot" => {
@@ -221,6 +236,16 @@ fn main() {
             std::process::exit(2);
         }
     };
+    if let Some(dir) = &args.export {
+        let from: Vec<&std::path::Path> = args.export_from.iter().map(PathBuf::as_path).collect();
+        let done = apk::Apk::open(&args.apk, &args.splits)
+            .and_then(|apk| export::run(&apk, dir, &from, !args.day));
+        if let Err(e) = done {
+            eprintln!("phoenix-view: {e:#}");
+            std::process::exit(1);
+        }
+        return;
+    }
     let theme = match (&args.theme, &args.work_json) {
         (Some(t), _) => Some(theme::ThemeSource::theme_file(t, args.variant.as_deref())),
         (None, Some(w)) => Some(theme::ThemeSource::work_file(w)),
