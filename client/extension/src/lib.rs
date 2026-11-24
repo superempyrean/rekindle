@@ -518,6 +518,12 @@ impl Driver {
         rekindle_ui_hook::set_theme_palettes(palettes);
     }
 
+    /// The colour each token a plugin sets has, as HSLA: the plugin's that
+    /// set it last.
+    pub fn theme_overrides(&self) -> std::collections::BTreeMap<String, [f32; 4]> {
+        self.shared.theme.lock().unwrap().overrides()
+    }
+
     /// For each client theme of [`Driver::use_framework_theme`], its token
     /// values and the plugins' overrides as (the theme's value, the
     /// override) pairs (HSLA). Framework theming recolours the scene with

@@ -21,7 +21,9 @@ files beside it:
 - `anchors.json`: the hook points, as anchors.
 - `layout.json`: field offsets, sizes and value encodings in the client's
   types.
-- `palette.json`: the client's token values for each of its themes.
+- `palette.json`: the client's token values for each of its themes, or,
+  for a client that names its palette on the wire, where each token's
+  colour is in that palette (`rekindle_wire_inject::theme`).
 
 Those files are recovered from each client build and ship with each rekindle
 version. The shim points the host at them with

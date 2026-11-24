@@ -40,15 +40,16 @@
 //! idle guest sends no turns, so nothing else would carry the change.
 //!
 //! With a palette in the config dir, the plugin runtime runs in the app too
-//! ([`runtime`]). The theme its plugins set becomes the engine's recolours,
-//! and rekindle's section on the settings screen, the plugins' chat-bar
-//! buttons and a plugin's modal become its mounts. A press on any of them
-//! goes to the runtime.
+//! ([`runtime`]). The theme its plugins set becomes the engine's recolours
+//! for the palette the guest names ([`theme`]), and rekindle's section on
+//! the settings screen, the plugins' chat-bar buttons and a plugin's modal
+//! become its mounts. A press on any of them goes to the runtime.
 //!
 //! The report and the running counts go to logcat (tag `rekindle`), since an
 //! app has no console.
 
 mod runtime;
+mod theme;
 
 use crate::gateway;
 use std::ffi::{CString, c_char, c_void};
@@ -137,6 +138,10 @@ static ENGINE: Mutex<Option<Engine>> = Mutex::new(None);
 /// caller also writes to logcat.
 pub(crate) fn run_worker() -> String {
     let mut out = crate::report_head();
+    // Before the swap: the guest names its palette in its first host calls.
+    if let Some(b) = theme::load() {
+        crate::field(&mut out, "theme_binding", b.tokens.len());
+    }
     // Before the swap, so the first turn the hook sees reaches the engine.
     match build_engine() {
         Ok(true) => {
@@ -521,6 +526,36 @@ fn set_plugins(state: runtime::State) {
     set_work(work);
 }
 
+/// The guest named a palette: recolour the plugins' theme for it, from
+/// the guest's next turn. On the guest's thread, within its call.
+fn retheme() {
+    let work = {
+        let mut panel = panel_lock();
+        let Some(panel) = panel.as_mut() else {
+            return;
+        };
+        let Some(plugins) = panel.plugins.as_mut() else {
+            return;
+        };
+        let recolors = theme::recolors();
+        if plugins.recolors == recolors {
+            return;
+        }
+        log(&format!(
+            "theme: {} recolours for the new palette",
+            recolors.len()
+        ));
+        plugins.recolors = recolors;
+        panel.work()
+    };
+    set_work(work);
+}
+
+/// Turns the guest has emitted.
+pub(crate) fn turns() -> u64 {
+    TURNS.load(Ordering::Relaxed)
+}
+
 /// Set `work` on the engine, for the next dispatch to flush.
 fn set_work(work: Work) {
     match with_engine(|e| e.set_work(work)) {
@@ -645,6 +680,9 @@ unsafe extern "C" fn hooked_emit(
         let n = CALLS.fetch_add(1, Ordering::Relaxed);
         if n < 8 {
             log(&format!("host call #{n} len={len} head={}", head_hex(buf)));
+        }
+        if theme::on_call(buf) {
+            retheme();
         }
         // SAFETY: the guest's own arguments.
         return unsafe { original(transport, bytes, len) };

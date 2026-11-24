@@ -48,8 +48,9 @@ use crate::messages::MessageMap;
 use crate::rows::{self, Look, Press};
 use crate::wire::SlotMap;
 
-/// The palette file in the config dir: Phoenix's colour for each token.
-const PALETTE: &str = "palette.json";
+/// The palette file in the config dir: the build's theme binding, or
+/// Phoenix's colour for each token.
+pub(crate) const PALETTE: &str = "palette.json";
 /// The look of rekindle's rows, in the config dir.
 const LOOK: &str = "panel.json";
 /// The wire map, in the config dir: where the chat-bar slot is.
@@ -279,6 +280,11 @@ struct Surfaces {
     /// The toasts shown, by id, and how many sets of them were shown.
     toasts: Vec<u64>,
     toast_sets: u32,
+    /// The palettes the guest had named when plugins' reads of the
+    /// client's colours were last set.
+    seeded: Option<u64>,
+    /// The theme report last logged.
+    theme_report: String,
 }
 
 impl Surfaces {
@@ -318,6 +324,8 @@ impl Surfaces {
             block: 0,
             toasts: Vec::new(),
             toast_sets: 0,
+            seeded: None,
+            theme_report: String::new(),
         }
     }
 
@@ -596,16 +604,25 @@ fn running(driver: &mut Driver) -> BTreeSet<String> {
 fn up() -> anyhow::Result<(Driver, Home)> {
     let home = home()?;
     std::fs::create_dir_all(&home)?;
-    let palettes = crate::layout::read_palette(&super::config_file(PALETTE));
-    if palettes.is_empty() {
+    // A binding's tokens take their colours from the palette the guest
+    // names. An older palette file lists the colours itself.
+    let palettes = match super::theme::load() {
+        Some(_) => vec![live_palette()],
+        None => crate::layout::read_palette(&super::config_file(PALETTE)),
+    };
+    let names: BTreeSet<String> = match super::theme::load() {
+        Some(b) => b.names().map(str::to_string).collect(),
+        None => palettes
+            .iter()
+            .flat_map(|(_, t)| t.iter().map(|(name, _)| name.clone()))
+            .collect(),
+    };
+    if names.is_empty() {
         anyhow::bail!("no palette in {}", super::config_file(PALETTE).display());
     }
     // A token's place in the client's theme value. With no theme function
     // to detour, only the names count: they are the tokens plugins can set.
-    let tokens: BTreeSet<&String> = palettes
-        .iter()
-        .flat_map(|(_, t)| t.iter().map(|(name, _)| name))
-        .collect();
+    let tokens: Vec<&String> = names.iter().collect();
     let profile = RecoveredProfile {
         theme: ThemeProfile {
             addr: None,
@@ -635,6 +652,47 @@ fn up() -> anyhow::Result<(Driver, Home)> {
     driver.use_wire_theme();
     driver.use_wire_chat_bar();
     Ok((driver, Home::new(home)))
+}
+
+/// The client's colour for each token, as a palette for the Driver: the
+/// palette the guest named last, by its theme.
+fn live_palette() -> (String, Vec<(String, u32)>) {
+    let values = super::theme::values()
+        .into_iter()
+        .map(|b| (b.token, b.value))
+        .collect();
+    (super::theme::shown(), values)
+}
+
+/// How often, in ticks, the theme report is made.
+const THEME_REPORT_EVERY: u32 = 40;
+
+/// The recolours for the plugins' theme in the palette the guest named
+/// last. Plugins' reads of a token follow that palette too.
+fn live_recolors(driver: &mut Driver, surfaces: &mut Surfaces) -> Vec<Recolor> {
+    let named = super::theme::named();
+    if surfaces.seeded != Some(named) {
+        surfaces.seeded = Some(named);
+        driver.use_framework_theme(vec![live_palette()]);
+    }
+    super::theme::set_overrides(
+        driver
+            .theme_overrides()
+            .into_iter()
+            .map(|(t, hsla)| (t, crate::wire::rgba(hsla)))
+            .collect(),
+    );
+    let recolors = super::theme::recolors();
+    // The report walks the guest's tree under the engine's lock.
+    if !recolors.is_empty()
+        && surfaces.ticks.is_multiple_of(THEME_REPORT_EVERY)
+        && let Some(report) = super::with_engine(|e| super::theme::report(e))
+        && report != surfaces.theme_report
+    {
+        log(&report);
+        surfaces.theme_report = report;
+    }
+    recolors
 }
 
 /// Hand the engine what the plugins make now, if it changed.
@@ -702,16 +760,20 @@ fn publish(driver: &mut Driver, surfaces: &mut Surfaces) -> State {
     if let Some(slot) = &surfaces.chat_bar {
         mounts.extend(crate::wire::button_mounts(&driver.chat_bar_buttons(), slot));
     }
-    let palettes = driver.recolors();
-    // Reading which palette the guest shows walks its whole tree under the
-    // engine's lock, which the guest's emit waits on. One palette needs no
-    // reading.
-    let shown = if palettes.len() > 1 {
-        super::with_engine(|e| crate::wire::shown_palette(e.guest(), &palettes)).flatten()
+    let recolors = if super::theme::binding().is_some() {
+        live_recolors(driver, surfaces)
     } else {
-        None
+        let palettes = driver.recolors();
+        // Reading which palette the guest shows walks its whole tree under
+        // the engine's lock, which the guest's emit waits on. One palette
+        // needs no reading.
+        let shown = if palettes.len() > 1 {
+            super::with_engine(|e| crate::wire::shown_palette(e.guest(), &palettes)).flatten()
+        } else {
+            None
+        };
+        crate::wire::palette_recolors(&palettes, shown)
     };
-    let recolors = crate::wire::palette_recolors(&palettes, shown);
     let cells = message_cells(driver, surfaces);
     let state = State {
         recolors,
