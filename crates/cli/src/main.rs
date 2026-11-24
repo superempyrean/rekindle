@@ -26,6 +26,8 @@ enum Cmd {
     Dev(cmd::dev::Commands),
     #[command(flatten)]
     Plugins(cmd::plugins::Commands),
+    #[command(flatten)]
+    Wire(cmd::wire::Commands),
 }
 
 fn main() -> Result<()> {
@@ -42,5 +44,6 @@ fn main() -> Result<()> {
         Cmd::Community(c) => cmd::community::run(c),
         Cmd::Dev(c) => cmd::dev::run(c),
         Cmd::Plugins(c) => cmd::plugins::run(c),
+        Cmd::Wire(c) => cmd::wire::run(c),
     }
 }

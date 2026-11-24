@@ -15,6 +15,8 @@ path = "src/main.rs"
 
 [dependencies]
 rekindle-plugin-host = { workspace = true }
+rekindle-wire = { workspace = true }
+rekindle-wire-inject = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true }
 serde = { workspace = true }

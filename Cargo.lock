@@ -2865,6 +2865,8 @@ dependencies = [
  "anyhow",
  "clap",
  "rekindle-plugin-host",
+ "rekindle-wire",
+ "rekindle-wire-inject",
  "serde",
  "serde_json",
  "tiny_http",
