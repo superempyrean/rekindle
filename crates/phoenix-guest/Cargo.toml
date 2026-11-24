@@ -1,0 +1,39 @@
+[package]
+name = "phoenix-guest"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Loads the guest compiled into Phoenix's Android x86_64 host library on Windows or Linux, with no Android userland, and drives it through the library's C platform API."
+publish = false
+
+[lib]
+name = "phoenix_guest"
+path = "src/lib.rs"
+
+[[bin]]
+name = "guest-headless"
+path = "src/bin/guest-headless.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+# The driver's capture of the render turns, in the wire capture format.
+rekindle-wire = { path = "../wire" }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_Security_Cryptography",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_Kernel",
+    "Win32_System_Memory",
+    "Win32_System_Performance",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2.191"
+
+[lints]
+workspace = true

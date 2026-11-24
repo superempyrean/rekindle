@@ -1,0 +1,78 @@
+[package]
+name = "phoenix-view"
+version = "0.0.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+description = "A platform for Phoenix's real guest: loads the Android x86_64 host library with phoenix-guest, applies its turns to a tree, paints the tree with GPUI, answers its host calls and sends it the window's input."
+publish = false
+
+[[bin]]
+name = "phoenix-view"
+path = "src/main.rs"
+
+[dependencies]
+rekindle-wire = { path = "../../crates/wire" }
+rekindle-wire-inject = { path = "../../crates/wire-inject" }
+# The guest loader, in the root workspace.
+phoenix-guest = { path = "../../crates/phoenix-guest" }
+# Same pins as the workspace root (Zed v1.27.0).
+gpui = { git = "https://github.com/zed-industries/zed", tag = "v1.27.0" }
+gpui_platform = { git = "https://github.com/zed-industries/zed", tag = "v1.27.0" }
+anyhow = "1.0"
+futures = "0.3"
+# The APK's fonts and drawables, read from the user's APK at run time.
+flate2 = "1.1"
+raw-window-handle = "0.6"
+serde_json = "1.0"
+unicode-segmentation = "1.12"
+# `--live`: the guest's HTTP and WebSocket traffic, over rustls (ring,
+# webpki roots), the way the Android platform's Java modules carry it.
+ureq = "3"
+tungstenite = { version = "0.30.0", default-features = false, features = ["handshake"] }
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = "1.0.12"
+# A zstd-stream gateway, inflated with libzstd as the Android platform does
+# through zstd-jni.
+zstd = { version = "0.13", default-features = false }
+# Decoding X-Super-Properties for the log.
+base64 = "0.22.1"
+# Remote images, decoded off the UI thread. gpui's own version.
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
+# The self-test's captures of the window.
+png = "0.18"
+
+[dev-dependencies]
+# The drawable tests render the SVGs as GPUI would.
+resvg = "0.46"
+
+[target.'cfg(windows)'.dependencies]
+# DPAPI for the guest's stored keys, and the system's locale, time zone and
+# memory for DeviceInfo.constants.
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_Globalization",
+    "Win32_Security_Cryptography",
+    "Win32_System_SystemInformation",
+    "Win32_System_Time",
+] }
+
+# This crate's own lint policy. It pulls GPUI, so it does not take the
+# client workspace's `unreachable_pub` lint.
+[lints.rust]
+unsafe_op_in_unsafe_fn = "warn"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+undocumented_unsafe_blocks = "warn"
+cast_possible_truncation = "allow"
+cast_possible_wrap = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
+unreadable_literal = "allow"
+many_single_char_names = "allow"
+similar_names = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
+module_name_repetitions = "allow"
+too_many_lines = "allow"

@@ -8,3 +8,24 @@ node_modules/
 .idea/
 *.swp
 .DS_Store
+
+# phoenix-view and phoenix-guest run against the user's own Discord binary,
+# which is never committed. Guard against staging one by accident. Scoped to
+# these two directories so the example plugins' tracked fonts are untouched.
+/client/phoenix-view/**/*.apk
+/client/phoenix-view/**/*.so
+/client/phoenix-view/**/*.dll
+/client/phoenix-view/**/*.dylib
+/client/phoenix-view/**/*.ttf
+/client/phoenix-view/**/*.otf
+/client/phoenix-view/**/*.woff
+/client/phoenix-view/**/*.woff2
+/client/phoenix-view/**/*.jks
+/client/phoenix-view/**/*.keystore
+/client/phoenix-view/**/*.dmp
+/client/phoenix-view/**/*.dpapi
+/crates/phoenix-guest/**/*.apk
+/crates/phoenix-guest/**/*.so
+/crates/phoenix-guest/**/*.dll
+/crates/phoenix-guest/**/*.dylib
+/crates/phoenix-guest/**/*.dmp

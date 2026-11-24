@@ -12,6 +12,7 @@ members = [
     "crates/hook",
     "crates/wire",
     "crates/wire-inject",
+    "crates/phoenix-guest",
     "crates/install",
     "crates/release",
     "crates/launcher",

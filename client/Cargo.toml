@@ -11,6 +11,11 @@
 #    framework layer, driven by recovered layout.
 #  - `native/`: rekindle's UI as real GPUI elements, built by calling the
 #    client's own compiled gpui.
+#
+# `phoenix-view/` (bin) is the exception: a standalone GPUI app that loads
+# Phoenix's real guest with the root workspace's `phoenix-guest` crate and
+# paints its turns. It is the only crate here that links GPUI, so the
+# workspace carries Zed's `async-task` patch for it.
 [workspace]
 resolver = "2"
 members = [
@@ -19,7 +24,13 @@ members = [
     "extension",
     "ui-hook",
     "native",
+    "phoenix-view",
 ]
+
+# gpui's executor is built against Zed's async-task fork, copied from Zed
+# v1.27.0's root Cargo.toml. Only phoenix-view links gpui.
+[patch.crates-io]
+async-task = { git = "https://github.com/zed-industries/async-task.git", rev = "015845a19fc31752c02367567d3b8900a406f9da" }
 
 [workspace.package]
 version = "0.0.0"
@@ -93,6 +104,12 @@ debug = "limited"
 
 [profile.dev.package."*"]
 opt-level = 2
+
+# rekindle-wire lives in the root workspace, outside this one, so `"*"` would
+# otherwise optimize it. phoenix-view builds it unoptimized, as the wire
+# codec stands in for the client's own gpui-native code.
+[profile.dev.package.rekindle-wire]
+opt-level = 0
 
 [profile.release]
 debug = "limited"

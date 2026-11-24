@@ -1,13 +1,14 @@
 # Tests and lints both workspaces. The root workspace runs on Linux on every
 # push to main and every pull request; a Linux runner minute is cheaper and
 # builds are faster. The Windows job builds and lints the client workspace
-# and tests the launcher, the root workspace's one Windows-only crate. A
-# Windows minute counts double against the Actions quota of a private
-# repository, so there that job runs on pull requests and on demand. While
-# the repository is public, Actions minutes are free and it runs on every
-# push too. The client's
-# live self-test runs against the mock client, which isn't in this
-# repository.
+# and tests the launcher, the hook crate and phoenix-guest, the root
+# workspace's Windows-only crates. A Windows minute counts double against the
+# Actions quota of a private repository, so there that job runs on pull
+# requests and on demand. While the repository is public, Actions minutes are
+# free and it runs on every push too. The Windows job also builds and tests
+# phoenix-view, the GPUI app that runs Phoenix's real guest; its APK-backed
+# tests skip without a Discord build, which CI doesn't have. The client's
+# live self-test runs against the mock client, which isn't in this repository.
 
 name: CI
 
@@ -76,10 +77,15 @@ jobs:
         run: cargo build --workspace --locked
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      # The launcher and the hook crate's Windows paths, which the Linux job
-      # doesn't compile.
-      - name: Launcher and hook on Windows
+      # phoenix-view links GPUI and is the one crate here built and tested on
+      # every run. Its tests skip the APK-backed ones unless a Discord build
+      # is present, which it isn't in CI, so they check the rest.
+      - name: Test phoenix-view
+        run: cargo test -p phoenix-view --locked
+      # The launcher, the hook crate and phoenix-guest have Windows paths the
+      # Linux root job doesn't compile.
+      - name: Windows-only crates in the root workspace
         working-directory: .
         run: |
-          cargo clippy -p rekindle-launcher -p rekindle-hook --all-targets --locked -- -D warnings
-          cargo test -p rekindle-launcher -p rekindle-hook --locked
+          cargo clippy -p rekindle-launcher -p rekindle-hook -p phoenix-guest --all-targets --locked -- -D warnings
+          cargo test -p rekindle-launcher -p rekindle-hook -p phoenix-guest --locked
