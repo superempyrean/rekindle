@@ -657,3 +657,73 @@ fn the_developer_tab_reloads_shows_logs_and_runs_console_actions() {
     assert!(!m.console_open());
     assert!(!lines(&m).iter().any(|l| l.contains("console-input")));
 }
+
+#[test]
+fn the_menu_opens_a_list_of_plugins_or_themes_and_back_returns() {
+    let dir = scratch("lists");
+    let project = Keypair::generate("Project").unwrap();
+    let home =
+        Home::new(dir.join("home")).with_trust(TrustContext::with_keys(vec![project.public()]));
+    let install = |wasm: Vec<u8>| {
+        let sig = project.sign_plugin(&wasm);
+        home.install(&wasm, Some(&sig)).unwrap();
+    };
+    // Midnight sets colours, so it is a theme. Without theming, it isn't.
+    install(midnight_at("1.0.0", |_| {}));
+    install(midnight_at("1.0.0", |m| {
+        m.id = "dev.example.plain".into();
+        m.name = "Plain".into();
+        m.capabilities.retain(|c| *c != Capability::Theming);
+    }));
+    home.set_enabled("dev.example.plain", true).unwrap();
+    let mut m = Manager::new(home.clone());
+
+    let menu = m.menu();
+    let Element::Cards { cards } = &menu.elements[0] else {
+        panic!("{:?}", menu.elements)
+    };
+    let rows: Vec<(&str, &str)> = cards
+        .iter()
+        .map(|c| (c.id.as_str(), c.meta.as_str()))
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            ("list:plugins", "1 installed, 1 on"),
+            ("list:themes", "1 installed, 0 on")
+        ]
+    );
+    assert!(matches!(
+        &menu.elements[1],
+        Element::Toggle { id, value: false, .. } if id == "developer-mode"
+    ));
+
+    click(&mut m, "list:themes");
+    assert!(has(&m, "Themes") && has(&m, &format!("[open:{}]", id())));
+    assert!(!has(&m, "[open:dev.example.plain]"), "{:?}", shown(&m));
+    // A page opened from a list goes back to it, and the list to the grid.
+    click(&mut m, &format!("open:{}", id()));
+    assert!(has(&m, &format!("[on:{}=false]", id())));
+    click(&mut m, "back");
+    assert!(has(&m, &format!("[open:{}]", id())) && has(&m, "Themes"));
+    click(&mut m, "back");
+    assert!(has(&m, "[tab=0]"), "{:?}", shown(&m));
+    click(&mut m, "list:plugins");
+    assert!(has(&m, "[open:dev.example.plain]") && !has(&m, &format!("[open:{}]", id())));
+    // Turning one off from the list keeps the list open.
+    click(&mut m, "disable:dev.example.plain");
+    assert!(has(&m, "1 installed, 0 on"), "{:?}", shown(&m));
+    assert!(click(&mut m, "list:nothing").is_empty());
+    assert!(has(&m, "no list `nothing`"));
+
+    // The menu's switch asks before turning developer mode on.
+    toggle(&mut m, "developer-mode", true);
+    assert!(has(&m, "Turn on developer mode?"), "{:?}", shown(&m));
+    assert!(!home.developer_mode().unwrap());
+    home.set_developer_mode(true).unwrap();
+    assert_eq!(
+        toggle(&mut m, "developer-mode", false),
+        vec![Effect::SyncAll]
+    );
+    assert!(!home.developer_mode().unwrap());
+}

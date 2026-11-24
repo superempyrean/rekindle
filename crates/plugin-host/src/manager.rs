@@ -21,6 +21,12 @@
 //!
 //! With developer mode on, a Developer tab adds a Reload button for each
 //! plugin, the plugins' log, and a [`console`].
+//!
+//! A client with room for one page at a time (a phone's settings screen)
+//! starts from [`Manager::menu`] instead of the grid: a row for the plugins,
+//! one for the themes, and the developer-mode switch. Each row opens a
+//! [`List`] of installed plugins, whose cards open the plugin's page, and
+//! `back` goes from the page to its list and from the list to the menu.
 
 pub mod console;
 
@@ -28,7 +34,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 
-use crate::capability::Trust;
+use crate::capability::{Capability, Trust};
 use crate::home::{DEVELOPER_MODE_WARNING, Home, InstallRecord, InstallState, Installed};
 use crate::manifest::{self, Manifest};
 use crate::model::{
@@ -122,9 +128,52 @@ const TABS: [(Tab, &str); 4] = [
 /// How many log records the Developer tab shows.
 const CONSOLE_ROWS: usize = 200;
 
+/// The installed plugins, split the way a client with one page at a time
+/// lists them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum List {
+    Plugins,
+    /// Theme files, and plugins that change how the client looks.
+    Themes,
+}
+
+impl List {
+    pub const ALL: [List; 2] = [List::Plugins, List::Themes];
+
+    /// The list an installed plugin is in.
+    pub fn of(inst: &Installed) -> List {
+        let theme = inst
+            .manifest
+            .as_ref()
+            .is_some_and(|m| m.theme || m.requests(Capability::Theming));
+        if theme { List::Themes } else { List::Plugins }
+    }
+
+    /// Its id in the `list:<id>` control.
+    pub fn id(self) -> &'static str {
+        match self {
+            List::Plugins => "plugins",
+            List::Themes => "themes",
+        }
+    }
+
+    pub fn title(self) -> &'static str {
+        match self {
+            List::Plugins => "Plugins",
+            List::Themes => "Themes",
+        }
+    }
+
+    fn parse(id: &str) -> Option<List> {
+        List::ALL.into_iter().find(|l| l.id() == id)
+    }
+}
+
 enum View {
     /// The cards of the current tab.
     Grid,
+    /// The installed plugins of one list.
+    List(List),
     /// One plugin's page, by id: installed, loaded from a file, or listed
     /// in the channel.
     Detail(String),
@@ -141,6 +190,8 @@ pub struct Manager {
     home: Home,
     view: View,
     tab: Tab,
+    /// The list the open page was reached from, which `back` returns to.
+    list: Option<List>,
     notice: Option<String>,
     /// Bumped each time the confirmation field is shown, so it starts empty.
     field: u32,
@@ -204,6 +255,7 @@ impl Manager {
             home,
             view: View::Grid,
             tab: Tab::Installed,
+            list: None,
             notice: None,
             field: 0,
             typed: String::new(),
@@ -305,6 +357,7 @@ impl Manager {
                     Tab::Settings => self.settings(&mut el),
                 }
             }
+            View::List(list) => self.list_view(*list, &mut el),
             View::Detail(id) => self.detail(id, dev, &mut el),
             View::DeveloperMode => {
                 el.push(Element::Heading {
@@ -344,6 +397,43 @@ impl Manager {
             id: PANEL.into(),
             title: "rekindle".into(),
             elements: el,
+        }
+    }
+
+    /// The top of the panel, for a client that shows the panel a page at a
+    /// time: a card for each [`List`], saying how many of its plugins are
+    /// installed and on, and the developer-mode switch. A card's id is
+    /// `list:<id>`, which opens the list, and the switch is
+    /// `developer-mode`. Pages opened from here are [`Manager::panel`]'s.
+    pub fn menu(&self) -> Panel {
+        let installed = self.home.installed().unwrap_or_default();
+        let cards = List::ALL
+            .into_iter()
+            .map(|list| {
+                let of: Vec<&Installed> =
+                    installed.iter().filter(|i| List::of(i) == list).collect();
+                let on = of.iter().filter(|i| i.is_ready()).count();
+                Card {
+                    id: format!("list:{}", list.id()),
+                    title: list.title().into(),
+                    meta: format!("{} installed, {on} on", of.len()),
+                    text: String::new(),
+                    state: String::new(),
+                    action: None,
+                }
+            })
+            .collect();
+        Panel {
+            id: PANEL.into(),
+            title: "rekindle".into(),
+            elements: vec![
+                Element::Cards { cards },
+                Element::Toggle {
+                    id: "developer-mode".into(),
+                    label: "Developer Mode".into(),
+                    value: self.home.developer_mode().unwrap_or(false),
+                },
+            ],
         }
     }
 
@@ -471,32 +561,7 @@ impl Manager {
             ));
             return;
         }
-        let mut cards = Vec::new();
-        for inst in &installed {
-            let id = &inst.id;
-            let version = inst.manifest.as_ref().map_or("?", |m| m.version.as_str());
-            let description = inst
-                .manifest
-                .as_ref()
-                .map_or("", |m| m.description.as_str());
-            let (state, action) = match &inst.state {
-                InstallState::Ready => ("On", Some((format!("disable:{id}"), "Turn off"))),
-                InstallState::Off => ("Off", Some((format!("enable:{id}"), "Turn on"))),
-                InstallState::NeedsReview(_) => ("Needs a review", None),
-                InstallState::DeveloperModeOff => ("Off: developer mode is off", None),
-                InstallState::Refused(_) => ("Can't be loaded", None),
-                InstallState::Blocked(_) => ("Turned off by rekindle", None),
-            };
-            let mut state = state.to_string();
-            if self.missing_of(id).is_some() {
-                state.push_str(" · some features unavailable");
-            }
-            if self.reviews.iter().any(|(r, _)| r == id) {
-                state.push_str(" · update to review");
-            }
-            let meta = format!("{version} · {}", tag(inst.trust.as_ref().map(|t| t.trust)));
-            cards.push(card(id, &name_of(inst), meta, description, &state, action));
-        }
+        let mut cards: Vec<Card> = installed.iter().map(|i| self.installed_card(i)).collect();
         for d in dev {
             let (state, action) = if d.on {
                 ("On", (format!("dev-off:{}", d.id), "Turn off"))
@@ -517,6 +582,61 @@ impl Manager {
                 Some(action),
             ));
         }
+        el.push(Element::Cards { cards });
+    }
+
+    /// An installed plugin's card: its state, and a button that turns it on
+    /// or off when it can be.
+    fn installed_card(&self, inst: &Installed) -> Card {
+        let id = &inst.id;
+        let version = inst.manifest.as_ref().map_or("?", |m| m.version.as_str());
+        let description = inst
+            .manifest
+            .as_ref()
+            .map_or("", |m| m.description.as_str());
+        let (state, action) = match &inst.state {
+            InstallState::Ready => ("On", Some((format!("disable:{id}"), "Turn off"))),
+            InstallState::Off => ("Off", Some((format!("enable:{id}"), "Turn on"))),
+            InstallState::NeedsReview(_) => ("Needs a review", None),
+            InstallState::DeveloperModeOff => ("Off: developer mode is off", None),
+            InstallState::Refused(_) => ("Can't be loaded", None),
+            InstallState::Blocked(_) => ("Turned off by rekindle", None),
+        };
+        let mut state = state.to_string();
+        if self.missing_of(id).is_some() {
+            state.push_str(" · some features unavailable");
+        }
+        if self.reviews.iter().any(|(r, _)| r == id) {
+            state.push_str(" · update to review");
+        }
+        let meta = format!("{version} · {}", tag(inst.trust.as_ref().map(|t| t.trust)));
+        card(id, &name_of(inst), meta, description, &state, action)
+    }
+
+    /// One [`List`]: a header with a back button, then its plugins' cards.
+    fn list_view(&self, list: List, el: &mut Vec<Element>) {
+        let installed: Vec<Installed> = self
+            .home
+            .installed()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|i| List::of(i) == list)
+            .collect();
+        let on = installed.iter().filter(|i| i.is_ready()).count();
+        el.push(header(
+            list.title().into(),
+            format!("{} installed, {on} on", installed.len()),
+            None,
+            None,
+        ));
+        if installed.is_empty() {
+            el.push(text(match list {
+                List::Plugins => "No plugins installed.",
+                List::Themes => "No themes installed.",
+            }));
+            return;
+        }
+        let cards = installed.iter().map(|i| self.installed_card(i)).collect();
         el.push(Element::Cards { cards });
     }
 
@@ -858,10 +978,17 @@ impl Manager {
 
     fn act(&mut self, element: &str, value: &UiValue) -> Result<Vec<Effect>> {
         let on = matches!(value, UiValue::Toggled(true));
+        // The menu's switch does what the Settings tab's buttons do.
+        let element = match element {
+            "developer-mode" if on => "developer-mode-on",
+            "developer-mode" => "developer-mode-off",
+            e => e,
+        };
         if let ("tab", UiValue::Selected(i)) = (element, value) {
             let (tab, _) = *self.tabs().get(*i as usize).context("no such tab")?;
             self.tab = tab;
             self.view = View::Grid;
+            self.list = None;
             return Ok(Vec::new());
         }
         // Plugin ids have no colon.
@@ -872,7 +999,7 @@ impl Manager {
             "install" => Ok(vec![Effect::PickFile]),
             "console-run" | "console-clear" => self.console_control(element),
             "back" => {
-                self.view = View::Grid;
+                self.back();
                 Ok(Vec::new())
             }
             "check-updates" => {
@@ -929,6 +1056,7 @@ impl Manager {
                     bail!("nothing to remove")
                 };
                 self.tab = Tab::Installed;
+                self.view = self.list.map_or(View::Grid, View::List);
                 self.home.uninstall(&id, element == "remove-purge")?;
                 self.reviews.retain(|(r, _)| *r != id);
                 self.notice = Some(format!("Removed {name}."));
@@ -941,14 +1069,26 @@ impl Manager {
                     self.home.discard_review(&p.screen.manifest.id);
                     self.reviews.retain(|(id, _)| *id != p.screen.manifest.id);
                 }
-                // Back to the plugin's page from its removal, else the grid.
+                // Back to the plugin's page from its removal, else to the
+                // list or the grid.
                 self.view = match std::mem::replace(&mut self.view, View::Grid) {
                     View::Remove { id, .. } => View::Detail(id),
-                    _ => View::Grid,
+                    _ => self.list.map_or(View::Grid, View::List),
                 };
                 Ok(Vec::new())
             }
             other => bail!("unknown control `{other}`"),
+        }
+    }
+
+    /// From a plugin's page to the list it was opened from, else to the
+    /// grid.
+    fn back(&mut self) {
+        if let (View::Detail(_), Some(list)) = (&self.view, self.list) {
+            self.view = View::List(list);
+        } else {
+            self.list = None;
+            self.view = View::Grid;
         }
     }
 
@@ -959,6 +1099,12 @@ impl Manager {
         match action {
             "open" => {
                 self.view = View::Detail(id.into());
+                Ok(Vec::new())
+            }
+            "list" => {
+                let list = List::parse(id).with_context(|| format!("no list `{id}`"))?;
+                self.list = Some(list);
+                self.view = View::List(list);
                 Ok(Vec::new())
             }
             // A card's buttons do what the switch on the plugin's page does.
