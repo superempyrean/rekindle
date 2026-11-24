@@ -86,9 +86,26 @@ pub(crate) fn guest_call(f: usize, a: [u64; 4]) -> u64 {
 /// Calls a function of the library with up to six integer and eight `f32`
 /// arguments, which fill separate registers.
 pub(crate) fn guest_call_f(f: usize, a: [u64; 6], x: [f32; 8]) -> u64 {
-    type F = extern "sysv64" fn(u64, u64, u64, u64, u64, u64, f32, f32, f32, f32, f32, f32, f32, f32) -> u64;
+    type F = extern "sysv64" fn(
+        u64,
+        u64,
+        u64,
+        u64,
+        u64,
+        u64,
+        f32,
+        f32,
+        f32,
+        f32,
+        f32,
+        f32,
+        f32,
+        f32,
+    ) -> u64;
     let f: F = unsafe { std::mem::transmute(f) };
-    f(a[0], a[1], a[2], a[3], a[4], a[5], x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7])
+    f(
+        a[0], a[1], a[2], a[3], a[4], a[5], x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7],
+    )
 }
 
 // ---------- faults ----------

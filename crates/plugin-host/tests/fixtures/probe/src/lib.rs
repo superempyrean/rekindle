@@ -156,7 +156,10 @@ impl Plugin for Probe {
     }
 
     fn on_response(&mut self, res: &events::HttpResponse) -> events::ResponseVerdict {
-        info!("response {} {} {} {}", res.method, res.path, res.status, res.id);
+        info!(
+            "response {} {} {} {}",
+            res.method, res.path, res.status, res.id
+        );
         match &res.body {
             Some(b) if res.method == "GET" && b.contains("secret") => {
                 events::ResponseVerdict::Replace("[]".into())

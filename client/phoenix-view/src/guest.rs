@@ -589,7 +589,9 @@ impl Platform {
         if pressed.elapsed() > Duration::from_secs(3) {
             return None;
         }
-        let Value::Object(fields) = record else { return None };
+        let Value::Object(fields) = record else {
+            return None;
+        };
         let url = fields.iter().find_map(|(p, v)| match v {
             Value::Str(s) if *p == atom::URL => Some(s.clone()),
             _ => None,

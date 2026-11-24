@@ -388,13 +388,26 @@ fn frame_summary(costs: &[crate::view::FrameCost]) -> String {
         v.sort_by(f64::total_cmp);
         let mean = v.iter().sum::<f64>() / v.len() as f64;
         let pct = |p: f64| v[((v.len() - 1) as f64 * p).round() as usize];
-        format!("mean {mean:.1}, median {:.1}, p95 {:.1}, max {:.1}", pct(0.5), pct(0.95), pct(1.))
+        format!(
+            "mean {mean:.1}, median {:.1}, p95 {:.1}, max {:.1}",
+            pct(0.5),
+            pct(0.95),
+            pct(1.)
+        )
     };
     let nodes = costs.iter().map(|c| c.nodes).sum::<usize>() / costs.len();
     let span = costs.last().unwrap().at - costs[0].at;
-    let fps = if span > 0. { (costs.len() - 1) as f64 * 1000. / span } else { 0. };
+    let fps = if span > 0. {
+        (costs.len() - 1) as f64 * 1000. / span
+    } else {
+        0.
+    };
     let gaps: Vec<f64> = costs.windows(2).map(|w| w[1].at - w[0].at).collect();
-    let gaps = if gaps.is_empty() { "none".into() } else { stats(gaps) };
+    let gaps = if gaps.is_empty() {
+        "none".into()
+    } else {
+        stats(gaps)
+    };
     format!(
         "{} frames of motion over {span:.0} ms, {fps:.0} fps; between frames {gaps}; render {}; frame {}; {nodes} nodes built a frame",
         costs.len(),
@@ -506,10 +519,17 @@ fn tick(
             // library's motion engine runs: it writes the button's
             // Background from the worklet's own colours.
             let m = &v.motion;
-            let wrote = m.seen.contains(&(run.login, crate::motion::channel::BACKGROUND));
+            let wrote = m
+                .seen
+                .contains(&(run.login, crate::motion::channel::BACKGROUND));
             let line = format!(
                 "motion: {} worklet cells, {} viewMotion cells, {} ticks, {} channel writes, {} op 8 events; the press on #{} wrote its Background: {wrote}",
-                m.counts.worklets, m.counts.view_motions, m.counts.ticks, m.counts.writes, m.counts.events, run.login
+                m.counts.worklets,
+                m.counts.view_motions,
+                m.counts.ticks,
+                m.counts.writes,
+                m.counts.events,
+                run.login
             );
             if wrote && m.counts.ticks > 0 {
                 run.pass.push(line);

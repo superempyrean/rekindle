@@ -71,7 +71,10 @@ pub enum Align {
     End,
     /// The least scroll that shows the whole row, `offset` dp clear of the
     /// start and `end_offset` of the end.
-    Visible { end_offset: f32, top_only: bool },
+    Visible {
+        end_offset: f32,
+        top_only: bool,
+    },
 }
 
 /// A guest's `ScrollTo` (op 7) on a list: an adapter position and where
@@ -157,9 +160,7 @@ impl Port {
     /// placeholders the content holds on each side.
     pub fn placeholders(&self, rows: usize) -> (i32, i32) {
         let before = self.first.max(0);
-        let after = self
-            .count
-            .map_or(0, |c| (c - before - rows as i32).max(0));
+        let after = self.count.map_or(0, |c| (c - before - rows as i32).max(0));
         (before, after)
     }
 
@@ -213,7 +214,8 @@ impl Port {
             }
         }
         // And after them.
-        if let (Some(count), Some(last_row)) = (self.count, self.laid.iter().map(|l| l.index).max()) {
+        if let (Some(count), Some(last_row)) = (self.count, self.laid.iter().map(|l| l.index).max())
+        {
             let next = self.first + last_row as i32 + 1;
             if next < count {
                 let (s0, _) = self.span(next)?;
@@ -241,7 +243,10 @@ impl Port {
             Align::Start => s - self.pad.0 + r.offset,
             Align::Center => s - (h / 2. - l / 2. - r.offset),
             Align::End => s - (h - self.pad.1 - l),
-            Align::Visible { end_offset, top_only } => {
+            Align::Visible {
+                end_offset,
+                top_only,
+            } => {
                 let (top, bottom) = (s - pos, s + l - pos);
                 let edge = if top_only { top } else { bottom };
                 if top < r.offset || edge > h - end_offset {
@@ -295,20 +300,32 @@ impl Port {
 
         // A list at its end stays there while nothing moves it away;
         // otherwise the anchor row keeps its place on screen.
-        let follow = self.stick && self.stuck && self.scroller.pos >= old_max - AT_END && !self.scroller.moving();
+        let follow = self.stick
+            && self.stuck
+            && self.scroller.pos >= old_max - AT_END
+            && !self.scroller.moving();
         self.shifted = 0.;
         let before = self.scroller.pos;
         if follow {
             self.scroller.pos = max;
         } else if let Some((node, d)) = self.anchors.iter().find_map(|(node, was)| {
-            self.laid.iter().find(|l| l.node == *node).map(|l| (*node, l.start - was))
+            self.laid
+                .iter()
+                .find(|l| l.node == *node)
+                .map(|l| (*node, l.start - was))
         }) {
             if d != 0. {
                 self.shifted = d;
                 self.scroller.shift(d);
             }
             if logging() && d.abs() > 0.01 {
-                crate::guest::log(&format!("[scroll] shift {d:.1} by #{node}: pos {before:.1} -> {:.1}, max {old_max:.1} -> {max:.1}, first {}, rows {}, est {:.1}", self.scroller.pos, self.first, self.laid.len(), self.est));
+                crate::guest::log(&format!(
+                    "[scroll] shift {d:.1} by #{node}: pos {before:.1} -> {:.1}, max {old_max:.1} -> {max:.1}, first {}, rows {}, est {:.1}",
+                    self.scroller.pos,
+                    self.first,
+                    self.laid.len(),
+                    self.est
+                ));
             }
         } else if let Some((p, was, epoch)) = self.anchor_at.filter(|a| a.2 == self.epoch)
             && let Some((start, _)) = self.span(p)
@@ -319,7 +336,13 @@ impl Port {
                 self.scroller.shift(d);
             }
             if logging() {
-                crate::guest::log(&format!("[scroll] no row left of {:?}; shift {d:.1} by position {p} (epoch {epoch}): pos {before:.1} -> {:.1}, first {}, rows {}", self.anchors.iter().map(|a| a.0).collect::<Vec<_>>(), self.scroller.pos, self.first, self.laid.len()));
+                crate::guest::log(&format!(
+                    "[scroll] no row left of {:?}; shift {d:.1} by position {p} (epoch {epoch}): pos {before:.1} -> {:.1}, first {}, rows {}",
+                    self.anchors.iter().map(|a| a.0).collect::<Vec<_>>(),
+                    self.scroller.pos,
+                    self.first,
+                    self.laid.len()
+                ));
             }
         }
         for r in std::mem::take(&mut self.requests) {
@@ -361,7 +384,9 @@ impl Port {
             shown.reverse();
         }
         self.anchors = shown;
-        self.anchor_at = self.shown().and_then(|(p, _)| Some((p, self.span(p)?.0, self.epoch)));
+        self.anchor_at = self
+            .shown()
+            .and_then(|(p, _)| Some((p, self.span(p)?.0, self.epoch)));
         -pos + self.scroller.stretch()
     }
 }
@@ -486,7 +511,10 @@ impl Element for RowProbe {
         cx: &mut App,
     ) -> (LayoutId, ()) {
         let id = self.child.request_layout(window, cx);
-        self.port.borrow_mut().probes.push((self.index, self.node, id));
+        self.port
+            .borrow_mut()
+            .probes
+            .push((self.index, self.node, id));
         (id, ())
     }
 

@@ -54,7 +54,9 @@ impl NavAnim {
             "nativeFade" => (150.0, accelerate_decelerate),
             // Toward the pushed panel 250 ms, back 200, along (0.4, 0,
             // 0.2, 1).
-            "panels" => (if self.push { 250.0 } else { 200.0 }, |t| cubic(0.4, 0.0, 0.2, 1.0, t)),
+            "panels" => (if self.push { 250.0 } else { 200.0 }, |t| {
+                cubic(0.4, 0.0, 0.2, 1.0, t)
+            }),
             _ => (0.0, |t| t),
         }
     }
@@ -68,7 +70,11 @@ impl NavAnim {
     pub fn places(&self, from_first: bool, w: f32, h: f32) -> Vec<Place> {
         let (ms, interp) = self.timing();
         let l = self.start.elapsed().as_secs_f32() * 1000.0;
-        let g = if ms <= 0.0 { 1.0 } else { interp((l / ms).clamp(0.0, 1.0)) };
+        let g = if ms <= 0.0 {
+            1.0
+        } else {
+            interp((l / ms).clamp(0.0, 1.0))
+        };
         let mut from = Place {
             node: self.from,
             tx: 0.0,
@@ -108,7 +114,11 @@ impl NavAnim {
             }
             _ => {}
         }
-        if from_first { vec![from, to] } else { vec![to, from] }
+        if from_first {
+            vec![from, to]
+        } else {
+            vec![to, from]
+        }
     }
 }
 
@@ -117,9 +127,15 @@ impl NavAnim {
 /// and (0.25, 1).
 fn emphasized(t: f32) -> f32 {
     if t <= 0.166_666 {
-        segment([(0.0, 0.0), (0.05, 0.0), (0.133_333, 0.06), (0.166_666, 0.4)], t)
+        segment(
+            [(0.0, 0.0), (0.05, 0.0), (0.133_333, 0.06), (0.166_666, 0.4)],
+            t,
+        )
     } else {
-        segment([(0.166_666, 0.4), (0.208_333, 0.82), (0.25, 1.0), (1.0, 1.0)], t)
+        segment(
+            [(0.166_666, 0.4), (0.208_333, 0.82), (0.25, 1.0), (1.0, 1.0)],
+            t,
+        )
     }
 }
 
@@ -159,7 +175,9 @@ mod tests {
 
     #[test]
     fn interpolators_run_from_zero_to_one() {
-        for f in [emphasized, accelerate_decelerate, |t| cubic(0.0, 0.0, 0.2, 1.0, t)] {
+        for f in [emphasized, accelerate_decelerate, |t| {
+            cubic(0.0, 0.0, 0.2, 1.0, t)
+        }] {
             assert!(f(0.0).abs() < 1e-3);
             assert!((f(1.0) - 1.0).abs() < 1e-3);
             let mut last = -1.0;
@@ -179,7 +197,15 @@ mod tests {
         a.start -= std::time::Duration::from_millis(1000);
         assert!(a.done());
         let p = a.places(true, 400.0, 800.0);
-        assert_eq!(p[1], Place { node: 2, tx: 0.0, ty: 0.0, alpha: 1.0 });
+        assert_eq!(
+            p[1],
+            Place {
+                node: 2,
+                tx: 0.0,
+                ty: 0.0,
+                alpha: 1.0
+            }
+        );
         assert!((p[0].tx + 120.0).abs() < 1e-3);
     }
 }

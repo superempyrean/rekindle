@@ -654,7 +654,11 @@ impl PhoenixView {
     /// itself.
     fn pressed_views(&self, id: NodeId) -> Vec<NodeId> {
         let mut out = vec![id];
-        let mut stack: Vec<NodeId> = self.tree.node(id).map(|n| n.children.clone()).unwrap_or_default();
+        let mut stack: Vec<NodeId> = self
+            .tree
+            .node(id)
+            .map(|n| n.children.clone())
+            .unwrap_or_default();
         while let Some(n) = stack.pop() {
             if self.listens(n, "press") {
                 continue;
@@ -698,7 +702,8 @@ impl PhoenixView {
         }
         for (id, port) in &self.ports {
             let port = port.borrow();
-            self.motion.scrolled(*id, port.horizontal, port.scroller.pos);
+            self.motion
+                .scrolled(*id, port.horizontal, port.scroller.pos);
         }
         let ticked = std::mem::take(&mut self.motion_ticked);
         if self.motion.due() && !ticked {
@@ -814,13 +819,21 @@ impl PhoenixView {
                 continue;
             };
             // The spaces' width, or the image's if they wrapped.
-            let w = if b.y == a.y { f32::from(b.x - a.x) } else { img.size };
+            let w = if b.y == a.y {
+                f32::from(b.x - a.x)
+            } else {
+                img.size
+            };
             let x = f32::from(a.x - origin.x) + (w - img.size).max(0.) / 2.;
             let y = f32::from(a.y - origin.y) + (line - img.size) / 2.;
-            let Some(source) = self.image(id, &img.uri, img.tint, Some((img.size, img.size)), scale) else {
+            let Some(source) =
+                self.image(id, &img.uri, img.tint, Some((img.size, img.size)), scale)
+            else {
                 continue;
             };
-            let mut i = img_el(source).size(px(img.size)).object_fit(ObjectFit::Contain);
+            let mut i = img_el(source)
+                .size(px(img.size))
+                .object_fit(ObjectFit::Contain);
             if img.radius > 0. {
                 i = i.rounded(px(img.radius));
             }
@@ -842,7 +855,10 @@ impl PhoenixView {
     /// open right after it counts as the user's.
     pub fn link_press(&mut self, id: NodeId, link: &str) {
         crate::guest::log(&format!("[view] link {link:?} pressed on #{id}"));
-        let fields = vec![(PropId::from_name("url").unwrap(), Value::Str(link.to_string()))];
+        let fields = vec![(
+            PropId::from_name("url").unwrap(),
+            Value::Str(link.to_string()),
+        )];
         if self.node_event(id, "linkPress", Value::Object(fields)) {
             crate::guest::log(&format!("[view] linkPress on #{id}: link {link:?}"));
             if let Some(g) = &self.guest {
@@ -855,7 +871,9 @@ impl PhoenixView {
     /// the snapshot run dispatches: the middle of its first glyph run.
     pub fn link_point(&self, text: &str) -> Option<gpui::Point<Pixels>> {
         for (id, layout) in &self.text_layouts {
-            let Some(v) = self.tree.props().get(*id, ids().spans) else { continue };
+            let Some(v) = self.tree.props().get(*id, ids().spans) else {
+                continue;
+            };
             let mut at = 0;
             for sp in spans(v) {
                 let len = if sp.image.is_some() { 0 } else { sp.text.len() };
@@ -891,7 +909,9 @@ impl PhoenixView {
             })
             .collect();
         for id in listening {
-            let Some(b) = self.hits.borrow().get(&id).copied() else { continue };
+            let Some(b) = self.hits.borrow().get(&id).copied() else {
+                continue;
+            };
             let size = (f32::from(b.size.width), f32::from(b.size.height));
             if self.layouts_sent.get(&id) == Some(&size) {
                 continue;
@@ -961,7 +981,9 @@ impl PhoenixView {
                         (p("screenEnd"), Value::I32(end)),
                     ];
                     fields.sort_by_key(|(p, _)| p.0);
-                    crate::guest::log(&format!("[view] list #{id}: range {start}..{end} of {count}, epoch {epoch}"));
+                    crate::guest::log(&format!(
+                        "[view] list #{id}: range {start}..{end} of {count}, epoch {epoch}"
+                    ));
                     self.node_event(id, "range", Value::Object(fields));
                 }
             }
@@ -1233,14 +1255,17 @@ impl PhoenixView {
         {
             let push = b > a;
             let top = if push { current } else { prev };
-            let text = |n: NodeId, name: &str| match props.get(n, PropId::from_name(name).unwrap()) {
+            let text = |n: NodeId, name: &str| match props.get(n, PropId::from_name(name).unwrap())
+            {
                 Some(Value::Str(s)) => Some(s.clone()),
                 _ => None,
             };
             let presentation = text(top, "presentation");
             let kind = match presentation.as_deref() {
                 Some("modal" | "transparentModal") => "modal".to_string(),
-                _ if props.get(top, PropId::from_name("panelBack").unwrap()) == Some(&Value::Bool(true)) => {
+                _ if props.get(top, PropId::from_name("panelBack").unwrap())
+                    == Some(&Value::Bool(true)) =>
+                {
                     "panels".to_string()
                 }
                 Some("card") => "card".to_string(),
@@ -1250,7 +1275,8 @@ impl PhoenixView {
                 "[view] navigator #{id}: {kind} {} from #{prev} to #{current}",
                 if push { "push" } else { "pop" }
             ));
-            self.nav_anims.insert(id, NavAnim::new(prev, current, push, kind));
+            self.nav_anims
+                .insert(id, NavAnim::new(prev, current, push, kind));
         }
         let Some(anim) = self.nav_anims.get(&id) else {
             return vec![still(current)];
@@ -1300,7 +1326,12 @@ impl PhoenixView {
             // worklets move them.
             Some(n) if layers && self.motion.running() => n.children.clone(),
             Some(n) if layers => {
-                let shown: Vec<NodeId> = n.children.iter().copied().filter(|c| !put_away(*c)).collect();
+                let shown: Vec<NodeId> = n
+                    .children
+                    .iter()
+                    .copied()
+                    .filter(|c| !put_away(*c))
+                    .collect();
                 if shown.is_empty() {
                     self.navigator_child(id).into_iter().collect()
                 } else {
@@ -1781,22 +1812,34 @@ impl PhoenixView {
         } else if let (Some(r), Some(Value::Bool(true))) = (num(get(p.radius)), get(p.clip)) {
             let row = text(p.direction).as_deref() == Some("row");
             let (start, end) = if row {
-                ([Some(r), None, None, Some(r)], [None, Some(r), Some(r), None])
+                (
+                    [Some(r), None, None, Some(r)],
+                    [None, Some(r), Some(r), None],
+                )
             } else {
-                ([Some(r), Some(r), None, None], [None, None, Some(r), Some(r)])
+                (
+                    [Some(r), Some(r), None, None],
+                    [None, None, Some(r), Some(r)],
+                )
             };
-            let mut flow: Vec<NodeId> = children.iter().copied().filter(|c| !self.overlays(*c)).collect();
+            let mut flow: Vec<NodeId> = children
+                .iter()
+                .copied()
+                .filter(|c| !self.overlays(*c))
+                .collect();
             // A row's first child that is only a narrow bar of colour (an
             // embed's accent) is drawn as the card's left border, which
             // GPUI curves along the rounded corners as Android's clip
             // curves the bar.
-            if let Some((c, w, colour)) = row.then(|| flow.first().copied()).flatten().and_then(|c| {
-                let props = self.tree.props();
-                let w = num(props.get(c, p.width)).filter(|w| *w <= 8.)?;
-                let colour = props.get(c, p.background).and_then(Value::as_color)?;
-                self.tree.node(c).filter(|n| n.children.is_empty())?;
-                Some((c, w, colour))
-            }) {
+            if let Some((c, w, colour)) =
+                row.then(|| flow.first().copied()).flatten().and_then(|c| {
+                    let props = self.tree.props();
+                    let w = num(props.get(c, p.width)).filter(|w| *w <= 8.)?;
+                    let colour = props.get(c, p.background).and_then(Value::as_color)?;
+                    self.tree.node(c).filter(|n| n.children.is_empty())?;
+                    Some((c, w, colour))
+                })
+            {
                 el.style().border_widths.left = Some(px(w).into());
                 el = el.border_color(argb(colour));
                 self.absorbed.insert(c);
@@ -1840,7 +1883,9 @@ impl PhoenixView {
                     *side = Some(px(w).into());
                 }
             }
-            if let Some(c) = mv(channel::BORDER_COLOR).or(get(p.border_color).and_then(Value::as_color)) {
+            if let Some(c) =
+                mv(channel::BORDER_COLOR).or(get(p.border_color).and_then(Value::as_color))
+            {
                 el = el.border_color(argb(c));
             }
         }
@@ -1860,8 +1905,12 @@ impl PhoenixView {
         // outside the rail, until a server has unread messages.
         // The engine's translation stands over the cell's, as a worklet
         // slides the panels and the rail's selected pill.
-        let tx = mf(channel::TRANSLATE_X).or(num(get(p.translate_x))).unwrap_or(0.);
-        let ty = mf(channel::TRANSLATE_Y).or(num(get(p.translate_y))).unwrap_or(0.);
+        let tx = mf(channel::TRANSLATE_X)
+            .or(num(get(p.translate_x)))
+            .unwrap_or(0.);
+        let ty = mf(channel::TRANSLATE_Y)
+            .or(num(get(p.translate_y)))
+            .unwrap_or(0.);
         if tx != 0. {
             el = el.left(px(tx));
         }
@@ -2054,7 +2103,10 @@ impl PhoenixView {
                         if let Some(r) = radius {
                             i = i.rounded(px(r * factor));
                         }
-                        el.items_center().justify_center().child(i).into_any_element()
+                        el.items_center()
+                            .justify_center()
+                            .child(i)
+                            .into_any_element()
                     }
                     // Still loading or absent: the placeholder circle, as
                     // Android shows it until the image arrives.
@@ -2064,7 +2116,10 @@ impl PhoenixView {
                             if let Some(r) = radius {
                                 i = i.rounded(px(r));
                             }
-                            el.items_center().justify_center().child(i).into_any_element()
+                            el.items_center()
+                                .justify_center()
+                                .child(i)
+                                .into_any_element()
                         }
                         None => el.into_any_element(),
                     },
@@ -2110,12 +2165,11 @@ impl PhoenixView {
                     .into_iter()
                     .enumerate()
                     .map(|(n, place)| {
-                        let mut screen = div().size_full().flex().flex_col().child(self.render_node(
-                            place.node,
-                            Parent::Layer,
-                            window,
-                            cx,
-                        ));
+                        let mut screen = div()
+                            .size_full()
+                            .flex()
+                            .flex_col()
+                            .child(self.render_node(place.node, Parent::Layer, window, cx));
                         if n > 0 {
                             screen = screen.absolute().top_0().left_0();
                         }
@@ -2131,10 +2185,7 @@ impl PhoenixView {
                         screen.into_any_element()
                     })
                     .collect();
-                el.flex()
-                    .flex_col()
-                    .children(screens)
-                    .into_any_element()
+                el.flex().flex_col().children(screens).into_any_element()
             }
             "scroll" | "list" | "hscroll" => {
                 // A list that listens for `rowPress` takes a click on any of
@@ -2202,13 +2253,16 @@ impl PhoenixView {
                     // was last built is laid out as space as tall as it
                     // was: a scroll moves the rows, it doesn't change
                     // them.
-                    let space = (kind == "list").then(|| self.spacer_len(&port.borrow(), c)).flatten();
+                    let space = (kind == "list")
+                        .then(|| self.spacer_len(&port.borrow(), c))
+                        .flatten();
                     let child = if let Some(len) = space {
                         if self.spaced.insert(c) {
                             self.forget_drawn(c);
                         }
                         let mut d = div().flex_shrink_0().h(px(len));
-                        if let Some(Value::Quad([_, t, _, b])) = self.tree.props().get(c, p.margin) {
+                        if let Some(Value::Quad([_, t, _, b])) = self.tree.props().get(c, p.margin)
+                        {
                             d = d.mt(px(*t)).mb(px(*b));
                         }
                         d.into_any_element()
@@ -2264,7 +2318,12 @@ impl PhoenixView {
                 flexbox(el).children(kids).into_any_element()
             }
         };
-        Recorded { id, hits, inner: drawn }.into_any_element()
+        Recorded {
+            id,
+            hits,
+            inner: drawn,
+        }
+        .into_any_element()
     }
 
     /// A row laid out as space draws none of its nodes: the bounds they
@@ -2344,7 +2403,9 @@ impl PhoenixView {
     /// most, draws an image or a background.
     fn fills(&self, id: NodeId, depth: u8) -> bool {
         let props = self.tree.props();
-        let Some(node) = self.tree.node(id) else { return false };
+        let Some(node) = self.tree.node(id) else {
+            return false;
+        };
         node.kind.name() == "image"
             || props.get(id, ids().background).is_some()
             || depth > 0 && node.children.iter().any(|c| self.fills(*c, depth - 1))
@@ -2360,7 +2421,12 @@ impl PhoenixView {
     /// (12 dp) inside the window. Its place needs its size, so the frame
     /// before its first layout draws it transparent, as Android shows it
     /// once it is placed.
-    fn render_popover(&mut self, id: NodeId, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    fn render_popover(
+        &mut self,
+        id: NodeId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let props = self.tree.props();
         let field = |name: &str| props.get(id, PropId::from_name(name).unwrap()).cloned();
         let s = |name: &str| match field(name) {
@@ -2384,16 +2450,27 @@ impl PhoenixView {
         let (ww, wh) = (f32::from(viewport.width), f32::from(viewport.height));
         let (place, size) = {
             let hits = self.hits.borrow();
-            (anchor.and_then(|a| hits.get(&a).copied()), hits.get(&id).map(|b| b.size))
+            (
+                anchor.and_then(|a| hits.get(&a).copied()),
+                hits.get(&id).map(|b| b.size),
+            )
         };
         self.hoisting = true;
         let content = self.render_node(id, Parent::Layer, window, cx);
-        let mut boxed = div().absolute().max_w(px((ww - inset - inset_left).max(0.))).child(content);
+        let mut boxed = div()
+            .absolute()
+            .max_w(px((ww - inset - inset_left).max(0.)))
+            .child(content);
         match (place, size) {
             (Some(a), Some(size)) => {
                 let (left, top) = (f32::from(a.origin.x), f32::from(a.origin.y));
                 let (x, y) = popover_origin(
-                    [left, top, left + f32::from(a.size.width), top + f32::from(a.size.height)],
+                    [
+                        left,
+                        top,
+                        left + f32::from(a.size.width),
+                        top + f32::from(a.size.height),
+                    ],
                     (f32::from(size.width), f32::from(size.height)),
                     (ww, wh),
                     (&placement, &align),
@@ -2414,7 +2491,11 @@ impl PhoenixView {
                 layer = layer.on_mouse_down(
                     gpui::MouseButton::Left,
                     cx.listener(move |this, ev: &gpui::MouseDownEvent, _, cx| {
-                        let inside = this.hits.borrow().get(&id).is_some_and(|b| b.contains(&ev.position));
+                        let inside = this
+                            .hits
+                            .borrow()
+                            .get(&id)
+                            .is_some_and(|b| b.contains(&ev.position));
                         if !inside {
                             this.node_event(id, "dismiss", Value::Object(vec![]));
                             cx.notify();
@@ -2705,7 +2786,11 @@ fn gradient_stops(v: &Value, axis: Option<&str>) -> Option<(f32, Vec<(u32, f32)>
                 Some(Value::Array(a)) => a.clone(),
                 _ => Vec::new(),
             };
-            (num(field("angle")).unwrap_or(180.), list("colors"), list("positions"))
+            (
+                num(field("angle")).unwrap_or(180.),
+                list("colors"),
+                list("positions"),
+            )
         }
         Value::Array(a) => {
             let angle = if axis == Some("vertical") { 180. } else { 90. };
@@ -2731,7 +2816,10 @@ fn gradient_stops(v: &Value, axis: Option<&str>) -> Option<(f32, Vec<(u32, f32)>
 fn gradient(v: &Value, axis: Option<&str>) -> Option<gpui::Background> {
     let (angle, stops) = gradient_stops(v, axis)?;
     let first = stops[0];
-    let next = stops.iter().position(|s| s.0 != first.0).unwrap_or(stops.len() - 1);
+    let next = stops
+        .iter()
+        .position(|s| s.0 != first.0)
+        .unwrap_or(stops.len() - 1);
     Some(gpui::linear_gradient(
         angle,
         gpui::linear_color_stop(argb(first.0), first.1),
@@ -2756,7 +2844,11 @@ fn gradient_layers(v: &Value, axis: Option<&str>) -> Option<Vec<AnyElement>> {
         _ => return None,
     };
     if reversed {
-        stops = stops.into_iter().rev().map(|(c, at)| (c, 1. - at)).collect();
+        stops = stops
+            .into_iter()
+            .rev()
+            .map(|(c, at)| (c, 1. - at))
+            .collect();
     }
     let mut out = Vec::new();
     for w in stops.windows(2) {
@@ -2786,11 +2878,18 @@ fn gradient_layers(v: &Value, axis: Option<&str>) -> Option<Vec<AnyElement>> {
 fn shadow(v: &Value) -> Option<gpui::BoxShadow> {
     let Value::Object(f) = v else { return None };
     let field = |n: &str| f.iter().find(|(k, _)| k.name() == Some(n)).map(|(_, v)| v);
-    let mut color = argb(field("color").and_then(Value::as_color).unwrap_or(0xff00_0000));
+    let mut color = argb(
+        field("color")
+            .and_then(Value::as_color)
+            .unwrap_or(0xff00_0000),
+    );
     color.a *= num(field("opacity")).unwrap_or(1.).clamp(0., 1.);
     Some(gpui::BoxShadow {
         color,
-        offset: gpui::point(px(num(field("offsetX")).unwrap_or(0.)), px(num(field("offsetY")).unwrap_or(0.))),
+        offset: gpui::point(
+            px(num(field("offsetX")).unwrap_or(0.)),
+            px(num(field("offsetY")).unwrap_or(0.)),
+        ),
         blur_radius: px(num(field("radius")).unwrap_or(0.)),
         spread_radius: px(0.),
         inset: false,
@@ -2818,7 +2917,11 @@ fn set_corners(el: &mut gpui::Stateful<gpui::Div>, corners: [Option<f32>; 4]) {
 
 /// `"50%"` as 0.5.
 fn percent(s: &str) -> Option<f32> {
-    s.strip_suffix('%')?.trim().parse::<f32>().ok().map(|v| v / 100.)
+    s.strip_suffix('%')?
+        .trim()
+        .parse::<f32>()
+        .ok()
+        .map(|v| v / 100.)
 }
 
 /// A uri as the log shows it: long ones cut short.
@@ -2994,9 +3097,18 @@ impl PhoenixView {
     /// `index`, `align`, `offset`, `endOffset`, `topOnly` and `animated`.
     fn scroll_requests(&mut self, turn: &Turn) {
         for op in &turn.ops {
-            let rekindle_wire::turn::NodeOp::ScrollTo { node, value } = op else { continue };
-            let Value::Object(fields) = value else { continue };
-            let field = |n: &str| fields.iter().find(|(k, _)| k.name() == Some(n)).map(|(_, v)| v);
+            let rekindle_wire::turn::NodeOp::ScrollTo { node, value } = op else {
+                continue;
+            };
+            let Value::Object(fields) = value else {
+                continue;
+            };
+            let field = |n: &str| {
+                fields
+                    .iter()
+                    .find(|(k, _)| k.name() == Some(n))
+                    .map(|(_, v)| v)
+            };
             let text = |n: &str| match field(n) {
                 Some(Value::Str(s)) => Some(s.as_str()),
                 _ => None,
@@ -3013,9 +3125,19 @@ impl PhoenixView {
                 _ => Align::Start,
             };
             let animated = field("animated") == Some(&Value::Bool(true)) && self.motion.enabled;
-            let horizontal = self.tree.node(*node).is_some_and(|n| n.kind.name() == "hscroll");
-            let stick = self.tree.props().get(*node, PropId::from_name("stickToEnd").unwrap()) == Some(&Value::Bool(true));
-            crate::guest::log(&format!("[view] scrollTo #{node}: position {index}, {align:?}, offset {offset}{}", if animated { ", animated" } else { "" }));
+            let horizontal = self
+                .tree
+                .node(*node)
+                .is_some_and(|n| n.kind.name() == "hscroll");
+            let stick = self
+                .tree
+                .props()
+                .get(*node, PropId::from_name("stickToEnd").unwrap())
+                == Some(&Value::Bool(true));
+            crate::guest::log(&format!(
+                "[view] scrollTo #{node}: position {index}, {align:?}, offset {offset}{}",
+                if animated { ", animated" } else { "" }
+            ));
             self.ports
                 .entry(*node)
                 .or_insert_with(|| Rc::new(RefCell::new(Port::new(horizontal, stick))))
@@ -3050,7 +3172,10 @@ impl PhoenixView {
             let pos = port.scroller.step(max, len, now);
             moving |= port.scroller.active();
             if crate::scrollport::logging() {
-                crate::guest::log(&format!("[scroll] frame at {now:.1} ms: offset {pos:.1}, stretch {:.1}", port.scroller.stretch()));
+                crate::guest::log(&format!(
+                    "[scroll] frame at {now:.1} ms: offset {pos:.1}, stretch {:.1}",
+                    port.scroller.stretch()
+                ));
             }
         }
         if moving {
@@ -3089,7 +3214,9 @@ impl PhoenixView {
     fn scrolls_at(&self, at: gpui::Point<Pixels>) -> (Option<NodeId>, Option<NodeId>) {
         let (mut v, mut h) = (None, None);
         for id in self.scroll_order.borrow().iter().rev() {
-            let Some(port) = self.ports.get(id) else { continue };
+            let Some(port) = self.ports.get(id) else {
+                continue;
+            };
             let port = port.borrow();
             if !port.bounds.contains(&at) || port.max <= 0. {
                 continue;
@@ -3154,7 +3281,9 @@ impl PhoenixView {
         }
         let on_field = {
             let hits = self.hits.borrow();
-            self.inputs.keys().any(|n| hits.get(n).is_some_and(|b| b.contains(&ev.position)))
+            self.inputs
+                .keys()
+                .any(|n| hits.get(n).is_some_and(|b| b.contains(&ev.position)))
         };
         let (vertical, horizontal) = self.scrolls_at(ev.position);
         if on_field || (vertical.is_none() && horizontal.is_none()) {
@@ -3206,11 +3335,17 @@ impl PhoenixView {
         let d = ev.position - drag.last;
         drag.last = ev.position;
         let delta = f32::from(if horizontal { d.x } else { d.y });
-        let Some(id) = (if horizontal { drag.horizontal } else { drag.vertical }) else {
+        let Some(id) = (if horizontal {
+            drag.horizontal
+        } else {
+            drag.vertical
+        }) else {
             return;
         };
         let now = self.now();
-        let Some(port) = self.ports.get(&id) else { return };
+        let Some(port) = self.ports.get(&id) else {
+            return;
+        };
         let mut port = port.borrow_mut();
         let (max, len) = (port.max, port.len);
         port.scroller.drag(delta, max, len, now);
@@ -3220,9 +3355,17 @@ impl PhoenixView {
     /// The button came up: a drag flings at the pointer's velocity, and
     /// isn't a click.
     fn on_release(&mut self, window: &mut Window) -> bool {
-        let Some(drag) = self.drag.take() else { return false };
-        let Some(horizontal) = drag.axis else { return false };
-        let id = if horizontal { drag.horizontal } else { drag.vertical };
+        let Some(drag) = self.drag.take() else {
+            return false;
+        };
+        let Some(horizontal) = drag.axis else {
+            return false;
+        };
+        let id = if horizontal {
+            drag.horizontal
+        } else {
+            drag.vertical
+        };
         let now = self.now();
         let density = window.scale_factor();
         if let Some(port) = id.and_then(|id| self.ports.get(&id)) {
@@ -3376,7 +3519,8 @@ impl Render for PhoenixView {
             render: began.elapsed().as_secs_f64() * 1000.,
             total: 0.,
             nodes: self.built,
-            scrolling: self.ports.values().any(|p| p.borrow().scroller.active()) || self.drag.is_some(),
+            scrolling: self.ports.values().any(|p| p.borrow().scroller.active())
+                || self.drag.is_some(),
         };
         let frames = self.stats.frames.clone();
         root = root.child(
@@ -3456,9 +3600,15 @@ mod tests {
             (PropId::from_name("size").unwrap(), Value::F64(17.5)),
         ]);
         let v = Value::Array(vec![
-            record(&[("text", Value::Str("a ".into())), ("code", Value::Bool(true))]),
+            record(&[
+                ("text", Value::Str("a ".into())),
+                ("code", Value::Bool(true)),
+            ]),
             record(&[("text", Value::Str(":spotify:".into())), ("image", img)]),
-            record(&[("text", Value::Str("site".into())), ("link", Value::Str("0".into()))]),
+            record(&[
+                ("text", Value::Str("site".into())),
+                ("link", Value::Str("0".into())),
+            ]),
         ]);
         let base = RunBase {
             family: "gg sans".into(),
@@ -3480,14 +3630,23 @@ mod tests {
     fn popovers_sit_by_their_anchor() {
         let anchor = [100., 50., 200., 80.];
         let win = (412., 860.);
-        let at = |pa: (&str, &str), offset: f32| popover_origin(anchor, (300., 120.), win, pa, offset, (12., 12.));
+        let at = |pa: (&str, &str), offset: f32| {
+            popover_origin(anchor, (300., 120.), win, pa, offset, (12., 12.))
+        };
         // Centred under the anchor, it would start at 0: the left inset
         // holds it at 12.
         assert_eq!(at(("bottom", "center"), 8.), (12., 88.));
         assert_eq!(at(("top", "start"), 4.), (100., -74.));
         assert_eq!(at(("bottom", "end"), 0.), (-100., 80.));
         // Centred where it fits.
-        let small = popover_origin(anchor, (60., 20.), win, ("bottom", "center"), 0., (12., 12.));
+        let small = popover_origin(
+            anchor,
+            (60., 20.),
+            win,
+            ("bottom", "center"),
+            0.,
+            (12., 12.),
+        );
         assert_eq!(small, (120., 80.));
     }
 

@@ -256,8 +256,14 @@ fn serve(stream: TcpStream) -> std::io::Result<()> {
             "200 OK",
             crate::wire::mirror(tree_json).unwrap_or(Json::Null),
         ),
-        (true, "/") => ("200 OK", json!({ "endpoints": ["/ops", "/events", "/tree"] })),
-        _ => ("404 Not Found", json!({ "error": "GET /ops, /events or /tree" })),
+        (true, "/") => (
+            "200 OK",
+            json!({ "endpoints": ["/ops", "/events", "/tree"] }),
+        ),
+        _ => (
+            "404 Not Found",
+            json!({ "error": "GET /ops, /events or /tree" }),
+        ),
     };
     let body = body.to_string();
     let mut stream = stream;

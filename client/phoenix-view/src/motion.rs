@@ -188,9 +188,9 @@ impl MotionHost {
         }
         let touches = turn.ops.iter().any(|op| match op {
             NodeOp::Motion { .. } | NodeOp::Delete { .. } => true,
-            NodeOp::Create { props, .. } | NodeOp::Update { props, .. } => props
-                .iter()
-                .any(|(p, _)| motion_cell(*p)),
+            NodeOp::Create { props, .. } | NodeOp::Update { props, .. } => {
+                props.iter().any(|(p, _)| motion_cell(*p))
+            }
             _ => false,
         });
         if !touches || self.engine().is_none() {
@@ -241,7 +241,10 @@ impl MotionHost {
                 NodeOp::Motion { words } => {
                     let p = Program::decode(words);
                     let codes: Vec<u32> = p.ops.iter().map(|o| o.opcode).collect();
-                    parts.push(format!("Motion {codes:?}{}", if p.tail.is_empty() { "" } else { " +tail" }));
+                    parts.push(format!(
+                        "Motion {codes:?}{}",
+                        if p.tail.is_empty() { "" } else { " +tail" }
+                    ));
                 }
                 NodeOp::Create { node, props, .. } | NodeOp::Update { node, props } => {
                     for (p, v) in props {
@@ -345,7 +348,11 @@ impl MotionHost {
     /// A scroll view's offset in dp (`mh.g1`: kind 3 horizontal, 4
     /// vertical).
     pub fn scrolled(&mut self, node: NodeId, horizontal: bool, offset: f32) {
-        let kind = if horizontal { input::SCROLL_X } else { input::SCROLL_Y };
+        let kind = if horizontal {
+            input::SCROLL_X
+        } else {
+            input::SCROLL_Y
+        };
         if self.scrolls.get(&(node, kind)) == Some(&offset) {
             return;
         }
@@ -382,7 +389,16 @@ impl MotionHost {
         for n in wanted {
             let Some((r, parent)) = rect(n) else { continue };
             let pr = parent.unwrap_or([0.0, 0.0, 0.0, 0.0]);
-            let out = [r[0], r[1], r[2], r[3], r[0] - pr[0], r[1] - pr[1], pr[2], pr[3]];
+            let out = [
+                r[0],
+                r[1],
+                r[2],
+                r[3],
+                r[0] - pr[0],
+                r[1] - pr[1],
+                pr[2],
+                pr[3],
+            ];
             if self.layouts.get(&n) == Some(&out) {
                 continue;
             }
@@ -420,9 +436,9 @@ impl MotionHost {
             return false;
         };
         let now = Instant::now();
-        let dt = self
-            .last
-            .map_or(self.frame_ms, |t| now.duration_since(t).as_secs_f32() * 1000.0);
+        let dt = self.last.map_or(self.frame_ms, |t| {
+            now.duration_since(t).as_secs_f32() * 1000.0
+        });
         self.last = Some(now);
         let t = m.tick(dt);
         let mut changed = 0;
@@ -495,5 +511,6 @@ pub fn show(ch: u32, bits: u32) -> String {
 }
 
 fn motion_cell(p: PropId) -> bool {
-    matches!(p, cell::WORKLET | cell::PAN_WORKLET | cell::VIEW_MOTION) || cell::declared(p).is_some()
+    matches!(p, cell::WORKLET | cell::PAN_WORKLET | cell::VIEW_MOTION)
+        || cell::declared(p).is_some()
 }

@@ -275,7 +275,11 @@ impl Tracker {
         if now - last > 40. {
             return 0.;
         }
-        let s: Vec<_> = self.samples.iter().filter(|(t, _)| last - t <= 100.).collect();
+        let s: Vec<_> = self
+            .samples
+            .iter()
+            .filter(|(t, _)| last - t <= 100.)
+            .collect();
         if s.len() < 2 {
             return 0.;
         }
@@ -596,7 +600,10 @@ mod tests {
             most = most.min(s.stretch());
         }
         assert!((s.pos - 1000.).abs() < 1e-3);
-        assert!(most < -5., "the content moved back from the end by {most} dp");
+        assert!(
+            most < -5.,
+            "the content moved back from the end by {most} dp"
+        );
         assert!(!s.active(), "still moving after {t} ms");
         assert!(s.stretch().abs() < 0.01);
     }

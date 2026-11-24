@@ -592,6 +592,9 @@ fn rest_requests_name_a_method_and_a_path() {
             body: None,
         }))
     );
-    assert_eq!(status("/api/rest", r#"{"method":"TRACE","path":"/x"}"#), 400);
+    assert_eq!(
+        status("/api/rest", r#"{"method":"TRACE","path":"/x"}"#),
+        400
+    );
     assert_eq!(status("/api/rest", r#"{"method":"GET","path":"x"}"#), 400);
 }

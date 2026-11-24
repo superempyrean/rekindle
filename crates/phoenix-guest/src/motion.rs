@@ -164,11 +164,7 @@ impl Motion {
         let mut x = [0.0; 8];
         x[0] = value;
         x[1] = ms;
-        self.call(
-            self.s.system,
-            [u64::from(kind), u64::from(key), 0, 0, 0],
-            x,
-        );
+        self.call(self.s.system, [u64::from(kind), u64::from(key), 0, 0, 0], x);
     }
 
     pub fn set_reduced(&self, on: bool) {
@@ -188,7 +184,13 @@ impl Motion {
     pub fn exit_begin(&self, view: u32, inner: &[u32]) -> bool {
         self.call(
             self.s.exit_begin,
-            [u64::from(view), ptr(inner.as_ptr()), inner.len() as u64, 0, 0],
+            [
+                u64::from(view),
+                ptr(inner.as_ptr()),
+                inner.len() as u64,
+                0,
+                0,
+            ],
             [0.0; 8],
         ) as u8
             != 0
@@ -300,8 +302,24 @@ mod tests {
         // k = 7: one lock, no exits, one row, wants, no trips; then the
         // frame: one write, one event pair, wants.
         let w = [
-            7, 1, 77, 0, 1, 5, 1, 0, //
-            1, 12, 7, 0x3f80_0000, 1, 0x0010_0001, 5, 1, 0, 0,
+            7,
+            1,
+            77,
+            0,
+            1,
+            5,
+            1,
+            0, //
+            1,
+            12,
+            7,
+            0x3f80_0000,
+            1,
+            0x0010_0001,
+            5,
+            1,
+            0,
+            0,
         ];
         let t = Tick::read(&w).unwrap();
         assert_eq!(t.locks, vec![77]);
