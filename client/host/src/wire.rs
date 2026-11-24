@@ -115,8 +115,8 @@ pub(crate) struct WireMap {
     #[serde(default)]
     surfaces: BTreeMap<String, Selector>,
     /// Where the message rows are, for the plugins' message renderers. Read
-    /// on Android, where the host reads the messages off the wire.
-    #[cfg(target_os = "android")]
+    /// on Android and iOS, where the host reads the messages off the wire.
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     #[serde(default)]
     pub(crate) messages: Option<crate::messages::MessageMap>,
 }
@@ -460,8 +460,8 @@ fn theme_recolors(driver: &Driver, engine: &Engine) -> Vec<Recolor> {
 /// The recolours for the plugins' theme on a client whose turns don't pass
 /// [`follow`]: those of palette `shown`, or of the first palette.
 #[cfg_attr(
-    not(target_os = "android"),
-    expect(dead_code, reason = "the Android host's runtime calls it")
+    not(any(target_os = "android", target_os = "ios")),
+    expect(dead_code, reason = "the phone hosts' runtime calls it")
 )]
 pub(crate) fn palette_recolors(
     palettes: &[rekindle_ui_hook::ThemePalette],

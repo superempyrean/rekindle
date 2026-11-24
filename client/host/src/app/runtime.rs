@@ -2,9 +2,9 @@
 //! of its own.
 //!
 //! The Driver starts from a profile with no addresses, so it installs no
-//! detours. Its plugins come from the home in the app's own files
-//! (`/data/data/<package>/files/rekindle`), installed and signed as on the
-//! desktop, and run on Pulley (`rekindle_plugin_host::runtime::engine`).
+//! detours. Its plugins come from the platform's home ([`super::Platform`]),
+//! installed and signed as on the desktop, and run on Pulley
+//! (`rekindle_plugin_host::runtime::engine`).
 //! Their theme reaches the screen as recolours of the guest's cells, from the
 //! palette in the config dir (`palette.json`, token to Phoenix's colour).
 //!
@@ -27,7 +27,6 @@
 //! once and flushed on the next dispatch.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
 use std::sync::Mutex;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -233,17 +232,6 @@ pub(crate) fn received(passed: Vec<Passed>) {
     if !passed.is_empty() {
         send(Request::Events(passed));
     }
-}
-
-/// The plugin home: `rekindle` in the app's own files dir, the same dir the
-/// config resolves to ([`super::config_dir`]), so plugins and config live
-/// together. A dev launch that points `REKINDLE_HOST_DIR` elsewhere puts the
-/// home there too.
-fn home() -> anyhow::Result<PathBuf> {
-    if std::env::var_os("REKINDLE_HOST_DIR").is_some() {
-        return Ok(super::config_dir());
-    }
-    super::app_config_dir().ok_or_else(|| anyhow::anyhow!("no package name in /proc/self/cmdline"))
 }
 
 /// What the runtime draws with, and what it drew.
@@ -597,7 +585,7 @@ fn running(driver: &mut Driver) -> BTreeSet<String> {
 /// Start the Driver on the app's home, with the palette's tokens as the
 /// client's, and its theme and chat-bar buttons on the wire.
 fn up() -> anyhow::Result<(Driver, Home)> {
-    let home = home()?;
+    let home = super::home();
     std::fs::create_dir_all(&home)?;
     // A binding's tokens take their colours from the palette the guest
     // names. An older palette file lists the colours itself.

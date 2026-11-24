@@ -57,7 +57,7 @@ const PAGE_IDS: [NodeId; 2] = [RESERVED + 0x0400_0000, RESERVED + 0x0480_0000];
 
 /// The cells each part of a row gets, and where the menu, pages and
 /// modals go. Read from the client's own rows, so a mount looks like them.
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Look {
     /// The node the menu is mounted under.
@@ -73,6 +73,11 @@ pub(crate) struct Look {
     /// modals aren't shown.
     #[serde(default)]
     pub(crate) modal_under: Option<Selector>,
+    /// The node a page is mounted under instead, when the client shows its
+    /// settings screen in a layer of its own that `modal_under` is behind,
+    /// as iOS shows a sheet. Pages open from the settings screen.
+    #[serde(default)]
+    pub(crate) page_under: Option<Selector>,
     /// A group's header with the group under it.
     pub(crate) section: Vec<Cell>,
     /// A group's header text.
@@ -469,7 +474,7 @@ pub(crate) fn page(
     panels: &[PanelItem],
     block: usize,
 ) -> Rendered {
-    let Some(under) = &look.modal_under else {
+    let Some(under) = look.page_under.as_ref().or(look.modal_under.as_ref()) else {
         return Rendered::default();
     };
     let (title, back, items) = page_items(widgets);
@@ -1111,6 +1116,12 @@ mod tests {
         .unwrap();
         assert_eq!(r.mounts[0].under, look.modal_under.clone().unwrap());
         assert!(r.mounts[0].root >= PAGE_IDS[0] && r.mounts[0].root < PAGE_IDS[1]);
+        // A look with a place of its own for pages puts them there, and
+        // leaves modals where they were.
+        let mut sheet = look.clone();
+        sheet.page_under = Some(Selector::cell(a11y::ID, "settings-phone"));
+        let r2 = page(&sheet, &list(), &[], 0);
+        assert_eq!(r2.mounts[0].under, sheet.page_under.clone().unwrap());
         let track = node(&r, "rekindle.rekindle.on:dev.a");
         assert_eq!(
             track.on_press,

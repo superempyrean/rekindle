@@ -7,8 +7,10 @@ rust-version.workspace = true
 description = "rekindle as a host DLL inside the client: resolves the client's functions by anchor and runs the plugin runtime there, with no dependency on the client or its types."
 publish.workspace = true
 
+# The rlib is for a platform whose hooks live in a crate of their own and
+# drive `app` (`src/app.rs`).
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 # The PE reader that maps an anchor's file offset to its address.

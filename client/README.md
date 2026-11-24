@@ -59,6 +59,15 @@ and a `Work` from a config dir (`REKINDLE_HOST_IMAGE` names the library, or
 `dl_iterate_phdr`. It logs its report and counts to logcat under the
 `rekindle` tag.
 
+On a phone the engine and the plugin runtime are the host's `app` module,
+which the Android hooks hand turns, host calls and events to. On iOS the
+host is a library instead. A tweak that hooks the client's functions links
+it, calls `app::set_platform` with the config dir and a function that sends
+a turn, then `app::start`, and hands `app` what passes through its hooks.
+Plugins run on wasmtime's Pulley
+interpreter on both, so the app never maps executable memory and iOS needs
+no JIT entitlement.
+
 ## Build
 
 ```sh

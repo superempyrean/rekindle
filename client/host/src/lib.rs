@@ -29,18 +29,20 @@ mod drive {
 }
 #[cfg(target_os = "android")]
 mod android;
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub mod app;
 mod debug;
-#[cfg(any(target_os = "android", test))]
+#[cfg(any(target_os = "android", target_os = "ios", test))]
 mod gateway;
 mod hooks;
 mod image;
 mod install;
 mod layout;
 mod live;
-#[cfg(any(target_os = "android", test))]
+#[cfg(any(target_os = "android", target_os = "ios", test))]
 mod messages;
 mod profile;
-#[cfg(any(target_os = "android", test))]
+#[cfg(any(target_os = "android", target_os = "ios", test))]
 mod rows;
 mod verify;
 mod wire;
@@ -79,6 +81,7 @@ static HOST_CTOR: extern "C" fn() = host_ctor;
 /// The library's initializer: start the worker. Starting a thread from it
 /// is fine; the thread must not touch the loader until the loader lock is
 /// released, which the sleep in [`worker`] ensures.
+#[cfg(any(windows, target_os = "linux", target_os = "android"))]
 extern "C" fn host_ctor() {
     // The initializer runs when the app maps this library. The first log
     // line proves the loader reached rekindle, before any other work.
@@ -111,6 +114,7 @@ extern "C" fn host_ctor() {
 /// work, and writes the report. Keeping the heavy work off the static
 /// initializer (which runs under the Windows loader lock) is what makes it safe
 /// to scan, hook and call into the client here.
+#[cfg(not(target_os = "ios"))]
 fn worker() {
     // Android: the host is loaded into the app, resolves its anchors against
     // the client's library once that library is mapped, swaps the emit slot
@@ -121,13 +125,13 @@ fn worker() {
         android_worker();
         return;
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     desktop_worker();
 }
 
 /// The desktop worker: the shared [`run`], then the report to the install and
 /// the handshake, and the client kept alive if a driver came back.
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn desktop_worker() {
     // Let `DllMain`/the loader finish before doing anything non-trivial.
     #[cfg(windows)]
@@ -175,11 +179,10 @@ fn android_worker() {
     let mut tick = 0u64;
     loop {
         std::thread::sleep(std::time::Duration::from_secs(1));
-        android::poll_test_press();
-        android::poll_test_gateway();
+        app::poll();
         tick += 1;
         if tick.is_multiple_of(5) {
-            android::log(&android::counts());
+            android::log(&app::counts());
         }
     }
 }

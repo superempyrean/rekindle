@@ -160,7 +160,7 @@ fn write_status(driver: &Driver) {
         .map(|c| format!(" {c}"))
         .unwrap_or_default();
     #[cfg(target_os = "android")]
-    let wire = format!("{wire} {}", crate::android::counts());
+    let wire = format!("{wire} {}", crate::app::counts());
     let _ = std::fs::write(
         std::env::temp_dir().join("rekindle-host-status.txt"),
         format!(

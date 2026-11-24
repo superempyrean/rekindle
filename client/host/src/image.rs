@@ -47,6 +47,43 @@ pub(crate) fn image_base() -> Option<usize> {
     mapped_base(|path| std::path::Path::new(path) == exe)
 }
 
+/// The main module's load address: on iOS the app's executable, the first
+/// image dyld loads.
+#[cfg(target_os = "ios")]
+pub(crate) fn image_base() -> Option<usize> {
+    unsafe extern "C" {
+        fn _dyld_get_image_header(index: u32) -> *const std::ffi::c_void;
+    }
+    // SAFETY: index 0 is always the main executable.
+    let base = unsafe { _dyld_get_image_header(0) } as usize;
+    (base != 0).then_some(base)
+}
+
+/// This library's load address, or 0 if it can't be found.
+#[cfg(target_os = "ios")]
+pub(crate) fn module_base() -> usize {
+    #[repr(C)]
+    struct DlInfo {
+        fname: *const std::ffi::c_char,
+        fbase: *mut std::ffi::c_void,
+        sname: *const std::ffi::c_char,
+        saddr: *mut std::ffi::c_void,
+    }
+    unsafe extern "C" {
+        fn dladdr(addr: *const std::ffi::c_void, info: *mut DlInfo) -> i32;
+    }
+    let mut info = DlInfo {
+        fname: std::ptr::null(),
+        fbase: std::ptr::null_mut(),
+        sname: std::ptr::null(),
+        saddr: std::ptr::null_mut(),
+    };
+    // SAFETY: any address in this library (this function's own), and a
+    // record dladdr fills in.
+    let ok = unsafe { dladdr(module_base as *const std::ffi::c_void, &raw mut info) };
+    if ok == 0 { 0 } else { info.fbase as usize }
+}
+
 /// The environment variable that names the client's image on Android: the
 /// path of the shared object the anchors resolve against.
 #[cfg(target_os = "android")]
