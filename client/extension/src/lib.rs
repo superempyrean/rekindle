@@ -22,6 +22,7 @@ mod convert;
 mod overlay;
 mod picker;
 mod rekindle;
+pub mod slash;
 pub mod theme;
 
 use std::path::PathBuf;
@@ -59,6 +60,10 @@ pub struct RecoveredProfile {
     /// the styles back with [`Driver::surface_styles`]. With none,
     /// `set-surface` fails with `unknown-surface`.
     pub surfaces: Vec<String>,
+    /// The host runs slash commands typed in the client's composer, which
+    /// it reads back with [`Driver::slash_commands`]. Without it,
+    /// `register-slash-command` fails with `unavailable`.
+    pub slash_commands: bool,
 }
 
 /// How long a send waits for `compose` plugins before going out unchanged.
@@ -139,6 +144,7 @@ impl Driver {
                 available: profile.surfaces.clone(),
                 ..backend::SurfaceStyles::default()
             })),
+            slash: Arc::new(Mutex::new(profile.slash_commands.then(Vec::new))),
         };
         let surfaces = profile
             .registry
@@ -392,6 +398,17 @@ impl Driver {
     /// plugins added them.
     pub fn chat_bar_buttons(&self) -> Vec<(String, Button)> {
         self.shared.buttons.lock().unwrap().clone()
+    }
+
+    /// The plugins' slash commands, as (plugin, command), in the order they
+    /// were registered.
+    pub fn slash_commands(&self) -> Vec<(String, rekindle_plugin_host::api::SlashCommand)> {
+        self.shared
+            .slash
+            .lock()
+            .unwrap()
+            .clone()
+            .unwrap_or_default()
     }
 
     /// The style that applies to each named surface a plugin restyled, by

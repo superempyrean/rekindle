@@ -124,6 +124,10 @@ pub(crate) struct WireMap {
     #[cfg(any(target_os = "android", target_os = "ios"))]
     #[serde(default)]
     pub(crate) composer: Option<Selector>,
+    /// The composer's send button, for the plugins' slash commands.
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    #[serde(default)]
+    pub(crate) send: Option<Selector>,
 }
 
 #[derive(Debug, Deserialize)]

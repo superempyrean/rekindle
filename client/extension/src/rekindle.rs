@@ -669,6 +669,25 @@ impl Rekindle {
         out
     }
 
+    /// Run one of `plugin`'s slash commands. A failure is logged for the
+    /// plugin and replies nothing.
+    pub fn slash_command(
+        &mut self,
+        plugin: &str,
+        inv: &rekindle_plugin_host::api::Invocation,
+    ) -> rekindle_plugin_host::api::CommandReply {
+        let reply = self.runtime.slash_command(plugin, inv).unwrap_or_else(|e| {
+            self.host_log(
+                plugin,
+                LogLevel::Warn,
+                &format!("slash command `/{}` failed: {e:#}", inv.command),
+            );
+            rekindle_plugin_host::api::CommandReply::None
+        });
+        self.check_faults();
+        reply
+    }
+
     pub(crate) fn run_command(&mut self, plugin: &str, id: &str) {
         if let Err(e) = self.runtime.run_command(plugin, id) {
             self.host_log(

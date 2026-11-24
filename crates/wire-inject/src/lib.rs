@@ -90,7 +90,9 @@ use rekindle_wire::motion::worklet::{PressLook, Worklet};
 use rekindle_wire::turn::{ON, SPANS, create_props};
 use rekindle_wire::{DecodeError, NodeId, NodeOp, PropId, Tree, Turn, Value};
 
-pub use compose::{CHANGE_TEXT, FORCE_VALUE, Field, Found, Inserted, SELECTION_CHANGE, VALUE};
+pub use compose::{
+    CHANGE_TEXT, Composer, FORCE_VALUE, Field, Found, Inserted, SELECTION_CHANGE, Typed, VALUE,
+};
 pub use select::{Selector, TEXT};
 pub use switches::{NodeCells, Switch, SwitchState, Switches};
 pub use work::{
@@ -184,6 +186,9 @@ pub struct Engine {
     fields: compose::Fields,
     /// Ops of rekindle's own on the guest's nodes, for the next turn.
     pending: Vec<NodeOp>,
+    composer: Composer,
+    /// Slash commands sent from a field, for the host.
+    typed: Vec<Typed>,
 }
 
 impl Engine {
@@ -202,6 +207,8 @@ impl Engine {
             restore: BTreeSet::new(),
             fields: compose::Fields::default(),
             pending: Vec::new(),
+            composer: Composer::default(),
+            typed: Vec::new(),
         };
         engine.mount_cells();
         Ok(engine)
@@ -297,18 +304,73 @@ impl Engine {
     }
 
     /// Put `text` at the caret of the guest's text field the user last
-    /// focused or typed in, over its selection, or else the one the guest focused, the one
-    /// `composer` names, or the only one on screen. The field's new text
-    /// goes out as a `forceValue` in the next turn, or in [`Engine::flush`].
-    /// `None` when no field is found.
-    pub fn insert_text(&mut self, text: &str, composer: Option<&Selector>) -> Option<Inserted> {
-        let (node, found) = self.fields.target(&self.guest, composer)?;
+    /// focused or typed in, over its selection, or else the one the guest
+    /// focused, the composer's field, or the only one on screen. The
+    /// field's new text goes out as a `forceValue` in the next turn, or in
+    /// [`Engine::flush`]. `None` when no field is found.
+    pub fn insert_text(&mut self, text: &str) -> Option<Inserted> {
+        let (node, found) = self.text_field()?;
         let force = self.fields.insert(node, text);
+        self.write_force(node, &force);
+        Some(Inserted { node, found, force })
+    }
+
+    /// The field [`Engine::insert_text`] would put text in.
+    pub fn text_field(&self) -> Option<(NodeId, Found)> {
+        self.fields
+            .target(&self.guest, self.composer.field.as_ref())
+    }
+
+    /// Replace `field`'s text with `text`, the caret at its end, as
+    /// [`Engine::insert_text`] writes it.
+    pub fn set_text(&mut self, field: NodeId, text: &str) -> rekindle_wire::text::ForceValue {
+        let force = self.fields.set(field, text);
+        self.write_force(field, &force);
+        force
+    }
+
+    fn write_force(&mut self, node: NodeId, force: &rekindle_wire::text::ForceValue) {
         self.pending.push(NodeOp::Update {
             node,
             props: vec![(FORCE_VALUE, force.to_value())],
         });
-        Some(Inserted { node, found, force })
+    }
+
+    /// Describe the composer: its field, its send button and the slash
+    /// commands the host runs.
+    pub fn set_composer(&mut self, composer: Composer) {
+        self.composer = composer;
+    }
+
+    /// The slash commands sent since the last call, in order.
+    pub fn take_typed(&mut self) -> Vec<Typed> {
+        std::mem::take(&mut self.typed)
+    }
+
+    /// The slash command a press on the send button or a field's `submit`
+    /// sends, if the host runs it.
+    fn typed_command(&self, ev: &Event) -> Option<Typed> {
+        if self.composer.commands.is_empty() {
+            return None;
+        }
+        let field = if ev.name == event::names::SUBMIT && self.fields.text(ev.node).is_some() {
+            ev.node
+        } else if ev.is_press()
+            && let Some(send) = &self.composer.send
+            && select::View::new(&self.guest).matches(ev.node, send)
+        {
+            self.fields
+                .target(&self.guest, self.composer.field.as_ref())?
+                .0
+        } else {
+            return None;
+        };
+        let text = self.fields.text(field)?;
+        self.composer.command(text)?;
+        Some(Typed {
+            field,
+            text: text.trim().to_string(),
+        })
     }
 
     /// The guest's text fields, by node.
@@ -437,6 +499,10 @@ impl Engine {
                 }),
                 _ => {}
             }
+            return Ok(Verdict::Consume(None));
+        }
+        if let Some(typed) = self.typed_command(&ev) {
+            self.typed.push(typed);
             return Ok(Verdict::Consume(None));
         }
         if !ev.is_press() {

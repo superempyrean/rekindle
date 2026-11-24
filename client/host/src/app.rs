@@ -26,6 +26,11 @@
 //! in the next turn rekindle flushes (`Engine::insert_text`). With no such
 //! field on screen, the field `wire.json` names as `composer` takes it.
 //!
+//! A plugin's slash command, typed in the composer and sent with the button
+//! `wire.json` names as `send` or the field's own submit, never reaches the
+//! guest. The runtime runs it, and its reply replaces the composer's text.
+//! A reply only the user sees goes up as a toast.
+//!
 //! Android's hooks are `crate::android`. Another platform's hooks link this
 //! crate as a library, call [`set_platform`] and then [`start`], and hand
 //! over what the guest sends and receives.
@@ -39,7 +44,9 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
-use rekindle_wire_inject::{Engine, Handler, PluginPress, Switches, Verdict, Work};
+use rekindle_wire_inject::{
+    Composer, Engine, Handler, PluginPress, Selector, Switches, Typed, Verdict, Work,
+};
 
 /// A test run names a JSON file of `Work` the engine runs on the turns.
 const WORK_ENV: &str = "REKINDLE_HOST_WIRE_WORK";
@@ -200,6 +207,37 @@ pub fn poll() {
     poll_test_press();
     poll_test_gateway();
     poll_tree_dump();
+    poll_test_compose();
+}
+
+/// A test run sets the text of the field `insert-text` would use by
+/// writing it to this file in the config dir. The host reads it every
+/// second and clears it, and the text goes out with the next dispatch.
+const TEST_COMPOSE: &str = "compose.txt";
+
+fn poll_test_compose() {
+    let path = config_file(TEST_COMPOSE);
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return;
+    };
+    let text = text.trim_end_matches(['\r', '\n']);
+    if text.is_empty() {
+        return;
+    }
+    let _ = std::fs::write(&path, "");
+    let set = with_engine(|e| {
+        let (field, _) = e.text_field()?;
+        e.set_text(field, text);
+        Some(field)
+    })
+    .flatten();
+    match set {
+        Some(field) => {
+            DIRTY.store(true, Ordering::SeqCst);
+            log(&format!("test compose {text:?} into #{field}"));
+        }
+        None => log(&format!("test compose {text:?}: no field")),
+    }
 }
 
 /// A test run asks for the trees by leaving this file in the config dir:
@@ -278,7 +316,8 @@ fn build_engine() -> anyhow::Result<bool> {
     if work.is_empty() && !runtime::wanted() {
         return Ok(false);
     }
-    let engine = Engine::new(work).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let mut engine = Engine::new(work).map_err(|e| anyhow::anyhow!("{e}"))?;
+    engine.set_composer(composer(std::collections::BTreeSet::new()));
     *lock() = Some(engine);
     *panel_lock() = Some(panel);
     Ok(true)
@@ -378,6 +417,11 @@ fn set_plugins(state: runtime::State) {
         };
         if panel.plugins.as_ref() == Some(&state) {
             return;
+        }
+        if panel.plugins.as_ref().map(|p| &p.commands) != Some(&state.commands) {
+            log(&format!("slash commands: {:?}", state.commands));
+            let commands = state.commands.clone();
+            with_engine(|e| e.set_composer(composer(commands)));
         }
         log(&format!(
             "plugins: running={:?} recolors={}",
@@ -558,6 +602,9 @@ fn lock_socket() -> std::sync::MutexGuard<'static, Option<gateway::Socket>> {
 /// flush the work they make. On the guest's thread, inside its dispatch,
 /// where the guest itself emits.
 fn deliver_presses() {
+    for typed in with_engine(Engine::take_typed).unwrap_or_default() {
+        run_typed(&typed);
+    }
     let presses = with_engine(Engine::take_presses).unwrap_or_default();
     for p in &presses {
         let at = Instant::now();
@@ -599,6 +646,44 @@ fn deliver_presses() {
     }
 }
 
+/// Run a slash command the user sent from a field, and put what it replies
+/// in the field: the text to insert or send, or nothing. A reply only the
+/// user sees goes up as a toast, and the command stays in the field.
+fn run_typed(typed: &Typed) {
+    use rekindle_plugin_host::api::CommandReply;
+    let at = Instant::now();
+    let Some(reply) = runtime::slash(&typed.text) else {
+        log(&format!(
+            "slash {:?}: the runtime didn't answer",
+            typed.text
+        ));
+        return;
+    };
+    let (text, what) = match &reply {
+        CommandReply::None => (Some(String::new()), "none".to_string()),
+        CommandReply::Insert(t) => (Some(t.clone()), format!("insert {t:?}")),
+        // Sending goes through the guest's own send, which nothing here
+        // reaches yet: the text waits in the composer for the user's send.
+        CommandReply::Send(t) => (Some(t.clone()), format!("send {t:?}, left in the composer")),
+        CommandReply::Local(spans) => {
+            let text: String = spans.iter().map(|s| s.text.as_str()).collect();
+            rekindle_ui_hook::push_toast(&text, rekindle_ui_hook::ToastStyle::Info);
+            (None, format!("local {text:?}"))
+        }
+    };
+    if let Some(text) = text {
+        with_engine(|e| e.set_text(typed.field, &text));
+        DIRTY.store(true, Ordering::SeqCst);
+    }
+    let flushed = flush_pending();
+    log(&format!(
+        "slash {:?} in #{} -> {what} in {} us, flushed={flushed} bytes",
+        typed.text,
+        typed.field,
+        at.elapsed().as_micros()
+    ));
+}
+
 /// Flush the engine's work if it changed outside a turn, with the text the
 /// plugins put in the composer since. The length of the turn flushed, 0 for
 /// none.
@@ -622,18 +707,27 @@ fn flush_pending() -> usize {
     }
 }
 
-/// The composer's field as `wire.json` names it, read once.
-fn composer() -> Option<&'static rekindle_wire_inject::Selector> {
-    static COMPOSER: OnceLock<Option<rekindle_wire_inject::Selector>> = OnceLock::new();
-    COMPOSER
-        .get_or_init(|| {
-            let path = config_file("wire.json");
-            path.exists()
-                .then(|| crate::wire::read_wire_map(&path).ok())
-                .flatten()
-                .and_then(|m| m.composer)
-        })
-        .as_ref()
+/// The composer as `wire.json` names it, read once: its field and its
+/// send button.
+fn composer_map() -> &'static (Option<Selector>, Option<Selector>) {
+    static COMPOSER: OnceLock<(Option<Selector>, Option<Selector>)> = OnceLock::new();
+    COMPOSER.get_or_init(|| {
+        let path = config_file("wire.json");
+        path.exists()
+            .then(|| crate::wire::read_wire_map(&path).ok())
+            .flatten()
+            .map_or((None, None), |m| (m.composer, m.send))
+    })
+}
+
+/// The composer for the engine, with the slash commands the plugins run.
+fn composer(commands: std::collections::BTreeSet<String>) -> Composer {
+    let (field, send) = composer_map().clone();
+    Composer {
+        field,
+        send,
+        commands,
+    }
 }
 
 /// Put the text plugins queued with `insert-text` into the guest's text
@@ -643,28 +737,28 @@ fn insert_queued() {
     if text.is_empty() {
         return;
     }
-    let done = with_engine(|e| match e.insert_text(&text, composer()) {
-        Some(i) => Ok(format!(
-            "compose: {text:?} into input #{} ({:?}) at {}, {} chars now, seq {:#x} eventCount {:?}",
-            i.node,
-            i.found,
-            i.force.start,
-            i.force.text.chars().count(),
-            i.force.seq,
-            i.force.event_count
-        )),
-        None => {
-            let a11y = rekindle_wire::a11y::ids::ID;
-            let fields: Vec<String> = e
-                .fields()
-                .keys()
-                .map(|n| format!("#{n} {:?}", e.guest().props().get(*n, a11y)))
-                .collect();
-            Err(format!(
-                "compose: no field for {text:?}; inputs: {}",
-                fields.join(", ")
-            ))
+    let done = with_engine(|e| {
+        if let Some(i) = e.insert_text(&text) {
+            return Ok(format!(
+                "compose: {text:?} into input #{} ({:?}) at {}, {} chars now, seq {:#x} eventCount {:?}",
+                i.node,
+                i.found,
+                i.force.start,
+                i.force.text.chars().count(),
+                i.force.seq,
+                i.force.event_count
+            ));
         }
+        let a11y = rekindle_wire::a11y::ids::ID;
+        let fields: Vec<String> = e
+            .fields()
+            .keys()
+            .map(|n| format!("#{n} {:?}", e.guest().props().get(*n, a11y)))
+            .collect();
+        Err(format!(
+            "compose: no field for {text:?}; inputs: {}",
+            fields.join(", ")
+        ))
     });
     match done {
         Some(Ok(line)) => {

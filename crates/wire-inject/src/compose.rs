@@ -17,6 +17,12 @@
 //! written it. Its `eventCount` is the platform's, so the platform applies
 //! it without a rebase, and the platform reports the edit to the guest as
 //! it reports the user's typing.
+//!
+//! A slash command typed in the composer is the guest's business unless
+//! [`Composer::commands`] names it. Then the press on the send button, or
+//! the field's `submit`, is consumed and kept as a [`Typed`] command for
+//! the host, whose reply replaces the field's text
+//! ([`Engine::set_text`](crate::Engine::set_text)).
 
 use std::collections::BTreeMap;
 
@@ -73,6 +79,40 @@ pub enum Found {
     Selector,
     /// The only field on screen.
     Only,
+}
+
+/// The message composer, as
+/// [`Engine::set_composer`](crate::Engine::set_composer) describes it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Composer {
+    /// The composer's text field, for text inserted before the user has
+    /// used a field.
+    pub field: Option<Selector>,
+    /// The button that sends what the composer holds.
+    pub send: Option<Selector>,
+    /// The slash commands the host runs, by name, without the `/`.
+    pub commands: std::collections::BTreeSet<String>,
+}
+
+/// A slash command the user sent from a field: `text` is the field's text,
+/// from the `/`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Typed {
+    pub field: NodeId,
+    pub text: String,
+}
+
+impl Composer {
+    /// The command `text` runs, if it names one of [`Composer::commands`].
+    #[must_use]
+    pub fn command<'t>(&self, text: &'t str) -> Option<&'t str> {
+        let name = text
+            .trim_start()
+            .strip_prefix('/')?
+            .split_whitespace()
+            .next()?;
+        self.commands.contains(name).then_some(name)
+    }
 }
 
 /// What [`Engine::insert_text`](crate::Engine::insert_text) wrote.
@@ -142,7 +182,11 @@ impl Fields {
 
     /// The field text goes into: the one the user last used, the one the
     /// guest focused, the one `composer` names, or the only one on screen.
-    pub(crate) fn target(&self, tree: &Tree, composer: Option<&Selector>) -> Option<(NodeId, Found)> {
+    pub(crate) fn target(
+        &self,
+        tree: &Tree,
+        composer: Option<&Selector>,
+    ) -> Option<(NodeId, Found)> {
         let view = View::new(tree);
         let shown = |n: NodeId| self.by_node.contains_key(&n) && on_screen(tree, &view, n);
         if let Some(n) = self.last.filter(|n| shown(*n)) {
@@ -161,6 +205,19 @@ impl Fields {
             (Some(n), None) => Some((n, Found::Only)),
             _ => None,
         }
+    }
+
+    /// `node`'s text, if it is a field.
+    pub(crate) fn text(&self, node: NodeId) -> Option<&str> {
+        self.by_node.get(&node).map(|f| f.text.as_str())
+    }
+
+    /// Replace `node`'s text with `text`: the `forceValue` to write, with
+    /// the caret at the end.
+    pub(crate) fn set(&mut self, node: NodeId, text: &str) -> ForceValue {
+        let field = self.by_node.entry(node).or_default();
+        field.selection = Some((0, utf16_len(&field.text)));
+        self.insert(node, text)
     }
 
     /// Put `text` in `node`'s field over its selection, or at its end: the

@@ -35,6 +35,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use rekindle_extension::theme::ThemeProfile;
 use rekindle_extension::{Driver, ExtArgs, RecoveredProfile};
+use rekindle_plugin_host::api::{ChannelRef, CommandReply};
 use rekindle_plugin_host::home::Home;
 use rekindle_plugin_host::manager;
 use rekindle_plugin_host::model::SLOT_CHAT_BAR_BUTTON;
@@ -87,6 +88,8 @@ pub(crate) struct State {
     /// The cells the plugins' message renderers write on the messages
     /// shown.
     pub(crate) cells: Vec<Write>,
+    /// The plugins' slash commands, by name.
+    pub(crate) commands: BTreeSet<String>,
 }
 
 /// What the guest's thread hands the runtime.
@@ -106,6 +109,12 @@ enum Request {
     },
     /// The guest received these dispatches: deliver their events.
     Events(Vec<Passed>),
+    /// The user sent this slash command from the composer: run it, and
+    /// send back its reply.
+    Slash {
+        text: String,
+        done: mpsc::SyncSender<CommandReply>,
+    },
 }
 
 /// The event kinds some plugin's event filter sees, as bits by
@@ -173,6 +182,18 @@ pub(crate) fn press(p: &PluginPress) -> bool {
         ANSWER_WAIT
     };
     sent && answered.recv_timeout(wait).is_ok()
+}
+
+/// Run the slash command `text` names, and wait up to [`PAGE_WAIT`] for
+/// its reply. `None` if the runtime didn't answer in time or isn't running.
+pub(crate) fn slash(text: &str) -> Option<CommandReply> {
+    let (done, answered) = mpsc::sync_channel(1);
+    let sent = send(Request::Slash {
+        text: text.to_string(),
+        done,
+    });
+    sent.then(|| answered.recv_timeout(PAGE_WAIT).ok())
+        .flatten()
 }
 
 /// Whether the runtime's thread is up.
@@ -418,17 +439,10 @@ fn run(rx: &mpsc::Receiver<Request>) {
                 // The dispatch may have stopped waiting.
                 let _ = done.send(driver.rekindle().gateway_filter(&t, d));
             }
-            Ok(Request::Events(passed)) => {
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map_or(0, |d| d.as_millis() as u64);
-                for p in passed {
-                    let n = driver.rekindle().gateway_events(&p.t, p.d(), now);
-                    received += 1;
-                    if received <= EVENTS_LOGGED || received.is_multiple_of(EVENTS_LOGGED) {
-                        log(&format!("gateway #{received}: {} -> {n} event(s)", p.t));
-                    }
-                }
+            Ok(Request::Events(passed)) => deliver_events(&mut driver, passed, &mut received),
+            Ok(Request::Slash { text, done }) => {
+                // The command may have stopped waiting.
+                let _ = done.send(run_slash(&mut driver, &text));
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => return,
@@ -452,6 +466,21 @@ fn run(rx: &mpsc::Receiver<Request>) {
         logs = next;
         for r in records {
             log(&format!("plugin {} {:?}: {}", r.plugin, r.level, r.message));
+        }
+    }
+}
+
+/// Hand the dispatches the guest received to the plugins as events. The
+/// first [`EVENTS_LOGGED`] are logged, then one in that many.
+fn deliver_events(driver: &mut Driver, passed: Vec<Passed>, received: &mut u64) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64);
+    for p in passed {
+        let n = driver.rekindle().gateway_events(&p.t, p.d(), now);
+        *received += 1;
+        if *received <= EVENTS_LOGGED || received.is_multiple_of(EVENTS_LOGGED) {
+            log(&format!("gateway #{received}: {} -> {n} event(s)", p.t));
         }
     }
 }
@@ -499,6 +528,38 @@ fn serve(driver: &mut Driver, surfaces: &mut Surfaces, p: &PluginPress) {
         page_title(&state),
         surfaces.developer_mode,
     ));
+}
+
+/// Run the slash command `text` names. A command no plugin has, or options
+/// it can't read, reply as a message only the user sees.
+fn run_slash(driver: &mut Driver, text: &str) -> CommandReply {
+    let commands = driver.slash_commands();
+    let Some((plugin, cmd)) = rekindle_extension::slash::find(&commands, text) else {
+        return local(&format!("No plugin has {text:?}."));
+    };
+    // Which channel the composer is in isn't read off the wire yet.
+    let channel = ChannelRef {
+        id: 0,
+        name: String::new(),
+        guild: None,
+        kind: 0,
+    };
+    match rekindle_extension::slash::invocation(cmd, text, channel) {
+        Ok(inv) => driver.rekindle().slash_command(plugin, &inv),
+        Err(e) => local(&e),
+    }
+}
+
+/// A reply only the user sees, of plain text.
+fn local(text: &str) -> CommandReply {
+    CommandReply::Local(vec![rekindle_plugin_host::api::Span {
+        text: text.to_string(),
+        bold: false,
+        italic: false,
+        code: false,
+        color: None,
+        target: None,
+    }])
 }
 
 /// The title of the page shown, for the log: the text of the page bar's
@@ -620,6 +681,7 @@ fn up() -> anyhow::Result<(Driver, Home)> {
         compose: None,
         framework: None,
         surfaces: Vec::new(),
+        slash_commands: true,
     };
     let args = ExtArgs {
         dev_paths: Vec::new(),
@@ -758,12 +820,18 @@ fn publish(driver: &mut Driver, surfaces: &mut Surfaces) -> State {
         crate::wire::palette_recolors(&palettes, shown)
     };
     let cells = message_cells(driver, surfaces);
+    let commands = driver
+        .slash_commands()
+        .into_iter()
+        .map(|(_, c)| c.name)
+        .collect();
     let state = State {
         recolors,
         running,
         mounts,
         back,
         cells,
+        commands,
     };
     super::set_plugins(state.clone());
     state

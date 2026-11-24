@@ -388,6 +388,7 @@ fn framework_only(
             frame_hook: frame_hook(hooks)?.0,
         }),
         surfaces: crate::wire::surfaces(),
+        slash_commands: false,
     };
     let (ext, n_plugins) = profile::ext_args();
     // SAFETY: the profile's addresses come from anchors resolved against this

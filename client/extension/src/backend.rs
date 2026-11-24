@@ -44,7 +44,13 @@ pub(crate) struct Shared {
     pub(crate) buttons: Arc<Mutex<Vec<(String, Button)>>>,
     pub(crate) overlay: Arc<Mutex<OverlayState>>,
     pub(crate) surfaces: Arc<Mutex<SurfaceStyles>>,
+    /// Slash commands, as (plugin, command). `None` when the host runs
+    /// none.
+    pub(crate) slash: Arc<Mutex<Option<SlashCommands>>>,
 }
+
+/// The plugins' slash commands, as (plugin, command).
+pub(crate) type SlashCommands = Vec<(String, rekindle_plugin_host::api::SlashCommand)>;
 
 /// The plugins' styles for the client's named surfaces
 /// (`theming.set-surface`).
@@ -523,11 +529,29 @@ impl ClientBackend for DetourBackend {
     }
 
     fn ui_update(&mut self, plugin: &str, op: UiOp) -> Result<(), UiError> {
-        self.shared.surfaces.lock().unwrap().update(plugin, op)
+        match op {
+            UiOp::RegisterSlashCommand { command } => {
+                let mut slash = self.shared.slash.lock().unwrap();
+                let list = slash.as_mut().ok_or(UiError::Unavailable)?;
+                list.retain(|(p, c)| !(p == plugin && c.name == command.name));
+                list.push((plugin.to_string(), command));
+                Ok(())
+            }
+            UiOp::UnregisterSlashCommand { name } => {
+                if let Some(list) = self.shared.slash.lock().unwrap().as_mut() {
+                    list.retain(|(p, c)| !(p == plugin && c.name == name));
+                }
+                Ok(())
+            }
+            op => self.shared.surfaces.lock().unwrap().update(plugin, op),
+        }
     }
 
     fn plugin_unloaded(&mut self, plugin: &str) {
         self.shared.surfaces.lock().unwrap().plugin_unloaded(plugin);
+        if let Some(list) = self.shared.slash.lock().unwrap().as_mut() {
+            list.retain(|(p, _)| p != plugin);
+        }
         self.shared.overlay.lock().unwrap().plugin_unloaded(plugin);
         self.shared.theme.lock().unwrap().plugin_unloaded(plugin);
         self.shared

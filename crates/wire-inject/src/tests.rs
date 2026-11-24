@@ -1862,19 +1862,26 @@ fn force_value(turn: &Turn, id: NodeId) -> Option<rekindle_wire::text::ForceValu
 fn inserted_text_goes_after_what_the_user_typed_in_the_field_they_used() {
     let (mut e, mut host) = engine(Work::default());
     send(&mut e, &mut host, &fields());
-    assert_eq!(e.insert_text("x", None), None, "two fields and none used");
+    assert_eq!(e.insert_text("x"), None, "two fields and none used");
     assert_eq!(
         e.event(&change_text(41, "hi ", 3)).unwrap(),
         Verdict::Pass,
         "the platform's edit reaches the guest"
     );
-    let ins = e.insert_text("(^_^)", None).unwrap();
-    assert_eq!((ins.node, ins.found, ins.force.text.as_str()), (41, Found::Used, "hi (^_^)"));
+    let ins = e.insert_text("(^_^)").unwrap();
+    assert_eq!(
+        (ins.node, ins.found, ins.force.text.as_str()),
+        (41, Found::Used, "hi (^_^)")
+    );
     let flushed = Turn::from_bytes(&e.flush().unwrap()).unwrap();
     let force = force_value(&flushed, 41).unwrap();
     assert_eq!(force.text, "hi (^_^)");
     assert_eq!((force.start, force.end), (8, 8));
-    assert_eq!(force.event_count, Some(3), "the platform's count: no rebase");
+    assert_eq!(
+        force.event_count,
+        Some(3),
+        "the platform's count: no rebase"
+    );
     assert_eq!(e.flush(), None, "written once");
 
     // The guest writes the field back, then deletes it.
@@ -1892,7 +1899,7 @@ fn inserted_text_goes_after_what_the_user_typed_in_the_field_they_used() {
     });
     t.push(NodeOp::Delete { nodes: vec![41] });
     send(&mut e, &mut host, &t);
-    let ins = e.insert_text("!", None).unwrap();
+    let ins = e.insert_text("!").unwrap();
     assert_eq!((ins.node, ins.found), (40, Found::Only));
 }
 
@@ -1900,9 +1907,15 @@ fn inserted_text_goes_after_what_the_user_typed_in_the_field_they_used() {
 fn a_composer_selector_finds_the_field_when_none_was_used() {
     let (mut e, mut host) = engine(Work::default());
     send(&mut e, &mut host, &fields());
-    let composer = Selector::cell(a11y::ID, "composer");
-    let ins = e.insert_text("hey", Some(&composer)).unwrap();
-    assert_eq!((ins.node, ins.found, ins.force.text.as_str()), (41, Found::Selector, "hey"));
+    e.set_composer(Composer {
+        field: Some(Selector::cell(a11y::ID, "composer")),
+        ..Composer::default()
+    });
+    let ins = e.insert_text("hey").unwrap();
+    assert_eq!(
+        (ins.node, ins.found, ins.force.text.as_str()),
+        (41, Found::Selector, "hey")
+    );
     // The guest's own next turn carries it.
     let (applied, _) = send(&mut e, &mut host, &Turn::new());
     assert_eq!(force_value(&applied, 41).unwrap().text, "hey");
@@ -1928,12 +1941,63 @@ fn inserted_text_replaces_the_selection_in_utf16_units() {
     e.event(&change_text(41, "a😀b", 2)).unwrap();
     // The caret after the emoji: 3 UTF-16 units in.
     e.event(&selection(41, 3, 3)).unwrap();
-    let ins = e.insert_text("(^_^)", None).unwrap();
+    let ins = e.insert_text("(^_^)").unwrap();
     assert_eq!(ins.force.text, "a😀(^_^)b");
     assert_eq!((ins.force.start, ins.force.end), (8, 8));
     // "😀(" selected, backwards.
     e.event(&selection(41, 4, 1)).unwrap();
-    let ins = e.insert_text("x", None).unwrap();
+    let ins = e.insert_text("x").unwrap();
     assert_eq!(ins.force.text, "ax^_^)b");
     assert_eq!((ins.force.start, ins.force.end), (2, 2));
+}
+
+#[test]
+fn a_slash_command_the_host_runs_is_kept_and_its_reply_replaces_the_text() {
+    let (mut e, mut host) = engine(Work::default());
+    let mut t = fields();
+    t.push(NodeOp::Create {
+        node: 42,
+        kind: ElementKind::VIEW,
+        props: vec![(a11y::ID, str("send"))],
+    });
+    t.push(NodeOp::Children {
+        node: PAGE,
+        children: vec![40, 41, 42],
+    });
+    send(&mut e, &mut host, &t);
+    e.set_composer(Composer {
+        field: Some(Selector::cell(a11y::ID, "composer")),
+        send: Some(Selector::cell(a11y::ID, "send")),
+        commands: ["kaomoji".to_string()].into(),
+    });
+    let press = Event::press(42).to_bytes();
+    // Plain text and the guest's own commands go to the guest.
+    e.event(&change_text(41, "hello", 1)).unwrap();
+    assert_eq!(e.event(&press).unwrap(), Verdict::Pass);
+    e.event(&change_text(41, "/giphy cat", 2)).unwrap();
+    assert_eq!(e.event(&press).unwrap(), Verdict::Pass);
+    e.event(&change_text(41, " /kaomoji happy ", 3)).unwrap();
+    assert_eq!(e.event(&press).unwrap(), Verdict::Consume(None));
+    let submit = Event {
+        node: 41,
+        name: rekindle_wire::event::names::SUBMIT,
+        value: Value::Null,
+    };
+    assert_eq!(e.event(&submit.to_bytes()).unwrap(), Verdict::Consume(None));
+    let typed = e.take_typed();
+    assert_eq!(typed.len(), 2);
+    assert_eq!(
+        typed[0],
+        Typed {
+            field: 41,
+            text: "/kaomoji happy".into()
+        }
+    );
+    let force = e.set_text(41, "(^_^)");
+    assert_eq!(
+        (force.text.as_str(), force.start, force.event_count),
+        ("(^_^)", 5, Some(3))
+    );
+    let flushed = Turn::from_bytes(&e.flush().unwrap()).unwrap();
+    assert_eq!(force_value(&flushed, 41).unwrap().text, "(^_^)");
 }
