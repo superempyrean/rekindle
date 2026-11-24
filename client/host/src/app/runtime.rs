@@ -38,7 +38,9 @@ use rekindle_extension::{Driver, ExtArgs, RecoveredProfile};
 use rekindle_plugin_host::api::{ChannelRef, CommandReply};
 use rekindle_plugin_host::home::Home;
 use rekindle_plugin_host::manager;
-use rekindle_plugin_host::model::SLOT_CHAT_BAR_BUTTON;
+use rekindle_plugin_host::model::{
+    SLOT_CHANNEL_MENU, SLOT_CHAT_BAR_BUTTON, SLOT_MESSAGE_MENU, SLOT_USER_MENU,
+};
 use rekindle_ui_hook::{Click, UiInput, Widget};
 use rekindle_wire_inject::{Handler, Mount, PluginPress, Recolor, Write};
 
@@ -46,7 +48,7 @@ use super::log;
 use crate::gateway::{Decision, Passed};
 use crate::messages::MessageMap;
 use crate::rows::{self, Look, Press};
-use crate::wire::SlotMap;
+use crate::wire::{MenuMap, SlotMap};
 
 /// The palette file in the config dir: the build's theme binding, or
 /// Phoenix's colour for each token.
@@ -163,8 +165,22 @@ pub(crate) fn handles(p: &PluginPress) -> bool {
         rows::MODAL_SCRIM,
         rows::MODAL_CARD,
         SLOT_CHAT_BAR_BUTTON,
+        SLOT_MESSAGE_MENU,
+        SLOT_USER_MENU,
+        SLOT_CHANNEL_MENU,
     ]
     .contains(&p.surface.as_str())
+}
+
+/// What the next press on a plugin's menu row is about, as the guest's
+/// thread read it off the tree before handing the press over.
+static MENU_TARGET: Mutex<Option<rekindle_ui_hook::MenuTargetRef>> = Mutex::new(None);
+
+/// Set what the next press on a menu row is about.
+pub(crate) fn set_menu_target(target: Option<rekindle_ui_hook::MenuTargetRef>) {
+    *MENU_TARGET
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = target;
 }
 
 /// Hand a press to the runtime, and wait up to [`ANSWER_WAIT`] for it, or
@@ -263,6 +279,8 @@ struct Surfaces {
     chat_bar: Option<SlotMap>,
     /// Where the messages are, when the wire map says.
     messages: Option<MessageMap>,
+    /// Where each menu is drawn, by slot, when the wire map says.
+    menus: BTreeMap<String, MenuMap>,
     /// The turns the guest had sent when the messages were last read, and
     /// the cells the renderers made of them.
     read_at: Option<u64>,
@@ -308,15 +326,16 @@ impl Surfaces {
         } else {
             None
         };
-        let (chat_bar, messages) = match map {
-            Some(mut m) => (m.slots.remove(SLOT_CHAT_BAR_BUTTON), m.messages),
-            None => (None, None),
+        let (chat_bar, messages, menus) = match map {
+            Some(mut m) => (m.slots.remove(SLOT_CHAT_BAR_BUTTON), m.messages, m.menus),
+            None => (None, None, BTreeMap::new()),
         };
         let developer_mode = home.developer_mode().unwrap_or(false);
         Surfaces {
             look,
             chat_bar,
             messages,
+            menus,
             read_at: None,
             message_cells: Vec::new(),
             home,
@@ -340,6 +359,17 @@ impl Surfaces {
             return Some(Click::Button {
                 plugin: p.plugin.clone(),
                 item: p.element.clone(),
+            });
+        }
+        if self.menus.contains_key(&p.surface) {
+            let target = MENU_TARGET
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take()?;
+            return Some(Click::Menu {
+                plugin: p.plugin.clone(),
+                item: p.element.clone(),
+                target,
             });
         }
         let Some(press) = self.presses.get(&(p.surface.clone(), p.element.clone())) else {
@@ -500,6 +530,11 @@ fn serve(driver: &mut Driver, surfaces: &mut Surfaces, p: &PluginPress) {
         }) => format!("{plugin}:{element}={value:?}"),
         Some(Click::Button { plugin, item }) => format!("button {plugin}/{item}"),
         Some(Click::Modal { plugin }) => format!("close {plugin}"),
+        Some(Click::Menu {
+            plugin,
+            item,
+            target,
+        }) => format!("menu {plugin}/{item} on {target:?}"),
         _ => "nothing".into(),
     };
     if let Some(click) = click {
@@ -682,6 +717,7 @@ fn up() -> anyhow::Result<(Driver, Home)> {
         framework: None,
         surfaces: Vec::new(),
         slash_commands: true,
+        wire_menus: true,
     };
     let args = ExtArgs {
         dev_paths: Vec::new(),
@@ -804,6 +840,17 @@ fn publish(driver: &mut Driver, surfaces: &mut Surfaces) -> State {
     }
     if let Some(slot) = &surfaces.chat_bar {
         mounts.extend(crate::wire::button_mounts(&driver.chat_bar_buttons(), slot));
+    }
+    let rows = driver.menu_items();
+    for (nth, (slot, map)) in (0u32..).zip(&surfaces.menus) {
+        let kind = match slot.as_str() {
+            SLOT_MESSAGE_MENU => rekindle_ui_hook::MenuKind::Message,
+            SLOT_USER_MENU => rekindle_ui_hook::MenuKind::User,
+            SLOT_CHANNEL_MENU => rekindle_ui_hook::MenuKind::Channel,
+            _ => continue,
+        };
+        let items: Vec<_> = rows.iter().filter(|r| r.kind == kind).cloned().collect();
+        mounts.extend(crate::wire::menu_mount(&items, slot, nth, map));
     }
     let recolors = if super::theme::binding().is_some() {
         live_recolors(driver, surfaces)

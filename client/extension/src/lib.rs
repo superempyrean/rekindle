@@ -64,6 +64,11 @@ pub struct RecoveredProfile {
     /// it reads back with [`Driver::slash_commands`]. Without it,
     /// `register-slash-command` fails with `unavailable`.
     pub slash_commands: bool,
+    /// The host draws the plugins' context-menu rows on the client's wire,
+    /// and reads them back with [`Driver::menu_items`]. Without it or the
+    /// client's registries, `slots.add` on a menu fails with
+    /// `unavailable`.
+    pub wire_menus: bool,
 }
 
 /// How long a send waits for `compose` plugins before going out unchanged.
@@ -154,11 +159,11 @@ impl Driver {
         // Without a page of rekindle's on the client's settings page, a
         // button in the chat bar opens rekindle's own window.
         rekindle_ui_hook::window::set_button(!surfaces.settings);
-        let backend = DetourBackend::new(shared.clone(), surfaces);
+        let backend = DetourBackend::new(shared.clone(), surfaces, profile.wire_menus);
         // Gateway dispatches read the client through a backend of their own,
         // so a plugin's call during an event filter never waits on the lock
         // the filter would hold.
-        let reader = DetourBackend::new(shared.clone(), surfaces);
+        let reader = DetourBackend::new(shared.clone(), surfaces, profile.wire_menus);
         let rekindle = Rekindle::new(backend, reader, args).map_err(|e| format!("{e:#}"))?;
 
         let theme_hook = profile
@@ -398,6 +403,12 @@ impl Driver {
     /// plugins added them.
     pub fn chat_bar_buttons(&self) -> Vec<(String, Button)> {
         self.shared.buttons.lock().unwrap().clone()
+    }
+
+    /// The plugins' context-menu rows, in the order they were added. Each
+    /// row's key joins its plugin and item id.
+    pub fn menu_items(&self) -> Vec<rekindle_ui_hook::MenuItem> {
+        rekindle_ui_hook::menu_rows()
     }
 
     /// The plugins' slash commands, as (plugin, command), in the order they

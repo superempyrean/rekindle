@@ -123,7 +123,8 @@ pub(crate) struct DetourBackend {
 }
 
 impl DetourBackend {
-    pub(crate) fn new(shared: Shared, surfaces: Surfaces) -> Self {
+    /// `wire_menus`: the host draws the menu rows on the client's wire.
+    pub(crate) fn new(shared: Shared, surfaces: Surfaces, wire_menus: bool) -> Self {
         let names = shared.theme.lock().unwrap().token_names();
         let tokens = tokens::default_tokens()
             .into_iter()
@@ -136,7 +137,7 @@ impl DetourBackend {
             profile_titles: BTreeMap::new(),
             profiles: Vec::new(),
             panels: Vec::new(),
-            menus: surfaces.menus.then(Vec::new),
+            menus: (surfaces.menus || wire_menus).then(Vec::new),
             profiles_available: surfaces.profiles,
         }
     }

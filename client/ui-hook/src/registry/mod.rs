@@ -26,8 +26,8 @@ use anyhow::{Result, bail};
 use rekindle_native::mem;
 
 pub use contribution::{
-    Button, Command, MenuItem, MenuKind, MenuTargetRef, Modal, ProfileSectionItem, modal_panel,
-    modal_plugin, set_buttons, set_commands, set_menu_items, set_modal, set_profiles,
+    Button, Command, MenuItem, MenuKind, MenuTargetRef, Modal, ProfileSectionItem, menu_rows,
+    modal_panel, modal_plugin, set_buttons, set_commands, set_menu_items, set_modal, set_profiles,
 };
 pub(crate) use contribution::{
     MENU_INVOKES, MODAL_RENDERS, PROFILE_OPENS, PROFILE_RENDERS, buttons, modal_title,

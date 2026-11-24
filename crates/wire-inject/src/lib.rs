@@ -189,6 +189,8 @@ pub struct Engine {
     composer: Composer,
     /// Slash commands sent from a field, for the host.
     typed: Vec<Typed>,
+    /// The last event of each name on one of the guest's nodes.
+    last: BTreeMap<PropId, Event>,
 }
 
 impl Engine {
@@ -209,6 +211,7 @@ impl Engine {
             pending: Vec::new(),
             composer: Composer::default(),
             typed: Vec::new(),
+            last: BTreeMap::new(),
         };
         engine.mount_cells();
         Ok(engine)
@@ -340,6 +343,18 @@ impl Engine {
     /// commands the host runs.
     pub fn set_composer(&mut self, composer: Composer) {
         self.composer = composer;
+    }
+
+    /// The first of the guest's nodes `sel` matches, in id order.
+    pub fn find(&self, sel: &Selector) -> Option<NodeId> {
+        select::View::new(&self.guest).first(sel)
+    }
+
+    /// The last event named `name` the host raised on one of the guest's
+    /// nodes, whatever was done with it: the `rowLongPress` that opened a
+    /// menu, say.
+    pub fn last_event(&self, name: PropId) -> Option<&Event> {
+        self.last.get(&name)
     }
 
     /// The slash commands sent since the last call, in order.
@@ -501,6 +516,7 @@ impl Engine {
             }
             return Ok(Verdict::Consume(None));
         }
+        self.last.insert(ev.name, ev.clone());
         if let Some(typed) = self.typed_command(&ev) {
             self.typed.push(typed);
             return Ok(Verdict::Consume(None));

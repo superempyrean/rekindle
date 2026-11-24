@@ -31,6 +31,12 @@
 //! guest. The runtime runs it, and its reply replaces the composer's text.
 //! A reply only the user sees goes up as a toast.
 //!
+//! The plugins' context-menu rows go into the guest's own menu, as one
+//! group where `wire.json`'s `menus` puts it. A press on one reaches the
+//! plugin with the menu's target: the id under the list row whose event
+//! opened the menu. The guest then receives a `dismiss` on the menu's sheet
+//! in place of the press, and the menu closes.
+//!
 //! Android's hooks are `crate::android`. Another platform's hooks link this
 //! crate as a library, call [`set_platform`] and then [`start`], and hand
 //! over what the guest sends and receives.
@@ -45,7 +51,7 @@ use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
 use rekindle_wire_inject::{
-    Composer, Engine, Handler, PluginPress, Selector, Switches, Typed, Verdict, Work,
+    Composer, Engine, Handler, PluginPress, Switches, Typed, Verdict, Work,
 };
 
 /// A test run names a JSON file of `Work` the engine runs on the turns.
@@ -537,9 +543,12 @@ fn deliver<R>(buf: &[u8], original: &mut impl FnMut(Option<&[u8]>) -> R) -> R {
         Some(Ok(Verdict::Consume(_))) => {
             CONSUMED.fetch_add(1, Ordering::Relaxed);
             // A panic can't unwind into the host's frame.
-            let _ = std::panic::catch_unwind(deliver_presses);
-            // Success, and the guest never saw the event.
-            original(None)
+            match std::panic::catch_unwind(deliver_presses).ok().flatten() {
+                // A menu's row closes the menu.
+                Some(instead) => original(Some(&instead)),
+                // Success, and the guest never saw the event.
+                None => original(None),
+            }
         }
         Some(Ok(Verdict::Replace(ev))) => original(Some(&ev.to_bytes())),
         Some(Ok(Verdict::Batch(b))) => {
@@ -601,11 +610,12 @@ fn lock_socket() -> std::sync::MutexGuard<'static, Option<gateway::Socket>> {
 /// Hand the presses the engine kept to the switches and the runtime, and
 /// flush the work they make. On the guest's thread, inside its dispatch,
 /// where the guest itself emits.
-fn deliver_presses() {
+fn deliver_presses() -> Option<Vec<u8>> {
     for typed in with_engine(Engine::take_typed).unwrap_or_default() {
         run_typed(&typed);
     }
     let presses = with_engine(Engine::take_presses).unwrap_or_default();
+    let mut instead = None;
     for p in &presses {
         let at = Instant::now();
         // A switch of `switches.json` flips here, unless it is a plugin's.
@@ -630,6 +640,13 @@ fn deliver_presses() {
             log(&format!("press {}: the runtime isn't up", p.element));
             continue;
         }
+        let menu = wire_map().and_then(|m| m.menus.get(&p.surface));
+        if let Some(map) = menu {
+            let target = with_engine(|e| menu_target(e, &p.surface, map)).flatten();
+            log(&format!("menu {}: target {target:?}", p.surface));
+            runtime::set_menu_target(target);
+            instead = with_engine(|e| dismiss(e, map)).flatten();
+        }
         // No lock is held while the runtime works, since it sets the
         // plugins' work itself.
         let answered = runtime::press(p);
@@ -644,6 +661,93 @@ fn deliver_presses() {
             at.elapsed().as_micros(),
         ));
     }
+    instead
+}
+
+/// What a menu of `slot` is about: the row of the list whose event opened
+/// it, and the id the `accessibilityId` under that row carries.
+fn menu_target(
+    e: &Engine,
+    slot: &str,
+    map: &crate::wire::MenuMap,
+) -> Option<rekindle_ui_hook::MenuTargetRef> {
+    use rekindle_plugin_host::model::{SLOT_CHANNEL_MENU, SLOT_MESSAGE_MENU, SLOT_USER_MENU};
+    use rekindle_ui_hook::MenuTargetRef;
+    let ev = e.last_event(rekindle_wire::PropId::from_name(&map.opened_by)?)?;
+    let tree = e.guest();
+    let number = |v: Option<&rekindle_wire::Value>| match v? {
+        rekindle_wire::Value::I32(n) => Some(i64::from(*n)),
+        rekindle_wire::Value::I64(n) => Some(*n),
+        rekindle_wire::Value::F64(f) => Some(*f as i64),
+        _ => None,
+    };
+    let field = |name: &str| match &ev.value {
+        rekindle_wire::Value::Object(props) => {
+            let id = rekindle_wire::PropId::from_name(name)?;
+            props.iter().find(|(p, _)| *p == id).map(|(_, v)| v)
+        }
+        rekindle_wire::Value::Map(entries) => {
+            entries.iter().find(|(k, _)| k == name).map(|(_, v)| v)
+        }
+        _ => None,
+    };
+    let index = number(field("index"))?;
+    let first = number(
+        tree.props()
+            .get(ev.node, rekindle_wire::PropId::from_name("first")?),
+    )
+    .unwrap_or(0);
+    let row = *tree
+        .node(ev.node)?
+        .children
+        .get(usize::try_from(index - first).ok()?)?;
+    let id = id_under(tree, row, &map.target_prefix)?;
+    match slot {
+        SLOT_MESSAGE_MENU => Some(MenuTargetRef::Message {
+            id,
+            // Which channel and author aren't read off the wire yet.
+            channel: 0,
+            author: 0,
+        }),
+        SLOT_USER_MENU => Some(MenuTargetRef::User { id }),
+        SLOT_CHANNEL_MENU => Some(MenuTargetRef::Channel { id }),
+        _ => None,
+    }
+}
+
+/// The id after `prefix` in an `accessibilityId` at or under `node`.
+fn id_under(tree: &rekindle_wire::Tree, node: rekindle_wire::NodeId, prefix: &str) -> Option<u64> {
+    let mut stack = vec![node];
+    while let Some(n) = stack.pop() {
+        if let Some(rekindle_wire::Value::Str(aid)) =
+            tree.props().get(n, rekindle_wire::a11y::ids::ID)
+            && let Some(id) = aid.strip_prefix(prefix).and_then(|i| i.parse().ok())
+        {
+            return Some(id);
+        }
+        stack.extend(
+            tree.node(n)
+                .map(|x| x.children.iter().copied())
+                .into_iter()
+                .flatten(),
+        );
+    }
+    None
+}
+
+/// The `dismiss` the guest receives on the menu's sheet, in place of the
+/// press on a plugin's row, so the menu closes as when the user swipes it
+/// away.
+fn dismiss(e: &Engine, map: &crate::wire::MenuMap) -> Option<Vec<u8>> {
+    let node = e.find(&map.sheet)?;
+    Some(
+        rekindle_wire::event::Event {
+            node,
+            name: rekindle_wire::PropId::from_name("dismiss")?,
+            value: rekindle_wire::Value::Null,
+        }
+        .to_bytes(),
+    )
 }
 
 /// Run a slash command the user sent from a field, and put what it replies
@@ -707,25 +811,24 @@ fn flush_pending() -> usize {
     }
 }
 
-/// The composer as `wire.json` names it, read once: its field and its
-/// send button.
-fn composer_map() -> &'static (Option<Selector>, Option<Selector>) {
-    static COMPOSER: OnceLock<(Option<Selector>, Option<Selector>)> = OnceLock::new();
-    COMPOSER.get_or_init(|| {
+/// The wire map in the config dir, read once: the composer, its send
+/// button and the menus.
+fn wire_map() -> Option<&'static crate::wire::WireMap> {
+    static MAP: OnceLock<Option<crate::wire::WireMap>> = OnceLock::new();
+    MAP.get_or_init(|| {
         let path = config_file("wire.json");
         path.exists()
             .then(|| crate::wire::read_wire_map(&path).ok())
             .flatten()
-            .map_or((None, None), |m| (m.composer, m.send))
     })
+    .as_ref()
 }
 
 /// The composer for the engine, with the slash commands the plugins run.
 fn composer(commands: std::collections::BTreeSet<String>) -> Composer {
-    let (field, send) = composer_map().clone();
     Composer {
-        field,
-        send,
+        field: wire_map().and_then(|m| m.composer.clone()),
+        send: wire_map().and_then(|m| m.send.clone()),
         commands,
     }
 }
@@ -847,7 +950,9 @@ fn dispatch_test_press() {
     match with_engine(|e| e.event(&bytes)) {
         Some(Ok(Verdict::Consume(_))) => {
             CONSUMED.fetch_add(1, Ordering::Relaxed);
-            deliver_presses();
+            if deliver_presses().is_some() {
+                log("test press: a menu would close now");
+            }
         }
         other => log(&format!("test press passed to nobody: {other:?}")),
     }

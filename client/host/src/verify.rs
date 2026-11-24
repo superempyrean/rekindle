@@ -69,6 +69,7 @@ pub(crate) fn drive_and_verify(layout: &Layout, hooks: &Hooks) -> Result<(String
         }),
         surfaces: crate::wire::surfaces(),
         slash_commands: false,
+        wire_menus: false,
     };
     let (mut ext, n_plugins) = ext_args();
     // Plugins' queries read the client. Live, the plugins start once the

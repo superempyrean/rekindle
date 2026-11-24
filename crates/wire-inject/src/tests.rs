@@ -1987,6 +1987,11 @@ fn a_slash_command_the_host_runs_is_kept_and_its_reply_replaces_the_text() {
     let typed = e.take_typed();
     assert_eq!(typed.len(), 2);
     assert_eq!(
+        e.last_event(rekindle_wire::event::names::SUBMIT),
+        Some(&submit),
+        "a consumed event is still the last of its name"
+    );
+    assert_eq!(
         typed[0],
         Typed {
             field: 41,

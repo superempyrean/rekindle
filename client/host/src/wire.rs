@@ -128,6 +128,41 @@ pub(crate) struct WireMap {
     #[cfg(any(target_os = "android", target_os = "ios"))]
     #[serde(default)]
     pub(crate) send: Option<Selector>,
+    /// By menu slot (`message.context-menu`): where the guest draws that
+    /// menu.
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    #[serde(default)]
+    pub(crate) menus: BTreeMap<String, MenuMap>,
+}
+
+/// Where a build's guest draws one context menu, for the plugins' rows on
+/// it, as `wire.json` holds it.
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct MenuMap {
+    /// The node the plugins' rows go under, last, as one group. It is in
+    /// the guest's tree only while the menu is open.
+    under: Selector,
+    /// The menu's sheet. After a press on a plugin's row the guest receives
+    /// a `dismiss` on it, as when the user swipes it away.
+    pub(crate) sheet: Selector,
+    /// The event on a list that opened the menu (`rowLongPress`). Its
+    /// `index` is the row the menu is for.
+    pub(crate) opened_by: String,
+    /// The start of the `accessibilityId` under that row that holds the
+    /// target's id (`message.content:`).
+    pub(crate) target_prefix: String,
+    /// Cells of the group, of each row, and of each row's text.
+    #[serde(default)]
+    group: Vec<Cell>,
+    #[serde(default)]
+    row: Vec<Cell>,
+    #[serde(default)]
+    label: Vec<Cell>,
+    /// Cells a dangerous row's text gets after `label`'s.
+    #[serde(default)]
+    danger: Vec<Cell>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -588,6 +623,72 @@ pub(crate) fn button_mounts(buttons: &[(String, Button)], slot: &SlotMap) -> Vec
             })
         })
         .collect()
+}
+
+/// The first id of the plugins' menu groups, one per menu slot.
+#[cfg(any(target_os = "android", target_os = "ios"))]
+const MENU_GROUPS: NodeId = RESERVED + 0x0600_0000;
+
+/// The plugins' rows on one menu, as one mount: a group under the menu's
+/// node holding a `view` with the `button` role for each row, its label in
+/// a `text`, and a plugin handler on `slot`. `nth` numbers the menu slots.
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub(crate) fn menu_mount(
+    items: &[rekindle_ui_hook::MenuItem],
+    slot: &str,
+    nth: u32,
+    map: &MenuMap,
+) -> Option<Mount> {
+    let group = MENU_GROUPS + nth;
+    let mut nodes = vec![MountNode {
+        id: group,
+        kind: ElementKind::VIEW,
+        cells: map.group.clone(),
+        children: Vec::new(),
+        on_press: None,
+    }];
+    for item in items {
+        let (plugin, id) = item.key.split_once('\u{1f}')?;
+        let root = button_root(plugin, &format!("{slot}\u{1f}{}", item.key))?;
+        let mut cells = vec![
+            Cell::new(a11y::ROLE, Value::Str(Role::Button.name().into())),
+            Cell::new(a11y::LABEL, Value::Str(item.label.clone())),
+            Cell::new(a11y::ID, Value::Str(format!("rekindle.{plugin}.{id}"))),
+        ];
+        cells.extend(map.row.iter().cloned());
+        let mut label = vec![Cell::new(TEXT, Value::Str(item.label.clone()))];
+        label.extend(map.label.iter().cloned());
+        if item.danger {
+            label.retain(|c| !map.danger.iter().any(|d| d.prop == c.prop));
+            label.extend(map.danger.iter().cloned());
+        }
+        nodes[0].children.push(root);
+        nodes.push(MountNode {
+            id: root,
+            kind: ElementKind::VIEW,
+            cells,
+            children: vec![root + 1],
+            on_press: Some(Handler::Plugin {
+                plugin: plugin.into(),
+                surface: slot.into(),
+                element: id.into(),
+            }),
+        });
+        nodes.push(MountNode {
+            id: root + 1,
+            kind: ElementKind::TEXT,
+            cells: label,
+            children: Vec::new(),
+            on_press: None,
+        });
+    }
+    (nodes.len() > 1).then(|| Mount {
+        under: map.under.clone(),
+        after: None,
+        before: None,
+        root: group,
+        nodes,
+    })
 }
 
 /// `opacity` (322), 0 to 1. Modelled as `f64`.

@@ -59,8 +59,8 @@ pub use panel::{
     CardItem, PanelItem, UiInput, Widget, panels, report_ui, set_panels, set_shown_plugin,
 };
 pub use registry::{
-    Button, Command, MenuItem, MenuKind, MenuTargetRef, Modal, ProfileSectionItem, modal_panel,
-    modal_plugin, set_menu_items, set_modal, set_profiles,
+    Button, Command, MenuItem, MenuKind, MenuTargetRef, Modal, ProfileSectionItem, menu_rows,
+    modal_panel, modal_plugin, set_menu_items, set_modal, set_profiles,
 };
 pub use theme::{ThemePalette, detected_theme, recolored_last_frame, set_theme_palettes};
 pub use toast::{

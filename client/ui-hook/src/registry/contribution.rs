@@ -132,6 +132,12 @@ pub(crate) fn buttons() -> Vec<Button> {
     BUTTONS.lock().unwrap().clone()
 }
 
+/// The rows rekindle's menu section offers, for a host that draws them on
+/// the client's wire.
+pub fn menu_rows() -> Vec<MenuItem> {
+    MENU_ITEMS.lock().unwrap().clone()
+}
+
 pub(super) fn menu_items() -> Vec<MenuItem> {
     MENU_ITEMS.lock().unwrap().clone()
 }
