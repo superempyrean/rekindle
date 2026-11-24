@@ -6,9 +6,9 @@
 //! before the other side sees them, as a [`Work`] value says:
 //!
 //! - **Mounts.** Subtrees rekindle creates and mounts under a node of the
-//!   guest's, last or after a child a selector finds. The root is spliced
-//!   into the guest's own Children op when a later turn rewrites that list,
-//!   so the host's keyed diff keeps its node across turns. A turn that
+//!   guest's, last, or before or after a child a selector finds. The root
+//!   is spliced into the guest's own Children op when a later turn rewrites
+//!   that list, so the host's keyed diff keeps its node across turns. A turn that
 //!   deletes the node takes the mount out first, and the mount is created
 //!   again under the next node its selector finds. A node with a press
 //!   handler lists `press` in its `on` (320) cell, since a platform raises
@@ -23,6 +23,9 @@
 //!   retargeted at another node. A press on rekindle's own nodes is always
 //!   consumed, after its [`Handler`] runs. A [`Handler::Plugin`] keeps the
 //!   press for the host to deliver ([`Engine::take_presses`]).
+//! - **Back.** While the work has a back handler, the system back reaches
+//!   it as a press instead of reaching the guest, so a page of rekindle's
+//!   closes before the client's own screen does.
 //! - **Labels.** An `accessibilityLabel` for each node the guest left
 //!   without one, made from another of its cells.
 //! - **Recolours.** A colour the guest writes, replaced in every colour cell
@@ -342,8 +345,10 @@ impl Engine {
 
     /// [`Engine::event`] for one UI event.
     fn ui_event(&mut self, bytes: &[u8]) -> Result<Verdict, DecodeError> {
-        let UiEvent::Node(ev) = UiEvent::from_bytes(bytes)? else {
-            return Ok(Verdict::Pass);
+        let ev = match UiEvent::from_bytes(bytes)? {
+            UiEvent::Node(ev) => ev,
+            UiEvent::Back => return Ok(self.back()),
+            _ => return Ok(Verdict::Pass),
         };
         if ev.node >= RESERVED {
             let handler = self
@@ -390,6 +395,26 @@ impl Engine {
             }
         }
         Ok(Verdict::Pass)
+    }
+
+    /// The system back: consumed and kept as a press while the work has a
+    /// back handler, else passed to the guest.
+    fn back(&mut self) -> Verdict {
+        match &self.work.back {
+            Some(Handler::Plugin {
+                plugin,
+                surface,
+                element,
+            }) => {
+                self.presses.push(PluginPress {
+                    plugin: plugin.clone(),
+                    surface: surface.clone(),
+                    element: element.clone(),
+                });
+                Verdict::Consume(None)
+            }
+            _ => Verdict::Pass,
+        }
     }
 
     /// Rewrite one turn's bytes. `None` when the turn goes through unchanged.
@@ -742,11 +767,13 @@ impl Engine {
         if !listed.contains(&mount.root) {
             let mut mounted = listed;
             let view = select::View::new(&self.mirror);
+            let find = |s: &Selector| mounted.iter().position(|c| view.matches(*c, s));
             let at = mount
-                .after
+                .before
                 .as_ref()
-                .and_then(|after| mounted.iter().position(|c| view.matches(*c, after)))
-                .map_or(mounted.len(), |i| i + 1);
+                .and_then(find)
+                .or_else(|| mount.after.as_ref().and_then(find).map(|i| i + 1))
+                .unwrap_or(mounted.len());
             mounted.insert(at, mount.root);
             // Splice into the guest's own op when this turn rewrote the list,
             // so the host diffs the list once and keeps the mount.

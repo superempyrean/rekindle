@@ -33,6 +33,12 @@ pub struct Work {
     /// Colours the guest writes, replaced wherever it writes them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub recolors: Vec<Recolor>,
+    /// What the system back gesture or button does while one of rekindle's
+    /// pages or modals is on top. The guest never receives the back, and a
+    /// [`Handler::Plugin`] keeps it as a press on `element`, as a press on
+    /// a node would be. Only a [`Handler::Plugin`] is allowed here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub back: Option<Handler>,
 }
 
 /// One cell: a `PropId` and its value.
@@ -52,9 +58,9 @@ impl Cell {
 }
 
 /// A subtree rekindle creates once, the first time `under` finds a node in
-/// the host's tree, and adds to that node's children: after the first child
-/// `after` finds, or at the end. When the guest rewrites the children, the
-/// root is spliced into the guest's own list, so the host's keyed diff keeps
+/// the host's tree, and adds to that node's children: before the first child
+/// `before` finds, else after the first child `after` finds, else at the
+/// end. When the guest rewrites the children, the root is spliced into the guest's own list, so the host's keyed diff keeps
 /// it. A mount is known by its `root`: new work that keeps the root and the
 /// subtree's shape only changes its cells. When a turn deletes the node the
 /// mount is under, the mount is deleted with it and created again the next
@@ -68,6 +74,10 @@ pub struct Mount {
     /// last.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub after: Option<Selector>,
+    /// The child of `under`'s node the root goes before. Matched in the
+    /// host's tree, and tried ahead of `after`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub before: Option<Selector>,
     /// The node appended under `under`. One of `nodes`.
     pub root: NodeId,
     /// Every node of the subtree. Ids are [`RESERVED`] and up.
@@ -247,9 +257,10 @@ impl std::error::Error for WorkError {}
 impl Mount {
     /// Whether `other` is this mount with at most its cells and handlers
     /// changed: the same node, root, ids, kinds and children.
-    pub(crate) fn same_shape(&self, other: &Mount) -> bool {
+    pub fn same_shape(&self, other: &Mount) -> bool {
         self.under == other.under
             && self.after == other.after
+            && self.before == other.before
             && self.root == other.root
             && self.nodes.len() == other.nodes.len()
             && self
@@ -280,12 +291,16 @@ impl Work {
             && self.presses.is_empty()
             && self.labels.is_empty()
             && self.recolors.is_empty()
+            && self.back.is_none()
     }
 
     /// Check that the mounts' ids are rekindle's, unique, and refer to each
     /// other.
     pub fn check(&self) -> Result<(), WorkError> {
         let err = |m: String| Err(WorkError(m));
+        if matches!(self.back, Some(Handler::Count { .. })) {
+            return err("the back handler counts nothing: use a plugin handler".into());
+        }
         let mut ids = BTreeSet::new();
         for n in self.mounts.iter().flat_map(|m| &m.nodes) {
             if n.id < RESERVED {

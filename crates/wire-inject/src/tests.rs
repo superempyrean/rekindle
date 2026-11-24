@@ -65,6 +65,7 @@ fn mounts() -> Work {
         mounts: vec![Mount {
             under: feed(),
             after: None,
+            before: None,
             root: BOX,
             nodes: vec![
                 MountNode {
@@ -427,10 +428,12 @@ fn a_mount_stays_when_a_turn_deletes_other_nodes() {
     });
     t.push(NodeOp::Delete { nodes: vec![31] });
     let (applied, _) = send(&mut e, &mut host, &t);
-    assert!(!applied
-        .ops
-        .iter()
-        .any(|op| matches!(op, NodeOp::Delete { nodes } if nodes.contains(&BOX))));
+    assert!(
+        !applied
+            .ops
+            .iter()
+            .any(|op| matches!(op, NodeOp::Delete { nodes } if nodes.contains(&BOX)))
+    );
     assert_eq!(host.node(FEED).unwrap().children, vec![HEAD, RULE, 30, BOX]);
 }
 
@@ -440,7 +443,10 @@ fn a_mount_goes_after_the_child_its_selector_finds() {
     work.mounts[0].after = Some(tag("rule"));
     let (mut e, mut host) = engine(work);
     send(&mut e, &mut host, &first());
-    assert_eq!(host.node(FEED).unwrap().children, vec![HEAD, RULE, BOX, 30, 31]);
+    assert_eq!(
+        host.node(FEED).unwrap().children,
+        vec![HEAD, RULE, BOX, 30, 31]
+    );
     // The guest's next list keeps it there.
     let mut t = Turn::new();
     t.push(NodeOp::Children {
@@ -456,6 +462,44 @@ fn a_mount_goes_after_the_child_its_selector_finds() {
     let (mut e, mut host) = engine(work);
     send(&mut e, &mut host, &first());
     assert_eq!(host.node(FEED).unwrap().children.last(), Some(&BOX));
+}
+
+#[test]
+fn a_mount_goes_before_the_child_its_selector_finds() {
+    let mut work = mounts();
+    work.mounts[0].before = Some(tag("rule"));
+    let (mut e, mut host) = engine(work);
+    send(&mut e, &mut host, &first());
+    assert_eq!(
+        host.node(FEED).unwrap().children,
+        vec![HEAD, BOX, RULE, 30, 31]
+    );
+    // The guest's next list keeps it there.
+    let mut t = Turn::new();
+    t.push(NodeOp::Children {
+        node: FEED,
+        children: vec![HEAD, RULE, 31],
+    });
+    send(&mut e, &mut host, &t);
+    assert_eq!(host.node(FEED).unwrap().children, vec![HEAD, BOX, RULE, 31]);
+
+    // Before the first child, it goes first.
+    let mut work = mounts();
+    work.mounts[0].before = Some(tag("head"));
+    let (mut e, mut host) = engine(work);
+    send(&mut e, &mut host, &first());
+    assert_eq!(host.node(FEED).unwrap().children.first(), Some(&BOX));
+
+    // With no such child, `after` places it, then the end.
+    let mut work = mounts();
+    work.mounts[0].before = Some(tag("nothing"));
+    work.mounts[0].after = Some(tag("head"));
+    let (mut e, mut host) = engine(work);
+    send(&mut e, &mut host, &first());
+    assert_eq!(
+        host.node(FEED).unwrap().children,
+        vec![HEAD, BOX, RULE, 30, 31]
+    );
 }
 
 #[test]
@@ -1000,6 +1044,7 @@ fn plugin_button(root: NodeId, label: &str) -> Mount {
     Mount {
         under: feed(),
         after: None,
+        before: None,
         root,
         nodes: vec![
             MountNode {
@@ -1398,4 +1443,58 @@ fn a_switch_writes_its_states_cells_and_recolours() {
         host.props().get(PAGE, ids::BACKGROUND),
         Some(&rgba(0x0b0d_12ff))
     );
+}
+
+/// The system back, as the host raises it: UI event op 2.
+fn back_event() -> Vec<u8> {
+    let mut b = rekindle_wire::event::UI.to_le_bytes().to_vec();
+    b.extend([
+        rekindle_wire::event::VERSION,
+        rekindle_wire::event::ops::BACK,
+    ]);
+    b
+}
+
+#[test]
+fn the_system_back_reaches_a_back_handler_instead_of_the_guest() {
+    let (mut e, mut host) = engine(with_mounts(vec![plugin_button(PLUGIN, "open")]));
+    send(&mut e, &mut host, &first());
+    // Without a handler, the guest receives it.
+    assert_eq!(e.event(&back_event()), Ok(Verdict::Pass));
+    let back = Handler::Plugin {
+        plugin: "rekindle".into(),
+        surface: "page".into(),
+        element: "back".into(),
+    };
+    e.set_work(Work {
+        back: Some(back),
+        ..with_mounts(vec![plugin_button(PLUGIN, "open")])
+    })
+    .unwrap();
+    assert_eq!(e.event(&back_event()), Ok(Verdict::Consume(None)));
+    // In a batch, only the back is taken out.
+    let pressed = Event::press(80).to_bytes();
+    let sent = batch(&[&back_event(), &pressed]);
+    let Ok(Verdict::Batch(out)) = e.event(&sent) else {
+        panic!("the batch wasn't rewritten");
+    };
+    let out = frame::Frame::from_bytes(&out).unwrap();
+    assert_eq!(out.batch().unwrap(), vec![pressed.as_slice()]);
+    let want = PluginPress {
+        plugin: "rekindle".into(),
+        surface: "page".into(),
+        element: "back".into(),
+    };
+    assert_eq!(e.take_presses(), vec![want.clone(), want]);
+    // A count handler can't be the back's.
+    let counting = Work {
+        back: Some(Handler::Count {
+            node: PLUGIN,
+            prop: TEXT,
+            one: "1".into(),
+            many: "{n}".into(),
+        }),
+        ..with_mounts(vec![plugin_button(PLUGIN, "open")])
+    };
+    assert!(counting.check().is_err());
 }
