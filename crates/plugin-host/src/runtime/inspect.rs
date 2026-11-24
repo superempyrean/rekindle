@@ -79,14 +79,25 @@ pub fn engine() -> Result<Engine> {
     // Running wasm checks the engine's epoch, which a thread advances every
     // EPOCH_TICK, so a call's wall-clock limit is enforced to about a tick.
     config.epoch_interruption(true);
-    // Android runs plugins on Pulley, wasmtime's interpreter. Its code is
-    // bytecode in data pages, so the app never maps memory executable, which
-    // SELinux may refuse an app. Bounds are checked in the interpreter, so no
-    // signal handler of wasmtime's sits beside the runtime's own.
-    #[cfg(target_os = "android")]
+    // Android and iOS run plugins on Pulley, wasmtime's interpreter. Its
+    // code is bytecode in data pages, so the app never maps memory
+    // executable, which SELinux may refuse an app and iOS refuses any app
+    // without a JIT entitlement. Bounds are checked in the interpreter, so
+    // no signal handler of wasmtime's sits beside the runtime's own.
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         config.target("pulley64")?;
         config.signals_based_traps(false);
+    }
+    // An iOS app's address space is a fraction of Android's, and the
+    // default 4 GiB reserved for each plugin's memory runs out of it after a
+    // few plugins. The interpreter checks bounds itself, so a memory needs
+    // no reservation or guard pages.
+    #[cfg(target_os = "ios")]
+    {
+        config.memory_reservation(0);
+        config.memory_guard_size(0);
+        config.memory_reservation_for_growth(1 << 20);
     }
     let engine = Engine::new(&config)?;
     let ticker = engine.clone();
