@@ -464,6 +464,7 @@ impl Panel {
         if let Some(p) = &self.plugins {
             work.recolors.extend(p.recolors.iter().copied());
             work.mounts.extend(p.mounts.iter().cloned());
+            work.back.clone_from(&p.back);
         }
         work
     }
@@ -814,12 +815,15 @@ fn gettid() -> i64 {
 }
 
 /// A test run presses one of rekindle's own nodes by writing the element of
-/// its handler to this file in the config dir, which the shell creates. The
-/// host reads it every second and clears it. The press reaches the engine in
+/// its handler to this file in the config dir, which the shell creates, or
+/// raises the system back by writing [`TEST_BACK`]. The host reads it every
+/// second and clears it. The press reaches the engine in
 /// the next dispatch, on the guest's thread, as a press the host raised on
 /// that node would, so a run can check the press path without input on the
 /// device.
 const TEST_PRESS: &str = "press.txt";
+/// What [`TEST_PRESS`] holds to raise the system back.
+const TEST_BACK: &str = "@back";
 
 /// The test run's press, as event bytes, until a dispatch takes it.
 static PRESS: Mutex<Option<Vec<u8>>> = Mutex::new(None);
@@ -837,6 +841,16 @@ pub(crate) fn poll_test_press() {
     }
     // Written in place, as the app can't create files in the config dir.
     let _ = std::fs::write(&path, "");
+    if element == TEST_BACK {
+        log("test back");
+        let mut back = rekindle_wire::event::UI.to_le_bytes().to_vec();
+        back.extend([
+            rekindle_wire::event::VERSION,
+            rekindle_wire::event::ops::BACK,
+        ]);
+        *lock_press() = Some(back);
+        return;
+    }
     let node = with_engine(|e| {
         e.work()
             .mounts
@@ -868,9 +882,12 @@ fn dispatch_test_press() {
     let Some(bytes) = lock_press().take() else {
         return;
     };
-    if let Some(Ok(Verdict::Consume(_))) = with_engine(|e| e.event(&bytes)) {
-        CONSUMED.fetch_add(1, Ordering::Relaxed);
-        deliver_presses();
+    match with_engine(|e| e.event(&bytes)) {
+        Some(Ok(Verdict::Consume(_))) => {
+            CONSUMED.fetch_add(1, Ordering::Relaxed);
+            deliver_presses();
+        }
+        other => log(&format!("test press passed to nobody: {other:?}")),
     }
 }
 

@@ -8,20 +8,23 @@
 //! Their theme reaches the screen as recolours of the guest's cells, from the
 //! palette in the config dir (`palette.json`, token to Phoenix's colour).
 //!
-//! With a look in the config dir (`panel.json`, [`Look`]), rekindle's section
-//! on the client's settings screen is rendered from the Manager's panel: a
-//! switch per installed plugin and one for developer mode. The plugins'
-//! chat-bar buttons are mounted where the wire map (`wire.json`) puts the
-//! slot, and a plugin's modal goes over the screen.
+//! With a look in the config dir (`panel.json`, [`Look`]), rekindle's menu
+//! on the client's settings screen is rendered from the Manager: a row for
+//! the plugins, one for the themes, and the developer-mode switch. Any other
+//! view of the Manager's panel is a page over the screen, which the system
+//! back closes as its back button does. The plugins' chat-bar buttons are
+//! mounted where the wire map (`wire.json`) puts the slot, and a plugin's
+//! modal goes over the screen.
 //!
 //! A press on any of them reaches the runtime as the click the same control
-//! reports on the desktop: a row of the section as an interaction with the
-//! Manager's panel, a chat-bar button as a click on it, a row of a modal as
-//! an interaction with the plugin's panel. The Manager turns a plugin on or
-//! off in the home and the runtime. [`press`] waits up to [`ANSWER_WAIT`] for
-//! the runtime to finish, on the guest's thread inside its dispatch.
-//! Whatever the runtime changes later is set on the engine at once and
-//! flushed on the next dispatch.
+//! reports on the desktop: a row of the menu or a page as an interaction
+//! with the Manager's panel, a row of a plugin's own panel on its page as an
+//! interaction with that panel, a chat-bar button as a click on it, a row of
+//! a modal as an interaction with the plugin's panel. The Manager turns a
+//! plugin on or off in the home and the runtime. [`press`] waits up to
+//! [`ANSWER_WAIT`] for the runtime to finish, on the guest's thread inside
+//! its dispatch. Whatever the runtime changes later is set on the engine at
+//! once and flushed on the next dispatch.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -34,8 +37,8 @@ use rekindle_extension::{Driver, ExtArgs, RecoveredProfile};
 use rekindle_plugin_host::home::Home;
 use rekindle_plugin_host::manager;
 use rekindle_plugin_host::model::SLOT_CHAT_BAR_BUTTON;
-use rekindle_ui_hook::{Click, UiInput};
-use rekindle_wire_inject::{Mount, PluginPress, Recolor};
+use rekindle_ui_hook::{Click, UiInput, Widget};
+use rekindle_wire_inject::{Handler, Mount, PluginPress, Recolor};
 
 use super::log;
 use crate::rows::{self, Look, Press};
@@ -53,6 +56,11 @@ const TICK: Duration = Duration::from_millis(50);
 const DEVELOPER_MODE_EVERY: u32 = 20;
 /// How long a press on one of rekindle's nodes waits for the runtime.
 pub(crate) const ANSWER_WAIT: Duration = Duration::from_millis(50);
+/// How long a press on rekindle's menu or a page waits. The Manager reads
+/// every installed plugin's file and checks its signature to draw a list,
+/// which took 170 to 490 ms for 38 plugins on the emulator, and an idle
+/// client can go seven seconds without a dispatch to flush a late answer.
+pub(crate) const PAGE_WAIT: Duration = Duration::from_millis(600);
 
 /// What the runtime last made of its plugins.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -61,9 +69,11 @@ pub(crate) struct State {
     pub(crate) recolors: Vec<Recolor>,
     /// The plugins running, by id.
     pub(crate) running: BTreeSet<String>,
-    /// rekindle's section, the plugins' chat-bar buttons and the modal
-    /// shown, if any.
+    /// rekindle's menu, the page and the modal shown, if any, and the
+    /// plugins' chat-bar buttons.
     pub(crate) mounts: Vec<Mount>,
+    /// What the system back does: close the modal or the page on top.
+    pub(crate) back: Option<Handler>,
 }
 
 /// One of rekindle's nodes was pressed: run the press, and say when done.
@@ -108,6 +118,8 @@ fn requests() -> std::sync::MutexGuard<'static, Option<mpsc::Sender<Request>>> {
 pub(crate) fn handles(p: &PluginPress) -> bool {
     [
         rows::SECTION,
+        rows::PAGE,
+        rows::PAGE_PANEL,
         rows::MODAL,
         rows::MODAL_SCRIM,
         rows::MODAL_CARD,
@@ -116,7 +128,8 @@ pub(crate) fn handles(p: &PluginPress) -> bool {
     .contains(&p.surface.as_str())
 }
 
-/// Hand a press to the runtime, and wait up to [`ANSWER_WAIT`] for it. True
+/// Hand a press to the runtime, and wait up to [`ANSWER_WAIT`] for it, or
+/// [`PAGE_WAIT`] on rekindle's menu and pages. True
 /// if it answered in time; false if it didn't or isn't running.
 pub(crate) fn press(p: &PluginPress) -> bool {
     let (done, answered) = mpsc::sync_channel(1);
@@ -127,7 +140,12 @@ pub(crate) fn press(p: &PluginPress) -> bool {
         })
         .is_ok()
     });
-    sent && answered.recv_timeout(ANSWER_WAIT).is_ok()
+    let wait = if [rows::SECTION, rows::PAGE].contains(&p.surface.as_str()) {
+        PAGE_WAIT
+    } else {
+        ANSWER_WAIT
+    };
+    sent && answered.recv_timeout(wait).is_ok()
 }
 
 /// The plugin home: `rekindle` in the app's own files dir.
@@ -160,6 +178,12 @@ struct Surfaces {
     /// What a press on each of rekindle's rows reports, by handler surface
     /// and element, from the last render.
     presses: BTreeMap<(String, String), Press>,
+    /// The Manager's menu. Reading it reads every installed plugin, so it
+    /// is read again only after a press and when developer mode changes.
+    menu: Vec<Widget>,
+    /// The page shown, and which block of ids it has.
+    page: Option<Mount>,
+    block: usize,
 }
 
 impl Surfaces {
@@ -188,6 +212,9 @@ impl Surfaces {
             developer_mode,
             ticks: 0,
             presses: BTreeMap::new(),
+            menu: Vec::new(),
+            page: None,
+            block: 0,
         }
     }
 
@@ -244,9 +271,14 @@ fn run(rx: &mpsc::Receiver<Request>) {
             "runtime: home {} has {} installed: {:?}",
             surfaces.home.root().display(),
             list.len(),
-            list.iter().map(|i| format!("{}:{:?}", i.id, i.state)).collect::<Vec<_>>(),
+            list.iter()
+                .map(|i| format!("{}:{:?}", i.id, i.state))
+                .collect::<Vec<_>>(),
         )),
-        Err(e) => log(&format!("runtime: home installed() error: {}", crate::err(&e))),
+        Err(e) => log(&format!(
+            "runtime: home installed() error: {}",
+            crate::err(&e)
+        )),
     }
     let engine = rekindle_plugin_host::runtime::engine().map(|e| e.is_pulley());
     let plugins: Vec<String> = driver
@@ -275,6 +307,7 @@ fn run(rx: &mpsc::Receiver<Request>) {
         surfaces.chat_bar.is_some(),
     ));
     let mut logs = 0;
+    surfaces.menu = driver.rekindle().menu();
     publish(&mut driver, &mut surfaces);
     loop {
         match rx.recv_timeout(TICK) {
@@ -282,6 +315,9 @@ fn run(rx: &mpsc::Receiver<Request>) {
                 serve(&mut driver, &mut surfaces, &r.press);
                 // The press may have stopped waiting.
                 let _ = r.done.send(());
+                // The menu's counts, after the press is answered: reading
+                // them reads every installed plugin.
+                surfaces.menu = driver.rekindle().menu();
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => return,
@@ -289,7 +325,11 @@ fn run(rx: &mpsc::Receiver<Request>) {
         driver.tick();
         surfaces.ticks = surfaces.ticks.wrapping_add(1);
         if surfaces.ticks.is_multiple_of(DEVELOPER_MODE_EVERY) {
-            surfaces.developer_mode = surfaces.home.developer_mode().unwrap_or(false);
+            let now = surfaces.home.developer_mode().unwrap_or(false);
+            if now != surfaces.developer_mode {
+                surfaces.developer_mode = now;
+                surfaces.menu = driver.rekindle().menu();
+            }
         }
         publish(&mut driver, &mut surfaces);
         let (records, next) = driver.rekindle().logs_since(logs);
@@ -307,7 +347,12 @@ fn serve(driver: &mut Driver, surfaces: &mut Surfaces, p: &PluginPress) {
     let before = running(driver);
     let click = surfaces.click(p, &before);
     let what = match &click {
-        Some(Click::Ui { element, value, .. }) => format!("{element}={value:?}"),
+        Some(Click::Ui {
+            plugin,
+            element,
+            value,
+            ..
+        }) => format!("{plugin}:{element}={value:?}"),
         Some(Click::Button { plugin, item }) => format!("button {plugin}/{item}"),
         Some(Click::Modal { plugin }) => format!("close {plugin}"),
         _ => "nothing".into(),
@@ -324,7 +369,7 @@ fn serve(driver: &mut Driver, surfaces: &mut Surfaces, p: &PluginPress) {
     log(&format!(
         "runtime: {}/{}/{} -> {what} in {} ms: started={started:?} stopped={stopped:?} \
          (last load: compile {} ms, instantiate {} ms, activate {} ms) running={:?} \
-         recolors={} mounts={} developer_mode={}",
+         recolors={} mounts={} page={} developer_mode={}",
         p.plugin,
         p.surface,
         p.element,
@@ -335,8 +380,34 @@ fn serve(driver: &mut Driver, surfaces: &mut Surfaces, p: &PluginPress) {
         state.running,
         state.recolors.len(),
         state.mounts.len(),
+        page_title(&state),
         surfaces.developer_mode,
     ));
+}
+
+/// The title of the page shown, for the log: the text of the page bar's
+/// title, `-` for none.
+fn page_title(state: &State) -> String {
+    state
+        .mounts
+        .iter()
+        .filter(|m| {
+            m.nodes.iter().any(|n| {
+                n.cells.iter().any(|c| {
+                    c.prop == rekindle_wire::a11y::ids::ID
+                        && c.value == rekindle_wire::Value::Str("rekindle.page".into())
+                })
+            })
+        })
+        .flat_map(|m| &m.nodes)
+        // The bar's title is the page's last text.
+        .rfind(|n| n.kind == rekindle_wire::ElementKind::TEXT)
+        .and_then(|n| {
+            n.cells
+                .iter()
+                .find(|c| c.prop == rekindle_wire_inject::TEXT)
+        })
+        .map_or_else(|| "-".into(), |c| format!("{:?}", c.value))
 }
 
 /// The plugins running, by id.
@@ -399,25 +470,49 @@ fn up() -> anyhow::Result<(Driver, Home)> {
 fn publish(driver: &mut Driver, surfaces: &mut Surfaces) -> State {
     let running = running(driver);
     let mut mounts = Vec::new();
+    let mut back = None;
     if let Some(look) = &surfaces.look {
-        let widgets = rekindle_ui_hook::panels()
-            .into_iter()
+        let panels = rekindle_ui_hook::panels();
+        let widgets = panels
+            .iter()
             .find(|p| p.plugin == manager::OWNER)
-            .map(|p| p.widgets)
+            .map(|p| p.widgets.clone())
             .unwrap_or_default();
-        let items = rows::section_items(&widgets, surfaces.developer_mode);
-        let modal = rekindle_ui_hook::modal_plugin()
-            .zip(rekindle_ui_hook::modal_panel())
-            .map(|(plugin, panel)| rows::modal(look, &plugin, &panel));
-        let rendered = rows::join(std::iter::once(rows::section(look, &items)).chain(modal));
+        let menu = rows::section(look, &rows::menu_items(&surfaces.menu));
+        // Any view but the grid is a page, and a plugin's page shows the
+        // plugin's own panels under the Manager's rows.
+        let page = (!rows::is_grid(&widgets)).then(|| {
+            let shown = driver.rekindle().detail_of();
+            let own: Vec<_> = panels
+                .iter()
+                .filter(|p| shown.as_deref() == Some(p.plugin.as_str()))
+                .cloned()
+                .collect();
+            let mut page = rows::page(look, &widgets, &own, surfaces.block);
+            // A page of another shape goes under the other block of ids,
+            // so the old one is taken out before the new one is made.
+            if let (Some(old), Some(new)) = (&surfaces.page, page.mounts.first())
+                && !old.same_shape(new)
+            {
+                surfaces.block ^= 1;
+                page = rows::page(look, &widgets, &own, surfaces.block);
+            }
+            page
+        });
+        surfaces.page = page.as_ref().and_then(|p| p.mounts.first().cloned());
+        let modal = rekindle_ui_hook::modal_plugin().zip(rekindle_ui_hook::modal_panel());
+        back = match (&modal, &surfaces.page) {
+            (Some((plugin, _)), _) => Some(rows::modal_back(plugin)),
+            (None, Some(_)) => Some(rows::page_back()),
+            (None, None) => None,
+        };
+        let modal = modal.map(|(plugin, panel)| rows::modal(look, &plugin, &panel));
+        let rendered = rows::join(std::iter::once(menu).chain(page).chain(modal));
         mounts = rendered.mounts;
         surfaces.presses = rendered.presses;
     }
     if let Some(slot) = &surfaces.chat_bar {
-        mounts.extend(crate::wire::button_mounts(
-            &driver.chat_bar_buttons(),
-            slot,
-        ));
+        mounts.extend(crate::wire::button_mounts(&driver.chat_bar_buttons(), slot));
     }
     let palettes = driver.recolors();
     // Reading which palette the guest shows walks its whole tree under the
@@ -433,6 +528,7 @@ fn publish(driver: &mut Driver, surfaces: &mut Surfaces) -> State {
         recolors,
         running,
         mounts,
+        back,
     };
     super::set_plugins(state.clone());
     state

@@ -533,29 +533,29 @@ pub(crate) fn button_mounts(buttons: &[(String, Button)], slot: &SlotMap) -> Vec
                 Cell::new(a11y::ID, Value::Str(format!("rekindle.{plugin}.{item}"))),
             ];
             cells.extend(slot.cells.iter().cloned());
-            let glyph = match slot.images.get(&b.glyph) {
-                Some(image) => MountNode {
+            let glyph = if let Some(image) = slot.images.get(&b.glyph) {
+                MountNode {
                     id: root + 1,
                     kind: ElementKind::IMAGE,
                     cells: image.clone(),
                     children: Vec::new(),
                     on_press: None,
-                },
-                None => {
-                    let mut cells = vec![Cell::new(TEXT, Value::Str(b.glyph.clone()))];
-                    cells.extend(slot.glyph.iter().cloned());
-                    MountNode {
-                        id: root + 1,
-                        kind: ElementKind::TEXT,
-                        cells,
-                        children: Vec::new(),
-                        on_press: None,
-                    }
+                }
+            } else {
+                let mut cells = vec![Cell::new(TEXT, Value::Str(b.glyph.clone()))];
+                cells.extend(slot.glyph.iter().cloned());
+                MountNode {
+                    id: root + 1,
+                    kind: ElementKind::TEXT,
+                    cells,
+                    children: Vec::new(),
+                    on_press: None,
                 }
             };
             Some(Mount {
                 under: slot.under.clone(),
                 after: None,
+                before: None,
                 root,
                 nodes: vec![
                     MountNode {

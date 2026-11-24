@@ -753,6 +753,18 @@ impl Rekindle {
     pub fn info(&self, id: &str) -> Option<PluginInfo> {
         self.runtime.plugin(id)
     }
+
+    /// The top of rekindle's panel as widgets, for a client that shows the
+    /// panel a page at a time (`Manager::menu`). Its controls are the
+    /// panel's, so a press on one goes to the panel like any other.
+    pub fn menu(&self) -> Vec<rekindle_ui_hook::Widget> {
+        crate::convert::widgets_of(&self.manager.menu().elements)
+    }
+
+    /// The plugin whose page rekindle's panel shows, if one is.
+    pub fn detail_of(&self) -> Option<String> {
+        self.manager.detail_of().map(String::from)
+    }
 }
 
 /// Load the user's installed plugins into `runtime`, as sources. A plugin
