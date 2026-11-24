@@ -235,20 +235,15 @@ pub(crate) fn received(passed: Vec<Passed>) {
     }
 }
 
-/// The plugin home: `rekindle` in the app's own files dir.
+/// The plugin home: `rekindle` in the app's own files dir, the same dir the
+/// config resolves to ([`super::config_dir`]), so plugins and config live
+/// together. A dev launch that points `REKINDLE_HOST_DIR` elsewhere puts the
+/// home there too.
 fn home() -> anyhow::Result<PathBuf> {
-    let cmdline = std::fs::read("/proc/self/cmdline")?;
-    let package = cmdline.split(|b| *b == 0).next().unwrap_or_default();
-    let package = std::str::from_utf8(package)?;
-    // A process name such as `com.discord:service` belongs to the package
-    // before the colon.
-    let package = package.split(':').next().unwrap_or_default();
-    if package.is_empty() || package.contains('/') {
-        anyhow::bail!("no package name in /proc/self/cmdline");
+    if std::env::var_os("REKINDLE_HOST_DIR").is_some() {
+        return Ok(super::config_dir());
     }
-    Ok(PathBuf::from(format!(
-        "/data/data/{package}/files/rekindle"
-    )))
+    super::app_config_dir().ok_or_else(|| anyhow::anyhow!("no package name in /proc/self/cmdline"))
 }
 
 /// What the runtime draws with, and what it drew.

@@ -48,12 +48,14 @@
 //! The report and the running counts go to logcat (tag `rekindle`), since an
 //! app has no console.
 
+pub(crate) mod apk;
 mod runtime;
 mod theme;
 
 use crate::gateway;
 use std::ffi::{CString, c_char, c_void};
-use std::sync::Mutex;
+use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
@@ -68,18 +70,93 @@ pub(crate) const EMIT_SLOT: &str = "wire_transport_emit_slot";
 pub(crate) const EVENT_SLOT: &str = "wire_event_dispatch_slot";
 /// A test run names a JSON file of `Work` the engine runs on the turns.
 const WORK_ENV: &str = "REKINDLE_HOST_WIRE_WORK";
-/// Where the loader leaves rekindle's files when no env var points at them:
-/// the `DT_NEEDED` loader can't set env, so the host reads this dir. Override
-/// with `REKINDLE_HOST_DIR`.
+/// The dev config dir, seeded over adb: the `DT_NEEDED` loader can't set env,
+/// so a build pushed with `adb push` leaves its files here. Used when no
+/// bundled config is in the APK. Override the whole choice with
+/// `REKINDLE_HOST_DIR`.
 const CONFIG_DIR: &str = "/data/local/tmp/rekindle";
+/// The app's own files, where a one-tap install keeps its config and plugin
+/// home: `<this>/rekindle`. Writable by the app (the host runs as the app's
+/// uid), unlike [`CONFIG_DIR`], so the host creates `known-slots.json` and
+/// the handshake here instead of relying on the shell pre-creating them.
+const APP_FILES: &str = "/data/data";
 /// How long [`run_worker`] waits for the client's library to be mapped.
 const IMAGE_WAIT: Duration = Duration::from_secs(60);
 
-/// A file in rekindle's config dir ([`CONFIG_DIR`], or `REKINDLE_HOST_DIR`).
-pub(crate) fn config_file(name: &str) -> std::path::PathBuf {
-    let dir = std::env::var_os("REKINDLE_HOST_DIR")
-        .map_or_else(|| std::path::PathBuf::from(CONFIG_DIR), Into::into);
-    dir.join(name)
+/// A file in rekindle's config dir. See [`config_dir`].
+pub(crate) fn config_file(name: &str) -> PathBuf {
+    config_dir().join(name)
+}
+
+/// rekindle's config dir, resolved once.
+///
+/// The order is:
+/// 1. `REKINDLE_HOST_DIR`, when a test run or a dev launch sets it.
+/// 2. The app's own `files/rekindle`, when the package is known. On the first
+///    run it is seeded from the config baked into the APK
+///    (`assets/rekindle/`, [`apk::seed_config`]), so a one-tap install carries
+///    `anchors.json`, the first-party plugins and the themes with no adb push.
+///    This is also the plugin home ([`runtime`]), so plugins and config share
+///    one dir.
+/// 3. The adb-seeded [`CONFIG_DIR`], when that holds an `anchors.json` and the
+///    app dir doesn't (a dev build with no bundled config).
+///
+/// With no package and no env, [`CONFIG_DIR`] is the last resort.
+pub(crate) fn config_dir() -> PathBuf {
+    static DIR: OnceLock<PathBuf> = OnceLock::new();
+    DIR.get_or_init(resolve_config_dir).clone()
+}
+
+fn resolve_config_dir() -> PathBuf {
+    if let Some(p) = std::env::var_os("REKINDLE_HOST_DIR") {
+        return p.into();
+    }
+    let tmp = PathBuf::from(CONFIG_DIR);
+    let Some(app) = app_config_dir() else {
+        return tmp;
+    };
+    if !app.join("anchors.json").exists() {
+        if let Err(e) = std::fs::create_dir_all(&app) {
+            log(&format!("config: can't create {}: {e}", app.display()));
+            return tmp;
+        }
+        match apk::seed_config(&app) {
+            Ok(0) => {}
+            Ok(n) => log(&format!(
+                "config: seeded {n} files from the APK into {}",
+                app.display()
+            )),
+            Err(e) => log(&format!("config: no bundled config seeded: {e}")),
+        }
+    }
+    if app.join("anchors.json").exists() {
+        return app;
+    }
+    // A dev build seeded tmp over adb and bundled nothing in the APK.
+    if tmp.join("anchors.json").exists() {
+        return tmp;
+    }
+    // Nothing anywhere yet: the app dir is writable, so prefer it.
+    app
+}
+
+/// `/data/data/<package>/files/rekindle`, from the process name, or `None`
+/// off-device or when the package can't be read.
+pub(crate) fn app_config_dir() -> Option<PathBuf> {
+    let package = package()?;
+    Some(PathBuf::from(format!("{APP_FILES}/{package}/files/rekindle")))
+}
+
+/// The app's package name from `/proc/self/cmdline`, dropping any `:process`
+/// suffix. `None` if it can't be read or isn't a plausible package.
+pub(crate) fn package() -> Option<String> {
+    let cmdline = std::fs::read("/proc/self/cmdline").ok()?;
+    let first = cmdline.split(|b| *b == 0).next().unwrap_or_default();
+    let name = std::str::from_utf8(first).ok()?.split(':').next()?;
+    if name.is_empty() || name.contains('/') {
+        return None;
+    }
+    Some(name.to_string())
 }
 
 /// What emit returns: a 24-byte value, which both AArch64 and x86-64 return
