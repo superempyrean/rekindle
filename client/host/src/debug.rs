@@ -6,6 +6,12 @@
 //! `GET /events` the last [`KEEP`] UI events, and `GET /tree` the mirrored
 //! tree with each node's cells.
 //!
+//! `GET /pick` waits for the next press on one of the guest's nodes, for
+//! up to `?wait=` seconds (30 by default), and answers with the selectors
+//! made for its node (`rekindle_wire_inject::Pick`). The press never
+//! reaches the guest. `GET /pick?node=N` picks node `N` at once. A request
+//! that times out is answered with 408.
+//!
 //! Host calls and host frames are never recorded: they carry the client's
 //! HTTP requests and responses, headers and bodies included. What an input
 //! holds or sends is replaced by its length: the `value`, `forceValue` and
@@ -18,7 +24,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::net::{Ipv4Addr, TcpListener, TcpStream};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use rekindle_wire::event::{self, UiEvent};
 use rekindle_wire::turn::NodeOp;
@@ -51,7 +57,10 @@ pub(crate) fn start() -> Option<u16> {
         .name("rekindle-debug".into())
         .spawn(move || {
             for stream in listener.incoming().flatten() {
-                let _ = serve(stream);
+                // A pick waits for the user, so each request has a thread.
+                let _ = std::thread::Builder::new()
+                    .name("rekindle-debug-req".into())
+                    .spawn(move || serve(stream));
             }
         })
         .ok()?;
@@ -253,8 +262,10 @@ fn serve(stream: TcpStream) -> std::io::Result<()> {
     let mut reader = BufReader::new(stream.try_clone()?);
     let mut line = String::new();
     reader.read_line(&mut line)?;
-    let path = line.split_whitespace().nth(1).unwrap_or("/");
+    let target = line.split_whitespace().nth(1).unwrap_or("/");
+    let (path, query) = target.split_once('?').unwrap_or((target, ""));
     let (status, body) = match (line.starts_with("GET "), path) {
+        (true, "/pick") => pick(query),
         (true, "/ops") => ("200 OK", list(&OPS)),
         (true, "/events") => ("200 OK", list(&EVENTS)),
         (true, "/tree") => (
@@ -263,11 +274,11 @@ fn serve(stream: TcpStream) -> std::io::Result<()> {
         ),
         (true, "/") => (
             "200 OK",
-            json!({ "endpoints": ["/ops", "/events", "/tree"] }),
+            json!({ "endpoints": ["/ops", "/events", "/tree", "/pick"] }),
         ),
         _ => (
             "404 Not Found",
-            json!({ "error": "GET /ops, /events or /tree" }),
+            json!({ "error": "GET /ops, /events, /tree or /pick" }),
         ),
     };
     let body = body.to_string();
@@ -279,6 +290,49 @@ fn serve(stream: TcpStream) -> std::io::Result<()> {
         body.len()
     )?;
     stream.flush()
+}
+
+/// The longest `?wait=` a pick takes, in seconds.
+const MAX_WAIT: u64 = 300;
+
+/// `GET /pick`: `?node=N`, or wait for a press.
+fn pick(query: &str) -> (&'static str, Json) {
+    let arg = |name: &str| {
+        query
+            .split('&')
+            .filter_map(|kv| kv.split_once('='))
+            .find(|(k, _)| *k == name)
+            .and_then(|(_, v)| v.parse::<u64>().ok())
+    };
+    let found =
+        |p: Option<rekindle_wire_inject::Pick>| serde_json::to_value(p).unwrap_or(Json::Null);
+    if let Some(node) = arg("node") {
+        let node = u32::try_from(node).unwrap_or(u32::MAX);
+        return match crate::wire::engine(|e| e.pick_node(node)) {
+            None => ("503 Service Unavailable", json!({ "error": "no engine" })),
+            Some(None) => (
+                "404 Not Found",
+                json!({ "error": format!("no node {node} in the guest's tree") }),
+            ),
+            Some(p) => ("200 OK", found(p)),
+        };
+    }
+    if crate::wire::engine(rekindle_wire_inject::Engine::pick).is_none() {
+        return ("503 Service Unavailable", json!({ "error": "no engine" }));
+    }
+    let wait = Duration::from_secs(arg("wait").unwrap_or(30).min(MAX_WAIT));
+    let start = Instant::now();
+    while start.elapsed() < wait {
+        if let Some(Some(p)) = crate::wire::engine(rekindle_wire_inject::Engine::take_pick) {
+            return ("200 OK", found(Some(p)));
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    crate::wire::engine(rekindle_wire_inject::Engine::cancel_pick);
+    (
+        "408 Request Timeout",
+        json!({ "error": format!("no press in {}s", wait.as_secs()) }),
+    )
 }
 
 fn list(l: &Mutex<VecDeque<Json>>) -> Json {
@@ -316,6 +370,15 @@ mod tests {
     fn quoted_strings_in_other_events_are_cut() {
         let s = redact_debug(&UiEvent::Back);
         assert!(!s.contains('"'));
+    }
+
+    #[test]
+    fn a_pick_without_an_engine_says_so() {
+        for q in ["node=3", "wait=0", ""] {
+            let (status, body) = pick(q);
+            assert_eq!(status, "503 Service Unavailable", "{q}");
+            assert_eq!(body, json!({ "error": "no engine" }));
+        }
     }
 
     #[test]

@@ -936,6 +936,12 @@ fn with_engine<T>(f: impl FnOnce(&mut Engine) -> T) -> Option<T> {
         .flatten()
 }
 
+/// Run `f` on the engine, for the debug endpoint. `None` when there is no
+/// engine.
+pub(crate) fn engine<T>(f: impl FnOnce(&mut Engine) -> T) -> Option<T> {
+    with_engine(f)
+}
+
 /// Run `f` on the tree rekindle mirrors, for the debug endpoint.
 pub(crate) fn mirror<T>(f: impl FnOnce(&rekindle_wire::Tree) -> T) -> Option<T> {
     with_engine(|e| f(e.mirror()))

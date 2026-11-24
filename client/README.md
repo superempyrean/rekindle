@@ -106,6 +106,8 @@ the variable, and it never listens on another interface.
 | `GET /ops` | the last 200 turns the guest emitted, each op decoded with property names |
 | `GET /events` | the last 200 UI events the client dispatched to the guest |
 | `GET /tree` | the tree rekindle mirrors: each node's kind, children and cells |
+| `GET /pick?wait=30` | waits for the next press, consumes it, and returns selectors for the pressed node |
+| `GET /pick?node=N` | selectors for node `N` of the guest's tree, at once |
 
 Host calls and host frames are never recorded, since they carry the
 client's HTTP requests and responses with their headers and bodies. The
@@ -113,6 +115,34 @@ client's HTTP requests and responses with their headers and bodies. The
 event, appear as their length (`"<7 chars>"`), so text typed into a
 password field doesn't show. The report's `debug_port` field says the
 endpoint is up.
+
+## Picking a selector
+
+If you press an element after asking for a pick, the press doesn't reach
+the guest. The host makes selectors for the pressed node from the guest's
+tree instead, ranks them, and proposes a name for the element.
+`rekindle pick` asks for one and prints the ranking:
+
+```sh
+rekindle pick --port 9229            # desktop, through the debug endpoint
+rekindle pick --dir <config dir>     # a phone app's host
+rekindle pick --capture guest.capture --node 233
+```
+
+A phone app's host has no port. It reads `pick.req` in its config dir
+every second, where `press` asks for the next press, a number picks
+that node and `cancel` stops waiting. The pick goes to `pick.json` beside it. On a device you reach
+over SSH, write `press` to the file, tap the element, and read
+`pick.json` back.
+
+The node's own `accessibilityId` ranks first. A node without one is found
+by its label, text or kind, `within` the nearest ancestors that have one.
+`ChildOf` chains are offered only for an ancestor up to four levels up, and
+rank lower than `within` from two levels up. Each selector comes with how
+many of the tree's nodes it matches, and one that matches only the pressed
+node ranks above any that doesn't. An id that ends in four digits or more
+(`dm_row_1531461354488201407`) is offered whole and as a `prefix`, which
+finds every row of that kind.
 
 ## Limitations
 

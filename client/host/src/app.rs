@@ -214,6 +214,61 @@ pub fn poll() {
     poll_test_gateway();
     poll_tree_dump();
     poll_test_compose();
+    poll_pick();
+}
+
+/// A picker asks for the next press by leaving `press` in this file in the
+/// config dir, or for one node by its number, and `cancel` stops waiting.
+/// The host clears the file, and writes the pick to [`PICK_ANSWER`] as JSON
+/// (`rekindle_wire_inject::Pick`) once the press arrives. The press never
+/// reaches the guest.
+const PICK_REQUEST: &str = "pick.req";
+const PICK_ANSWER: &str = "pick.json";
+
+fn poll_pick() {
+    let path = config_file(PICK_REQUEST);
+    if let Ok(req) = std::fs::read_to_string(&path)
+        && !req.trim().is_empty()
+    {
+        // Written in place, as the app can't create files in the config dir.
+        let _ = std::fs::write(&path, "");
+        let _ = std::fs::write(config_file(PICK_ANSWER), "");
+        let req = req.trim();
+        if req == "cancel" {
+            with_engine(Engine::cancel_pick);
+            log("pick: cancelled");
+        } else if let Ok(node) = req.parse::<u32>() {
+            let picked = with_engine(|e| e.pick_node(node)).flatten();
+            write_pick(
+                picked.as_ref(),
+                &format!("no node {node} in the guest's tree"),
+            );
+        } else if with_engine(Engine::pick).is_some() {
+            log("pick: waiting for a press");
+        } else {
+            write_pick(None, "no engine");
+        }
+    }
+    if let Some(p) = with_engine(Engine::take_pick).flatten() {
+        write_pick(Some(&p), "");
+    }
+}
+
+fn write_pick(p: Option<&rekindle_wire_inject::Pick>, error: &str) {
+    let json = match p {
+        Some(p) => {
+            log(&format!(
+                "pick: #{} {} ({:?})",
+                p.node, p.name, p.best.basis
+            ));
+            serde_json::to_string_pretty(p).unwrap_or_default()
+        }
+        None => {
+            log(&format!("pick: {error}"));
+            serde_json::json!({ "error": error }).to_string()
+        }
+    };
+    let _ = std::fs::write(config_file(PICK_ANSWER), json);
 }
 
 /// A test run sets the text of the field `insert-text` would use by
