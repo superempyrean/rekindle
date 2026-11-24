@@ -79,6 +79,15 @@ pub fn engine() -> Result<Engine> {
     // Running wasm checks the engine's epoch, which a thread advances every
     // EPOCH_TICK, so a call's wall-clock limit is enforced to about a tick.
     config.epoch_interruption(true);
+    // Android runs plugins on Pulley, wasmtime's interpreter. Its code is
+    // bytecode in data pages, so the app never maps memory executable, which
+    // SELinux may refuse an app. Bounds are checked in the interpreter, so no
+    // signal handler of wasmtime's sits beside the runtime's own.
+    #[cfg(target_os = "android")]
+    {
+        config.target("pulley64")?;
+        config.signals_based_traps(false);
+    }
     let engine = Engine::new(&config)?;
     let ticker = engine.clone();
     std::thread::Builder::new()

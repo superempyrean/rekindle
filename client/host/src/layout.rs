@@ -13,6 +13,12 @@ pub(crate) fn load_palette() -> Vec<(String, Vec<(String, u32)>)> {
     let Ok(path) = std::env::var(env::PALETTE) else {
         return Vec::new();
     };
+    read_palette(std::path::Path::new(&path))
+}
+
+/// The palette file at `path`, as [`load_palette`] reads it. Empty when it
+/// can't be read.
+pub(crate) fn read_palette(path: &std::path::Path) -> Vec<(String, Vec<(String, u32)>)> {
     let Ok(text) = std::fs::read_to_string(path) else {
         return Vec::new();
     };

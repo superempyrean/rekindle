@@ -17,7 +17,7 @@ use rekindle_plugin_host::model::{LogLevel, LogRecord, Mods, ToastKind, UiEvent}
 use rekindle_plugin_host::net::{
     HttpError, HttpRequest, HttpResponse, NetClient, NetLimits, UreqClient,
 };
-use rekindle_plugin_host::runtime::{PluginInfo, Status, StorageLocation};
+use rekindle_plugin_host::runtime::{LoadTimes, PluginInfo, Status, StorageLocation};
 use rekindle_plugin_host::store::Download;
 use rekindle_plugin_host::updates::{self, Outcome, Updater};
 use rekindle_plugin_host::{ClientBackend as _, Runtime, SharedBackend, Trust};
@@ -87,7 +87,10 @@ impl Rekindle {
     /// runtime can't start. A plugin that doesn't load is reported, not an
     /// error.
     pub(crate) fn new(backend: DetourBackend, opts: ExtArgs) -> Result<Self> {
-        let home = Home::from_env()?;
+        let home = match &opts.home {
+            Some(root) => Home::new(root),
+            None => Home::from_env()?,
+        };
         let backend = Arc::new(Mutex::new(backend));
         let shared: SharedBackend = backend.clone();
         let mut config = home.runtime_config();
@@ -707,6 +710,17 @@ impl Rekindle {
     /// The plugins loaded now.
     pub fn infos(&self) -> Vec<PluginInfo> {
         self.runtime.plugins()
+    }
+
+    /// Where the last plugin load spent its time.
+    pub fn last_load(&self) -> LoadTimes {
+        self.runtime.last_load
+    }
+
+    /// The plugins' log records after cursor `since`, and the cursor to pass
+    /// next time.
+    pub fn logs_since(&self, since: u64) -> (Vec<LogRecord>, u64) {
+        self.runtime.logs().since(since)
     }
 
     /// The plugins' renderers over `batch` (`Runtime::render`).

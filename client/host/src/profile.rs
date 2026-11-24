@@ -50,6 +50,7 @@ pub(crate) fn ext_args() -> (rekindle_extension::ExtArgs, usize) {
             memory_storage: false,
             allow_network: true,
             wait_for_client: false,
+            home: None,
         };
         return (ext, 0);
     }
@@ -67,6 +68,7 @@ pub(crate) fn ext_args() -> (rekindle_extension::ExtArgs, usize) {
             memory_storage: true,
             allow_network: false,
             wait_for_client: false,
+            home: None,
         },
         n,
     )

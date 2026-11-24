@@ -166,9 +166,14 @@ fn android_worker() {
         .map_or_else(|| android::config_file("handshake.txt"), Into::into);
     let _ = std::fs::write(handshake, format!("{report}\n"));
     READY.store(1, Ordering::Release);
+    let mut tick = 0u64;
     loop {
-        std::thread::sleep(std::time::Duration::from_secs(5));
-        android::log(&android::counts());
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        android::poll_test_press();
+        tick += 1;
+        if tick.is_multiple_of(5) {
+            android::log(&android::counts());
+        }
     }
 }
 

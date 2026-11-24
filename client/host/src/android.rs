@@ -39,15 +39,21 @@
 //! dispatch returns. A consumed event makes the guest render nothing, and an
 //! idle guest sends no turns, so nothing else would carry the change.
 //!
+//! With a palette in the config dir, the plugin runtime runs in the app too
+//! ([`runtime`]). A press on a plugin's switch goes to it, and the theme its
+//! plugins set becomes the engine's recolours.
+//!
 //! The report and the running counts go to logcat (tag `rekindle`), since an
 //! app has no console.
 
+mod runtime;
+
 use std::ffi::{CString, c_char, c_void};
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use rekindle_wire_inject::{Engine, PluginPress, Switches, Verdict, Work};
+use rekindle_wire_inject::{Engine, Handler, PluginPress, Switches, Verdict, Work};
 
 use crate::hooks::Hooks;
 
@@ -112,6 +118,9 @@ static CALLS: AtomicU64 = AtomicU64::new(0);
 static DISPATCHES: AtomicU64 = AtomicU64::new(0);
 static CONSUMED: AtomicU64 = AtomicU64::new(0);
 static FLUSHED: AtomicU64 = AtomicU64::new(0);
+/// Set when the engine's work changed outside a turn, so the next dispatch
+/// flushes it.
+static DIRTY: AtomicBool = AtomicBool::new(false);
 /// The transport the guest last emitted through, for [`flush`].
 static TRANSPORT: AtomicUsize = AtomicUsize::new(0);
 
@@ -127,7 +136,13 @@ pub(crate) fn run_worker() -> String {
     let mut out = crate::report_head();
     // Before the swap, so the first turn the hook sees reaches the engine.
     match build_engine() {
-        Ok(true) => crate::field(&mut out, "wire_engine", "on"),
+        Ok(true) => {
+            crate::field(&mut out, "wire_engine", "on");
+            if runtime::wanted() {
+                runtime::start();
+                crate::field(&mut out, "runtime", "starting");
+            }
+        }
         Ok(false) => crate::field(&mut out, "wire_engine", "off"),
         Err(e) => crate::field(&mut out, "wire_engine", crate::err(&e)),
     }
@@ -374,20 +389,21 @@ fn early_swap(which: &'static Slot, bias: usize, recorded: (u64, u64), hook: usi
     }
 }
 
-/// Build the engine from the `Work` a test run names, if it names one. True
-/// when an engine is in place.
+/// Build the engine from the `Work` a test run names, if it names one, or
+/// for the plugin runtime. True when an engine is in place.
 fn build_engine() -> anyhow::Result<bool> {
-    let path = std::env::var_os(WORK_ENV).map_or_else(|| config_file("work.json"), Into::into);
-    if !path.exists() {
-        return Ok(false);
-    }
-    let json = std::fs::read_to_string(&path).map_err(|e| {
-        anyhow::anyhow!("can't read {}: {e}", std::path::Path::new(&path).display())
-    })?;
-    let base = Work::from_json(&json).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let path: std::path::PathBuf =
+        std::env::var_os(WORK_ENV).map_or_else(|| config_file("work.json"), Into::into);
+    let base = if path.exists() {
+        let json = std::fs::read_to_string(&path)
+            .map_err(|e| anyhow::anyhow!("can't read {}: {e}", path.display()))?;
+        Work::from_json(&json).map_err(|e| anyhow::anyhow!("{e}"))?
+    } else {
+        Work::default()
+    };
     let panel = Panel::load(base)?;
     let work = panel.work();
-    if work.is_empty() {
+    if work.is_empty() && !runtime::wanted() {
         return Ok(false);
     }
     let engine = Engine::new(work).map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -402,12 +418,14 @@ const SWITCHES: &str = "switches.json";
 /// [`KNOWN_SLOTS`], so the shell creates it.
 const SWITCH_STATE: &str = "switch-state.json";
 
-/// The work as `work.json` gives it, and the switches in it with their
-/// state.
+/// The work as `work.json` gives it, the switches in it with their state,
+/// and what the plugin runtime adds.
 struct Panel {
     base: Work,
     switches: Switches,
     on: std::collections::BTreeMap<String, bool>,
+    /// What the runtime last made of its plugins, once it runs.
+    plugins: Option<runtime::State>,
 }
 
 impl Panel {
@@ -420,11 +438,31 @@ impl Panel {
             .ok()
             .and_then(|b| serde_json::from_slice(&b).ok())
             .unwrap_or_default();
-        Ok(Panel { base, switches, on })
+        Ok(Panel {
+            base,
+            switches,
+            on,
+            plugins: None,
+        })
     }
 
+    /// The work for the switches' state, with the plugins' recolours after
+    /// the base work's. A plugin's switch (`on:<id>`) is on while the
+    /// plugin runs.
     fn work(&self) -> Work {
-        self.switches.apply(&self.base, &self.on)
+        let mut on = self.on.clone();
+        if let Some(p) = &self.plugins {
+            for s in &self.switches.switches {
+                if let Some(id) = plugin_switch(&s.element) {
+                    on.insert(s.element.clone(), p.running.contains(id));
+                }
+            }
+        }
+        let mut work = self.switches.apply(&self.base, &on);
+        if let Some(p) = &self.plugins {
+            work.recolors.extend(p.recolors.iter().copied());
+        }
+        work
     }
 
     /// Flip the switch a press is for, and keep its state for the next
@@ -448,6 +486,43 @@ impl Panel {
 }
 
 static PANEL: Mutex<Option<Panel>> = Mutex::new(None);
+
+/// The plugin a switch element turns on and off: `on:<id>`, as the Manager
+/// names its own switch for the plugin.
+fn plugin_switch(element: &str) -> Option<&str> {
+    element.strip_prefix("on:")
+}
+
+/// The runtime's new state: set the work it makes on the engine, to be
+/// flushed on the next dispatch. Called on the runtime's thread.
+fn set_plugins(state: runtime::State) {
+    let work = {
+        let mut panel = panel_lock();
+        let Some(panel) = panel.as_mut() else {
+            return;
+        };
+        if panel.plugins.as_ref() == Some(&state) {
+            return;
+        }
+        log(&format!(
+            "plugins: running={:?} recolors={}",
+            state.running,
+            state.recolors.len()
+        ));
+        panel.plugins = Some(state);
+        panel.work()
+    };
+    set_work(work);
+}
+
+/// Set `work` on the engine, for the next dispatch to flush.
+fn set_work(work: Work) {
+    match with_engine(|e| e.set_work(work)) {
+        Some(Ok(())) => DIRTY.store(true, Ordering::SeqCst),
+        Some(Err(e)) => log(&format!("work refused: {e}")),
+        None => {}
+    }
+}
 
 fn panel_lock() -> std::sync::MutexGuard<'static, Option<Panel>> {
     PANEL
@@ -603,9 +678,11 @@ unsafe extern "C" fn hooked_dispatch(
     if n < 4 {
         log(&format!("dispatch #{n} len={len} tid={}", gettid()));
     }
+    // A test run's press goes through the engine as the host's would.
+    let _ = std::panic::catch_unwind(dispatch_test_press);
     // SAFETY: the host passes `len` readable bytes.
     let buf = unsafe { std::slice::from_raw_parts(bytes, len) };
-    match with_engine(|e| e.event(buf)) {
+    let r = match with_engine(|e| e.event(buf)) {
         Some(Ok(Verdict::Consume(_))) => {
             CONSUMED.fetch_add(1, Ordering::Relaxed);
             // A panic can't unwind into the host's frame.
@@ -627,36 +704,66 @@ unsafe extern "C" fn hooked_dispatch(
         }
         // SAFETY: the host's own arguments.
         _ => unsafe { original(data, bytes, len) },
+    };
+    // What the runtime changed outside a turn, after the guest's own turns
+    // for this event. A panic can't unwind into the host's frame.
+    let _ = std::panic::catch_unwind(flush_pending);
+    r
+}
+
+/// Hand the presses the engine kept to the switches and the runtime, and
+/// flush the work they make. On the guest's thread, inside its dispatch,
+/// where the guest itself emits.
+fn deliver_presses() {
+    let presses = with_engine(Engine::take_presses).unwrap_or_default();
+    for p in &presses {
+        let at = Instant::now();
+        if let Some(id) = plugin_switch(&p.element) {
+            let running = panel_lock()
+                .as_ref()
+                .and_then(|panel| panel.plugins.as_ref())
+                .map(|s| s.running.contains(id));
+            let Some(running) = running else {
+                log(&format!("press {}: the runtime isn't up", p.element));
+                continue;
+            };
+            // No lock is held while the runtime works, since it sets the
+            // plugins' work itself.
+            let answered = runtime::toggle(id, !running);
+            let waited = at.elapsed();
+            let flushed = flush_pending();
+            log(&format!(
+                "press {} -> {}: answered={answered} wait={} us flushed={flushed} bytes total={} us",
+                p.element,
+                if running { "off" } else { "on" },
+                waited.as_micros(),
+                at.elapsed().as_micros(),
+            ));
+            continue;
+        }
+        let work = panel_lock().as_mut().and_then(|panel| panel.press(p));
+        match work {
+            Some(work) => {
+                set_work(work);
+                flush_pending();
+            }
+            None => log(&format!("press {}/{}/{}", p.plugin, p.surface, p.element)),
+        }
     }
 }
 
-/// Hand the presses the engine kept to the switches, and flush the work
-/// they make. On the guest's thread, inside its dispatch, where the guest
-/// itself emits.
-fn deliver_presses() {
-    let presses = with_engine(Engine::take_presses).unwrap_or_default();
-    let mut work = None;
-    if let Some(panel) = panel_lock().as_mut() {
-        for p in &presses {
-            match panel.press(p) {
-                Some(w) => work = Some(w),
-                None => log(&format!("press {}/{}/{}", p.plugin, p.surface, p.element)),
-            }
-        }
+/// Flush the engine's work if it changed outside a turn. The length of the
+/// turn flushed, 0 for none.
+fn flush_pending() -> usize {
+    if !DIRTY.swap(false, Ordering::SeqCst) {
+        return 0;
     }
-    let Some(work) = work else {
-        return;
-    };
-    let flushed = with_engine(|e| match e.set_work(work) {
-        Ok(()) => e.flush(),
-        Err(err) => {
-            log(&format!("switch work refused: {err}"));
-            None
+    match with_engine(Engine::flush).flatten() {
+        Some(ops) => {
+            flush(&ops);
+            ops.len()
         }
-    })
-    .flatten();
-    if let Some(ops) = flushed {
-        flush(&ops);
+        None => 0,
     }
 }
 
@@ -697,6 +804,67 @@ fn flush(ops: &[u8]) {
 fn gettid() -> i64 {
     // SAFETY: `gettid` takes no arguments and always succeeds.
     i64::from(unsafe { libc::gettid() })
+}
+
+/// A test run presses one of rekindle's own nodes by writing the element of
+/// its handler to this file in the config dir, which the shell creates. The
+/// host reads it every second and clears it. The press reaches the engine in
+/// the next dispatch, on the guest's thread, as a press the host raised on
+/// that node would, so a run can check the press path without input on the
+/// device.
+const TEST_PRESS: &str = "press.txt";
+
+/// The test run's press, as event bytes, until a dispatch takes it.
+static PRESS: Mutex<Option<Vec<u8>>> = Mutex::new(None);
+
+/// Take the test run's press from [`TEST_PRESS`], if it holds one. Called
+/// by the worker every second.
+pub(crate) fn poll_test_press() {
+    let path = config_file(TEST_PRESS);
+    let Ok(element) = std::fs::read_to_string(&path) else {
+        return;
+    };
+    let element = element.trim();
+    if element.is_empty() {
+        return;
+    }
+    // Written in place, as the app can't create files in the config dir.
+    let _ = std::fs::write(&path, "");
+    let node = with_engine(|e| {
+        e.work()
+            .mounts
+            .iter()
+            .flat_map(|m| &m.nodes)
+            .find(|n| {
+                matches!(&n.on_press, Some(Handler::Plugin { element: el, .. }) if el == element)
+            })
+            .map(|n| n.id)
+    })
+    .flatten();
+    match node {
+        Some(node) => {
+            log(&format!("test press {element} on node {node:#x}"));
+            *lock_press() = Some(rekindle_wire::event::Event::press(node).to_bytes());
+        }
+        None => log(&format!("test press {element}: no node has that handler")),
+    }
+}
+
+fn lock_press() -> std::sync::MutexGuard<'static, Option<Vec<u8>>> {
+    PRESS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Run the test run's press through the engine, if one waits.
+fn dispatch_test_press() {
+    let Some(bytes) = lock_press().take() else {
+        return;
+    };
+    if let Some(Ok(Verdict::Consume(_))) = with_engine(|e| e.event(&bytes)) {
+        CONSUMED.fetch_add(1, Ordering::Relaxed);
+        deliver_presses();
+    }
 }
 
 /// How many of the first turns [`CAPTURE`] records.

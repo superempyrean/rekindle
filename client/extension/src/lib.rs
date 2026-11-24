@@ -78,6 +78,9 @@ pub struct ExtArgs {
     /// Start the plugins once the client has handed rekindle its model
     /// (`rekindle_ui_hook::client::ready`), instead of at once.
     pub wait_for_client: bool,
+    /// The plugin home, when it isn't `$REKINDLE_HOME` or `~/.rekindle`. An
+    /// app on Android has no `HOME` and keeps it in its own files.
+    pub home: Option<PathBuf>,
 }
 
 /// The routing key of a plugin's item. `\u{1f}` can't appear in a plugin or

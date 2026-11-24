@@ -443,6 +443,22 @@ fn theme_recolors(driver: &Driver, engine: &Engine) -> Vec<Recolor> {
         .unwrap_or_default()
 }
 
+/// The recolours for the plugins' theme on a client whose turns don't pass
+/// [`follow`]: those of palette `shown`, or of the first palette.
+#[cfg_attr(
+    not(target_os = "android"),
+    expect(dead_code, reason = "the Android host's runtime calls it")
+)]
+pub(crate) fn palette_recolors(
+    palettes: &[rekindle_ui_hook::ThemePalette],
+    shown: Option<usize>,
+) -> Vec<Recolor> {
+    palettes
+        .get(shown.unwrap_or(0))
+        .map(recolors)
+        .unwrap_or_default()
+}
+
 /// The first node id the plugins' mounts take, above the ids a test run's
 /// fixed work uses.
 const PLUGIN_IDS: NodeId = RESERVED + 0x0100_0000;
@@ -603,7 +619,7 @@ fn recolors(palette: &rekindle_ui_hook::ThemePalette) -> Vec<Recolor> {
 
 /// The palette most of the guest's colour cells come from, if any of them
 /// does. A tie goes to the earlier palette.
-fn shown_palette(
+pub(crate) fn shown_palette(
     guest: &rekindle_wire::Tree,
     palettes: &[rekindle_ui_hook::ThemePalette],
 ) -> Option<usize> {
