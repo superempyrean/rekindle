@@ -940,6 +940,188 @@ fn a_recolour_replaces_the_guests_colour_wherever_it_is_written() {
     );
 }
 
+/// Every grey `background` magenta.
+fn magenta_surfaces() -> Work {
+    Work {
+        prop_recolors: vec![PropRecolor {
+            props: vec![ids::BACKGROUND],
+            select: None,
+            max_chroma: Some(24),
+            opaque: false,
+            to: 0xff00_ffff,
+        }],
+        ..Work::default()
+    }
+}
+
+/// [`first`] in a theme: the page's fill and the rule's text colour.
+fn themed(page: u32, text: u32) -> Turn {
+    let mut t = first();
+    t.push(NodeOp::Update {
+        node: PAGE,
+        props: vec![(ids::BACKGROUND, rgba(page))],
+    });
+    t.push(NodeOp::Update {
+        node: RULE,
+        props: vec![(ids::COLOR, rgba(text))],
+    });
+    t
+}
+
+#[test]
+fn a_prop_recolour_paints_the_cell_in_a_light_and_a_dark_theme() {
+    // The dark theme's surface is the light theme's text.
+    for (page, text) in [(0xffff_ffff, 0x3133_38ff), (0x3133_38ff, 0xffff_ffff)] {
+        let (mut e, mut host) = engine(magenta_surfaces());
+        send(&mut e, &mut host, &themed(page, text));
+        assert_eq!(
+            host.props().get(PAGE, ids::BACKGROUND),
+            Some(&rgba(0xff00_ffff))
+        );
+        assert_eq!(host.props().get(RULE, ids::COLOR), Some(&rgba(text)));
+    }
+}
+
+#[test]
+fn a_prop_recolour_keeps_coloured_and_transparent_fills() {
+    let (mut e, mut host) = engine(magenta_surfaces());
+    let mut t = first();
+    t.push(NodeOp::Update {
+        node: HEAD,
+        props: vec![(ids::BACKGROUND, rgba(0x5865_f2ff))],
+    });
+    t.push(NodeOp::Update {
+        node: 30,
+        props: vec![(ids::BACKGROUND, Value::color(0))],
+    });
+    t.push(NodeOp::Update {
+        node: 31,
+        props: vec![(ids::BACKGROUND, Value::color(0x8020_2024))],
+    });
+    send(&mut e, &mut host, &t);
+    assert_eq!(
+        host.props().get(HEAD, ids::BACKGROUND),
+        Some(&rgba(0x5865_f2ff))
+    );
+    assert_eq!(
+        host.props().get(30, ids::BACKGROUND),
+        Some(&Value::color(0))
+    );
+    // A half-transparent grey stays half transparent.
+    assert_eq!(
+        host.props().get(31, ids::BACKGROUND),
+        Some(&Value::color(0x80ff_00ff))
+    );
+
+    let mut work = magenta_surfaces();
+    work.prop_recolors[0].opaque = true;
+    let (mut e, mut host) = engine(work);
+    send(&mut e, &mut host, &t);
+    assert_eq!(
+        host.props().get(31, ids::BACKGROUND),
+        Some(&Value::color(0x8020_2024))
+    );
+    assert_eq!(
+        host.props().get(PAGE, ids::BACKGROUND),
+        Some(&rgba(0xff00_ffff))
+    );
+}
+
+#[test]
+fn a_prop_recolour_follows_the_guests_writes_and_its_selector() {
+    let mut work = magenta_surfaces();
+    work.recolors = recolours().recolors;
+    work.prop_recolors[0].select = Some(feed().parent_of());
+    let (mut e, mut host) = engine(work);
+    send(&mut e, &mut host, &first());
+    // Over the recolour of the same colour.
+    assert_eq!(
+        host.props().get(PAGE, ids::BACKGROUND),
+        Some(&rgba(0xff00_ffff))
+    );
+    let mut t = Turn::new();
+    t.push(NodeOp::Update {
+        node: PAGE,
+        props: vec![(ids::BACKGROUND, rgba(0xf2f3_f5ff))],
+    });
+    t.push(NodeOp::Update {
+        node: HEAD,
+        props: vec![(ids::BACKGROUND, rgba(0xf2f3_f5ff))],
+    });
+    send(&mut e, &mut host, &t);
+    assert_eq!(
+        host.props().get(PAGE, ids::BACKGROUND),
+        Some(&rgba(0xff00_ffff))
+    );
+    assert_eq!(
+        host.props().get(HEAD, ids::BACKGROUND),
+        Some(&rgba(0xf2f3_f5ff))
+    );
+}
+
+#[test]
+fn a_prop_recolour_paints_a_gradients_stops_and_keeps_a_fade() {
+    let mut work = magenta_surfaces();
+    work.prop_recolors[0].props.push(ids::BACKGROUND_GRADIENT);
+    work.prop_recolors[0].opaque = true;
+    let (mut e, mut host) = engine(work);
+    let fade = Value::Array(vec![Value::color(0xff12_1214), Value::color(0x0012_1214)]);
+    let object = |stops: Vec<Value>| {
+        Value::Object(vec![
+            (PropId(70), Value::F64(180.0)),
+            (PropId(577), Value::Array(stops)),
+        ])
+    };
+    let mut t = first();
+    t.push(NodeOp::Update {
+        node: HEAD,
+        props: vec![(ids::BACKGROUND_GRADIENT, fade)],
+    });
+    t.push(NodeOp::Update {
+        node: 30,
+        props: vec![(
+            ids::BACKGROUND_GRADIENT,
+            object(vec![Value::color(0x001a_1a1e), Value::color(0xff1a_1a1e)]),
+        )],
+    });
+    send(&mut e, &mut host, &t);
+    assert_eq!(
+        host.props().get(HEAD, ids::BACKGROUND_GRADIENT),
+        Some(&Value::Array(vec![
+            Value::color(0xffff_00ff),
+            Value::color(0x0012_1214)
+        ]))
+    );
+    assert_eq!(
+        host.props().get(30, ids::BACKGROUND_GRADIENT),
+        Some(&object(vec![
+            Value::color(0x001a_1a1e),
+            Value::color(0xffff_00ff)
+        ]))
+    );
+}
+
+#[test]
+fn a_prop_recolour_reads_back_from_its_json_and_names_colour_cells() {
+    let json = r#"{"prop_recolors": [{"props": ["background", 21], "max_chroma": 24, "opaque": true, "to": "ff00ffff"}]}"#;
+    let work = Work::from_json(json).unwrap();
+    assert_eq!(
+        work.prop_recolors[0].props,
+        vec![ids::BACKGROUND, ids::ACTIVE_BACKGROUND]
+    );
+    assert!(work.prop_recolors[0].opaque);
+    assert_eq!(Work::from_json(&work.to_json()).unwrap(), work);
+    assert!(
+        Work::from_json(r#"{"prop_recolors": [{"props": ["text"], "to": "ff00ffff"}]}"#).is_err()
+    );
+    assert!(
+        Work::from_json(
+            r#"{"prop_recolors": [{"props": ["backgroundGradient"], "to": "ff00ffff"}]}"#
+        )
+        .is_ok()
+    );
+}
+
 #[test]
 fn a_recolour_keeps_the_guests_alpha() {
     let (mut e, mut host) = engine(recolours());

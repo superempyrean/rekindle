@@ -33,6 +33,10 @@ pub struct Work {
     /// Colours the guest writes, replaced wherever it writes them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub recolors: Vec<Recolor>,
+    /// Colour cells replaced by which cell they are, whatever colour the
+    /// guest writes in them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prop_recolors: Vec<PropRecolor>,
     /// What the system back gesture or button does while one of rekindle's
     /// pages or modals is on top. The guest never receives the back, and a
     /// [`Handler::Plugin`] keeps it as a press on `element`, as a press on
@@ -242,6 +246,57 @@ pub struct Recolor {
     pub to: u32,
 }
 
+/// The guest's colour cells that are one of `props`, given `to` whatever
+/// colour they hold. Where a [`Recolor`] needs the colour a theme gave a
+/// surface, this names the cell: `background` is a node's fill in every
+/// theme, and the text's colour is `color`, a different cell. A gradient
+/// cell has each of its stops replaced as a colour cell would be.
+///
+/// The cell's alpha is kept, multiplied by `to`'s, and a transparent cell is
+/// left alone. With `select`, only the cells of the nodes it finds in the
+/// guest's tree are replaced, and a mount's cells never are. With
+/// `max_chroma`, only cells whose red, green and blue are at most that far
+/// apart, the greys a theme paints its surfaces with, so a coloured fill
+/// such as a brand button keeps its colour. When two of these replace the same cell, the later one applies,
+/// and either applies over a [`Recolor`]. A cell a `cells`, `labels` or row
+/// rule writes keeps the rule's value.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PropRecolor {
+    /// Each one of [`COLOR_PROPS`](crate::COLOR_PROPS) or
+    /// [`GRADIENT_PROPS`](crate::GRADIENT_PROPS).
+    #[serde(with = "crate::json::props")]
+    pub props: Vec<PropId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub select: Option<Selector>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_chroma: Option<u8>,
+    /// Only opaque cells. A theme's surfaces are opaque, and the
+    /// translucent fills drawn over them (a hover, a scrim over an image)
+    /// keep their colour.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub opaque: bool,
+    /// `0xRRGGBBAA`, spelled as eight hex digits.
+    #[serde(with = "crate::json::rgba")]
+    pub to: u32,
+}
+
+impl PropRecolor {
+    /// Whether this replaces cell `prop` holding `argb` on a node `select`
+    /// finds.
+    pub(crate) fn paints(&self, prop: PropId, argb: u32) -> bool {
+        self.props.contains(&prop)
+            && (!self.opaque || argb >> 24 == 0xff)
+            && self.max_chroma.is_none_or(|m| chroma(argb) <= u32::from(m))
+    }
+}
+
+/// How far apart a colour's red, green and blue are: 0 for a grey.
+fn chroma(argb: u32) -> u32 {
+    let [_, r, g, b] = argb.to_be_bytes().map(u32::from);
+    r.max(g).max(b) - r.min(g).min(b)
+}
+
 /// A [`Work`] that can't be used.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkError(pub String);
@@ -291,6 +346,7 @@ impl Work {
             && self.presses.is_empty()
             && self.labels.is_empty()
             && self.recolors.is_empty()
+            && self.prop_recolors.is_empty()
             && self.back.is_none()
     }
 
@@ -300,6 +356,14 @@ impl Work {
         let err = |m: String| Err(WorkError(m));
         if matches!(self.back, Some(Handler::Count { .. })) {
             return err("the back handler counts nothing: use a plugin handler".into());
+        }
+        if let Some(p) = self
+            .prop_recolors
+            .iter()
+            .flat_map(|r| &r.props)
+            .find(|p| !crate::COLOR_PROPS.contains(p) && !crate::GRADIENT_PROPS.contains(p))
+        {
+            return err(format!("{p:?} is not a colour cell"));
         }
         let mut ids = BTreeSet::new();
         for n in self.mounts.iter().flat_map(|m| &m.nodes) {

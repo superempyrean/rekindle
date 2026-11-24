@@ -33,6 +33,13 @@
 //!   to these, one recolour for each token a plugin overrides. A mount
 //!   written in the client's own palette follows the theme as the guest's
 //!   nodes do.
+//! - **Prop recolours.** Colour cells replaced by which cell they are,
+//!   whatever colour they hold: a node's `background` in any theme. A light
+//!   and a dark theme write different colours in the same cell, and one
+//!   theme's text colour is the other's surface, so a recolour by value
+//!   reaches the wrong cells in one of them. A prop recolour can be limited
+//!   to the nodes a selector finds, to greys or to opaque cells, and it
+//!   paints gradient stops too.
 //!
 //! [`Engine::set_work`] replaces the work while turns go through. Cells the
 //! old work wrote and the new one doesn't are set back to the guest's own
@@ -79,15 +86,15 @@ use rekindle_wire::{DecodeError, NodeId, NodeOp, PropId, Tree, Turn, Value};
 pub use select::{Selector, TEXT};
 pub use switches::{NodeCells, Switch, SwitchState, Switches};
 pub use work::{
-    Cell, Handler, LabelRule, Mount, MountNode, PluginPress, PressAction, PressRule, Recolor,
-    RowAction, RowRule, Work, WorkError, Write,
+    Cell, Handler, LabelRule, Mount, MountNode, PluginPress, PressAction, PressRule, PropRecolor,
+    Recolor, RowAction, RowRule, Work, WorkError, Write,
 };
 
 /// The first of the node ids rekindle takes for its own nodes.
 pub const RESERVED: NodeId = 0xF000_0000;
 
-/// The cells a [`Recolor`] reads and writes: every recolour id that holds
-/// one colour.
+/// The cells a [`Recolor`] or [`PropRecolor`] reads and writes: every
+/// recolour id that holds one colour.
 pub const COLOR_PROPS: &[PropId] = &[
     rekindle_wire::ids::BACKGROUND,
     rekindle_wire::ids::COLOR,
@@ -104,6 +111,17 @@ pub const COLOR_PROPS: &[PropId] = &[
     rekindle_wire::ids::ACTIVE_BACKGROUND,
     rekindle_wire::ids::ACTIVE_BORDER_COLOR,
 ];
+
+/// The gradient cells a [`PropRecolor`] can also name. It paints each of
+/// the gradient's colour stops as it would a colour cell, so a fade from a
+/// surface to transparent stays a fade.
+pub const GRADIENT_PROPS: &[PropId] = &[
+    rekindle_wire::ids::BACKGROUND_GRADIENT,
+    rekindle_wire::ids::TEXT_GRADIENT,
+];
+
+/// The `colors` field of a gradient written as an object.
+const COLORS: PropId = PropId(577);
 
 /// A colour as the wire carries it, an integer `0xAARRGGBB`, from
 /// `0xRRGGBBAA`.
@@ -179,6 +197,15 @@ impl Engine {
     /// each count handler's count in its cell.
     fn mount_cells(&mut self) {
         let to = self.recolor_map();
+        // A prop recolour's selector finds the guest's nodes, so only the
+        // ones without one reach a mount.
+        let roles: Vec<&PropRecolor> = self
+            .work
+            .prop_recolors
+            .iter()
+            .rev()
+            .filter(|r| r.select.is_none())
+            .collect();
         self.cells = self
             .work
             .mounts
@@ -189,7 +216,8 @@ impl Engine {
                     .cells
                     .iter()
                     .map(|c| {
-                        let value = recolor_cell(c.prop, &c.value, &to);
+                        let value = prop_recolor_cell(c.prop, &c.value, roles.iter().copied())
+                            .or_else(|| recolor_cell(c.prop, &c.value, &to));
                         (c.prop, value.unwrap_or_else(|| c.value.clone()))
                     })
                     .collect();
@@ -855,23 +883,45 @@ impl Engine {
         &self,
         ruled: &BTreeSet<(NodeId, PropId)>,
     ) -> Vec<(NodeId, Vec<(PropId, Value)>)> {
-        if self.work.recolors.is_empty() {
+        if self.work.recolors.is_empty() && self.work.prop_recolors.is_empty() {
             return Vec::new();
         }
         let to = self.recolor_map();
+        let guest = select::View::new(&self.guest);
         let mut writes = Vec::new();
         for n in self.guest.nodes() {
             if self.mirror.node(n.id).is_none() {
                 continue;
             }
+            // The prop recolours that apply to this node, latest first.
+            let roles: Vec<&PropRecolor> = self
+                .work
+                .prop_recolors
+                .iter()
+                .rev()
+                .filter(|r| r.select.as_ref().is_none_or(|s| guest.matches(n.id, s)))
+                .collect();
             let mut cells: Vec<(PropId, Value)> = COLOR_PROPS
                 .iter()
                 .filter(|p| !ruled.contains(&(n.id, **p)))
                 .filter_map(|p| {
                     let v = self.guest.props().get(n.id, *p)?;
-                    recolor_cell(*p, v, &to).map(|v| (*p, v))
+                    prop_recolor_cell(*p, v, roles.iter().copied())
+                        .or_else(|| recolor_cell(*p, v, &to))
+                        .map(|v| (*p, v))
                 })
                 .collect();
+            if !roles.is_empty() {
+                cells.extend(
+                    GRADIENT_PROPS
+                        .iter()
+                        .filter(|p| !ruled.contains(&(n.id, **p)))
+                        .filter_map(|p| {
+                            let v = self.guest.props().get(n.id, *p)?;
+                            prop_recolor_gradient(*p, v, &roles).map(|v| (*p, v))
+                        }),
+                );
+            }
             if !ruled.contains(&(n.id, WORKLET))
                 && let Some(w) = self.recolored_worklet(n.id, &to)
             {
@@ -915,6 +965,54 @@ fn recolor_cell(prop: PropId, value: &Value, to: &BTreeMap<u32, u32>) -> Option<
     let c = value.as_color()?;
     to.get(&(c & 0x00ff_ffff))
         .map(|t| Value::color(recolored(c >> 24, *t)))
+}
+
+/// The value the first of `roles` that paints cell `prop` holding `value`
+/// gives it. A transparent cell is left as it is.
+fn prop_recolor_cell<'w>(
+    prop: PropId,
+    value: &Value,
+    mut roles: impl Iterator<Item = &'w PropRecolor>,
+) -> Option<Value> {
+    let c = value.as_color().filter(|c| c >> 24 != 0)?;
+    roles
+        .find(|r| r.paints(prop, c))
+        .map(|r| Value::color(recolored(c >> 24, r.to)))
+}
+
+/// Gradient cell `prop` holding `value`, a list of colours or an object
+/// with a `colors` list, with each stop the first of `roles` paints
+/// painted. `None` when no stop changes.
+fn prop_recolor_gradient(prop: PropId, value: &Value, roles: &[&PropRecolor]) -> Option<Value> {
+    let stops = |items: &[Value]| -> Option<Vec<Value>> {
+        let mut changed = false;
+        let out = items
+            .iter()
+            .map(
+                |v| match prop_recolor_cell(prop, v, roles.iter().copied()) {
+                    Some(new) => {
+                        changed = true;
+                        new
+                    }
+                    None => v.clone(),
+                },
+            )
+            .collect();
+        changed.then_some(out)
+    };
+    match value {
+        Value::Array(items) => stops(items).map(Value::Array),
+        Value::Object(fields) => {
+            let mut fields = fields.clone();
+            let (_, colors) = fields.iter_mut().find(|(p, _)| *p == COLORS)?;
+            let Value::Array(items) = colors else {
+                return None;
+            };
+            *colors = Value::Array(stops(items)?);
+            Some(Value::Object(fields))
+        }
+        _ => None,
+    }
 }
 
 /// `to` (`0xRRGGBBAA`) with its alpha multiplied by `alpha` (0 to 255), as

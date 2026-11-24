@@ -8,7 +8,9 @@
 //! "ff7a18ff"}` (read as the integer colour `0xFFFF7A18`),
 //! `{"object": [["opacity", {"f64": 0}]]}`, and `"null"`. A
 //! [`Recolor`](crate::Recolor)'s colours are hex strings: `"1e1f22"` and
-//! `"050609ff"`.
+//! `"050609ff"`. A [`PropRecolor`](crate::PropRecolor) is
+//! `{"props": ["background"], "max_chroma": 24, "opaque": true,
+//! "to": "ff00ffff"}`.
 
 use rekindle_wire::{ElementKind, PropId, Value};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -51,6 +53,25 @@ pub(crate) mod prop {
 
     pub(crate) fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<PropId, D::Error> {
         Prop::deserialize(d)?.id()
+    }
+}
+
+/// `#[serde(with)]` for a list of [`PropId`]s.
+pub(crate) mod props {
+    use super::{Deserialize, Deserializer, Prop, PropId, Serialize, Serializer};
+
+    pub(crate) fn serialize<S: Serializer>(ids: &[PropId], s: S) -> Result<S::Ok, S::Error> {
+        ids.iter()
+            .map(|id| Prop::of(*id))
+            .collect::<Vec<_>>()
+            .serialize(s)
+    }
+
+    pub(crate) fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<PropId>, D::Error> {
+        Vec::<Prop>::deserialize(d)?
+            .into_iter()
+            .map(Prop::id)
+            .collect()
     }
 }
 
