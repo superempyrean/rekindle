@@ -82,6 +82,22 @@ jobs:
       # is present, which it isn't in CI, so they check the rest.
       - name: Test phoenix-view
         run: cargo test -p phoenix-view --locked
+      # A release build of phoenix-view, uploaded as a downloadable artifact.
+      # It carries only the exe and the README; the Discord binary the user
+      # brings is never in the repo or the build.
+      - name: Build phoenix-view for release
+        run: cargo build -p phoenix-view --release --locked
+      - name: Bundle phoenix-view
+        run: |
+          New-Item -ItemType Directory -Force dist > $null
+          Copy-Item target/release/phoenix-view.exe dist/
+          Copy-Item phoenix-view/README.md dist/
+      - name: Upload phoenix-view
+        uses: actions/upload-artifact@v4
+        with:
+          name: phoenix-view-windows
+          path: client/dist/*
+          if-no-files-found: error
       # The launcher, the hook crate and phoenix-guest have Windows paths the
       # Linux root job doesn't compile.
       - name: Windows-only crates in the root workspace

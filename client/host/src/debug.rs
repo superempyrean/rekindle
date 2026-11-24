@@ -13,6 +13,7 @@
 //! `changeText` from a password field is one).
 
 use std::collections::VecDeque;
+use std::fmt::Write as _;
 use std::io::{BufRead, BufReader, Write};
 use std::net::{Ipv4Addr, TcpListener, TcpStream};
 use std::sync::Mutex;
@@ -42,7 +43,9 @@ pub(crate) fn start() -> Option<u16> {
     let port: u16 = std::env::var(PORT_ENV).ok()?.trim().parse().ok()?;
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, port)).ok()?;
     let port = listener.local_addr().ok()?.port();
-    *START.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
+    *START
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Instant::now());
     ON.store(true, Ordering::SeqCst);
     std::thread::Builder::new()
         .name("rekindle-debug".into())
@@ -120,7 +123,9 @@ pub(crate) fn tree_json(tree: &Tree) -> Json {
 }
 
 fn push(list: &Mutex<VecDeque<Json>>, entry: Json) {
-    let mut l = list.lock().unwrap_or_else(|e| e.into_inner());
+    let mut l = list
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     if l.len() == KEEP {
         l.pop_front();
     }
@@ -130,7 +135,7 @@ fn push(list: &Mutex<VecDeque<Json>>, entry: Json) {
 fn elapsed_ms() -> u64 {
     START
         .lock()
-        .unwrap_or_else(|e| e.into_inner())
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .map_or(0, |s| s.elapsed().as_millis() as u64)
 }
 
@@ -239,7 +244,7 @@ fn redact_debug(e: &UiEvent) -> String {
             }
             n += 1;
         }
-        out.push_str(&format!("<{n} chars>"));
+        let _ = write!(out, "<{n} chars>");
     }
     out
 }
@@ -279,7 +284,7 @@ fn serve(stream: TcpStream) -> std::io::Result<()> {
 fn list(l: &Mutex<VecDeque<Json>>) -> Json {
     Json::Array(
         l.lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .iter()
             .cloned()
             .collect(),
