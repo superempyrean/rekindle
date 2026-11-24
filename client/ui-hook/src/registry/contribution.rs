@@ -155,7 +155,7 @@ pub fn modal_plugin() -> Option<String> {
 }
 
 /// The panel of the modal rekindle is presenting, if any.
-pub(crate) fn modal_panel() -> Option<PanelItem> {
+pub fn modal_panel() -> Option<PanelItem> {
     MODAL.lock().unwrap().as_ref().map(|m| m.panel.clone())
 }
 

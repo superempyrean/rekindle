@@ -36,6 +36,8 @@ mod install;
 mod layout;
 mod live;
 mod profile;
+#[cfg(any(target_os = "android", test))]
+mod rows;
 mod verify;
 mod wire;
 

@@ -40,8 +40,10 @@
 //! idle guest sends no turns, so nothing else would carry the change.
 //!
 //! With a palette in the config dir, the plugin runtime runs in the app too
-//! ([`runtime`]). A press on a plugin's switch goes to it, and the theme its
-//! plugins set becomes the engine's recolours.
+//! ([`runtime`]). The theme its plugins set becomes the engine's recolours,
+//! and rekindle's section on the settings screen, the plugins' chat-bar
+//! buttons and a plugin's modal become its mounts. A press on any of them
+//! goes to the runtime.
 //!
 //! The report and the running counts go to logcat (tag `rekindle`), since an
 //! app has no console.
@@ -461,6 +463,7 @@ impl Panel {
         let mut work = self.switches.apply(&self.base, &on);
         if let Some(p) = &self.plugins {
             work.recolors.extend(p.recolors.iter().copied());
+            work.mounts.extend(p.mounts.iter().cloned());
         }
         work
     }
@@ -718,37 +721,41 @@ fn deliver_presses() {
     let presses = with_engine(Engine::take_presses).unwrap_or_default();
     for p in &presses {
         let at = Instant::now();
-        if let Some(id) = plugin_switch(&p.element) {
-            let running = panel_lock()
-                .as_ref()
-                .and_then(|panel| panel.plugins.as_ref())
-                .map(|s| s.running.contains(id));
-            let Some(running) = running else {
-                log(&format!("press {}: the runtime isn't up", p.element));
-                continue;
-            };
-            // No lock is held while the runtime works, since it sets the
-            // plugins' work itself.
-            let answered = runtime::toggle(id, !running);
-            let waited = at.elapsed();
-            let flushed = flush_pending();
-            log(&format!(
-                "press {} -> {}: answered={answered} wait={} us flushed={flushed} bytes total={} us",
-                p.element,
-                if running { "off" } else { "on" },
-                waited.as_micros(),
-                at.elapsed().as_micros(),
-            ));
+        // A switch of `switches.json` flips here, unless it is a plugin's.
+        let work = if plugin_switch(&p.element).is_none() {
+            panel_lock().as_mut().and_then(|panel| panel.press(p))
+        } else {
+            None
+        };
+        if let Some(work) = work {
+            set_work(work);
+            flush_pending();
             continue;
         }
-        let work = panel_lock().as_mut().and_then(|panel| panel.press(p));
-        match work {
-            Some(work) => {
-                set_work(work);
-                flush_pending();
-            }
-            None => log(&format!("press {}/{}/{}", p.plugin, p.surface, p.element)),
+        if !runtime::handles(p) {
+            log(&format!("press {}/{}/{}", p.plugin, p.surface, p.element));
+            continue;
         }
+        let up = panel_lock()
+            .as_ref()
+            .is_some_and(|panel| panel.plugins.is_some());
+        if !up {
+            log(&format!("press {}: the runtime isn't up", p.element));
+            continue;
+        }
+        // No lock is held while the runtime works, since it sets the
+        // plugins' work itself.
+        let answered = runtime::press(p);
+        let waited = at.elapsed();
+        let flushed = flush_pending();
+        log(&format!(
+            "press {}/{}/{}: answered={answered} wait={} us flushed={flushed} bytes total={} us",
+            p.plugin,
+            p.surface,
+            p.element,
+            waited.as_micros(),
+            at.elapsed().as_micros(),
+        ));
     }
 }
 

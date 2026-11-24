@@ -107,10 +107,10 @@ type ReplyFn = unsafe extern "C" fn(*mut c_void, *const u8, usize);
 /// build's guest sends, and a desktop build's map comes from that build.
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct WireMap {
+pub(crate) struct WireMap {
     /// By slot name (`chat-bar.button`).
     #[serde(default)]
-    slots: BTreeMap<String, SlotMap>,
+    pub(crate) slots: BTreeMap<String, SlotMap>,
     /// The node of each named surface (`member-list`), by name.
     #[serde(default)]
     surfaces: BTreeMap<String, Selector>,
@@ -118,13 +118,20 @@ struct WireMap {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct SlotMap {
+pub(crate) struct SlotMap {
     /// The node a slot's items are mounted under, after its own children.
     under: Selector,
     /// Cells each item's pressable node gets besides its role and label,
     /// for a guest whose host raises presses only on nodes that ask.
     #[serde(default)]
     cells: Vec<Cell>,
+    /// Cells the text holding an item's glyph gets.
+    #[serde(default)]
+    glyph: Vec<Cell>,
+    /// By glyph: the cells of an `image` that stands in for that glyph's
+    /// text, for a client that draws its buttons' icons from images.
+    #[serde(default)]
+    images: BTreeMap<String, Vec<Cell>>,
 }
 
 /// What the plugins put on the wire, decided once the anchors resolved.
@@ -338,12 +345,14 @@ fn wire_map() -> anyhow::Result<Option<WireMap>> {
     let Some(path) = std::env::var_os(rekindle_install::env::WIRE_MAP) else {
         return Ok(None);
     };
-    let path = std::path::Path::new(&path);
+    read_wire_map(std::path::Path::new(&path)).map(Some)
+}
+
+/// The wire map in `path`.
+pub(crate) fn read_wire_map(path: &std::path::Path) -> anyhow::Result<WireMap> {
     let json = std::fs::read_to_string(path)
         .map_err(|e| anyhow::anyhow!("can't read {}: {e}", path.display()))?;
-    let map =
-        serde_json::from_str(&json).map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))?;
-    Ok(Some(map))
+    serde_json::from_str(&json).map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))
 }
 
 fn lock() -> std::sync::MutexGuard<'static, Option<Engine>> {
@@ -506,8 +515,8 @@ fn button_root(plugin: &str, key: &str) -> Option<NodeId> {
 
 /// One mount per chat-bar button under the slot's node: a `view` with the
 /// `button` role, the button's tooltip as its label and a plugin handler,
-/// holding a `text` with its glyph.
-fn button_mounts(buttons: &[(String, Button)], slot: &SlotMap) -> Vec<Mount> {
+/// holding a `text` with its glyph, or the `image` the slot gives for it.
+pub(crate) fn button_mounts(buttons: &[(String, Button)], slot: &SlotMap) -> Vec<Mount> {
     buttons
         .iter()
         .filter_map(|(plugin, b)| {
@@ -521,10 +530,32 @@ fn button_mounts(buttons: &[(String, Button)], slot: &SlotMap) -> Vec<Mount> {
             let mut cells = vec![
                 Cell::new(a11y::ROLE, Value::Str(Role::Button.name().into())),
                 Cell::new(a11y::LABEL, Value::Str(label.into())),
+                Cell::new(a11y::ID, Value::Str(format!("rekindle.{plugin}.{item}"))),
             ];
             cells.extend(slot.cells.iter().cloned());
+            let glyph = match slot.images.get(&b.glyph) {
+                Some(image) => MountNode {
+                    id: root + 1,
+                    kind: ElementKind::IMAGE,
+                    cells: image.clone(),
+                    children: Vec::new(),
+                    on_press: None,
+                },
+                None => {
+                    let mut cells = vec![Cell::new(TEXT, Value::Str(b.glyph.clone()))];
+                    cells.extend(slot.glyph.iter().cloned());
+                    MountNode {
+                        id: root + 1,
+                        kind: ElementKind::TEXT,
+                        cells,
+                        children: Vec::new(),
+                        on_press: None,
+                    }
+                }
+            };
             Some(Mount {
                 under: slot.under.clone(),
+                after: None,
                 root,
                 nodes: vec![
                     MountNode {
@@ -538,13 +569,7 @@ fn button_mounts(buttons: &[(String, Button)], slot: &SlotMap) -> Vec<Mount> {
                             element: item.into(),
                         }),
                     },
-                    MountNode {
-                        id: root + 1,
-                        kind: ElementKind::TEXT,
-                        cells: vec![Cell::new(TEXT, Value::Str(b.glyph.clone()))],
-                        children: Vec::new(),
-                        on_press: None,
-                    },
+                    glyph,
                 ],
             })
         })
@@ -928,10 +953,34 @@ mod tests {
             cell(open, rekindle_wire::PropId::from_name("pressable").unwrap()),
             Some(&Value::Bool(true))
         );
+        assert_eq!(
+            cell(open, a11y::ID),
+            Some(&Value::Str("rekindle.dev.a.open".into()))
+        );
+        assert_eq!(mounts[0].nodes[1].kind, ElementKind::TEXT);
         // A button without a tooltip is labelled by its id.
         assert_eq!(
             cell(&mounts[1].nodes[0], a11y::LABEL),
             Some(&Value::Str("toggle".into()))
+        );
+    }
+
+    #[test]
+    fn a_glyph_the_slot_has_an_image_for_is_that_image() {
+        let map: WireMap = serde_json::from_str(
+            r#"{"slots": {"chat-bar.button": {
+                "under": {"kind": "view"},
+                "images": {"B": [{"prop": "uri", "value": {"str": "res://icon"}}]}
+            }}}"#,
+        )
+        .unwrap();
+        let slot = map.slots.into_values().next().unwrap();
+        let mounts = button_mounts(&[button("dev.img", "open", "")], &slot);
+        let glyph = &mounts[0].nodes[1];
+        assert_eq!(glyph.kind, ElementKind::IMAGE);
+        assert_eq!(
+            cell(glyph, rekindle_wire::PropId::from_name("uri").unwrap()),
+            Some(&Value::Str("res://icon".into()))
         );
     }
 
