@@ -29,6 +29,16 @@
 //! and host calls and forwards them unchanged. Host calls always pass
 //! through.
 //!
+//! Events reach the guest through one method too: the event method of the
+//! runtime handle's vtable, which the JNI dispatch and `ldh_dispatch` both
+//! call. rekindle swaps that slot (anchor [`EVENT_SLOT`]) the same way, so
+//! every UI event and host frame passes `Engine::event` first
+//! ([`hooked_dispatch`]). A press on one of rekindle's own nodes is consumed
+//! there. If it flips one of the work's [`Switches`], the host sets the new
+//! work and emits the engine's flush through the original emit before the
+//! dispatch returns. A consumed event makes the guest render nothing, and an
+//! idle guest sends no turns, so nothing else would carry the change.
+//!
 //! The report and the running counts go to logcat (tag `rekindle`), since an
 //! app has no console.
 
@@ -37,12 +47,15 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use rekindle_wire_inject::{Engine, Work};
+use rekindle_wire_inject::{Engine, PluginPress, Switches, Verdict, Work};
 
 use crate::hooks::Hooks;
 
 /// The anchor of the vtable slot that holds the transport's emit method.
 pub(crate) const EMIT_SLOT: &str = "wire_transport_emit_slot";
+/// The anchor of the vtable slot that holds the runtime handle's event
+/// method.
+pub(crate) const EVENT_SLOT: &str = "wire_event_dispatch_slot";
 /// A test run names a JSON file of `Work` the engine runs on the turns.
 const WORK_ENV: &str = "REKINDLE_HOST_WIRE_WORK";
 /// Where the loader leaves rekindle's files when no env var points at them:
@@ -65,14 +78,42 @@ pub(crate) fn config_file(name: &str) -> std::path::PathBuf {
 pub(crate) struct EmitResult([u64; 3]);
 
 type EmitFn = unsafe extern "C" fn(*mut c_void, *const u8, usize) -> EmitResult;
+/// The event method: the handle's data, the event's bytes and length. Null
+/// is success, anything else the guest's error.
+type EventFn = unsafe extern "C" fn(*mut c_void, *const u8, usize) -> *mut c_void;
 
-/// The emit method the slot held. Stored before the swap, so the hook never
-/// sees 0.
-static ORIGINAL: AtomicUsize = AtomicUsize::new(0);
+/// A vtable slot rekindle swaps.
+struct Slot {
+    what: &'static str,
+    /// The method the slot held. Stored before the swap, so the hook never
+    /// sees 0.
+    original: AtomicUsize,
+    /// The swap in place, kept so a swap the anchors disagree with can be
+    /// put back.
+    swap: Mutex<Option<rekindle_hook::SlotSwap>>,
+}
+
+impl Slot {
+    const fn new(what: &'static str) -> Slot {
+        Slot {
+            what,
+            original: AtomicUsize::new(0),
+            swap: Mutex::new(None),
+        }
+    }
+}
+
+static EMIT: Slot = Slot::new("emit");
+static EVENT: Slot = Slot::new("event");
 static TURNS: AtomicU64 = AtomicU64::new(0);
 static REWRITTEN: AtomicU64 = AtomicU64::new(0);
 static FAILED: AtomicU64 = AtomicU64::new(0);
 static CALLS: AtomicU64 = AtomicU64::new(0);
+static DISPATCHES: AtomicU64 = AtomicU64::new(0);
+static CONSUMED: AtomicU64 = AtomicU64::new(0);
+static FLUSHED: AtomicU64 = AtomicU64::new(0);
+/// The transport the guest last emitted through, for [`flush`].
+static TRANSPORT: AtomicUsize = AtomicUsize::new(0);
 
 /// The engine, when a test run gave it `Work`. `None` leaves every turn
 /// unchanged.
@@ -94,7 +135,7 @@ pub(crate) fn run_worker() -> String {
         crate::field(&mut out, "capture", CAPTURE_FILE);
     }
     let known = KnownSlots::load();
-    let Some((loaded, early)) = wait_and_swap(&known) else {
+    let Some((loaded, early, early_event)) = wait_and_swap(&known) else {
         crate::field(&mut out, "error", "image_not_mapped");
         return out;
     };
@@ -131,7 +172,7 @@ pub(crate) fn run_worker() -> String {
     match (&early, hooks.addr(EMIT_SLOT)) {
         (Early::Swapped(slot), Ok(r)) if *slot == r => crate::field(&mut out, "verify", "agreed"),
         (Early::Swapped(slot), Ok(_)) => {
-            restore();
+            restore(&EMIT);
             crate::field(&mut out, "verify", format_args!("moved_from({slot:#x})"));
             report_install(&hooks, &mut out);
         }
@@ -145,15 +186,47 @@ pub(crate) fn run_worker() -> String {
         }
         _ => report_install(&hooks, &mut out),
     }
+    report_event_hook(&hooks, early_event, &mut out);
     if let (Some(id), Ok(slot), Ok(emit)) = (
         build,
         hooks.addr(EMIT_SLOT),
         hooks.addr("wire_transport_emit"),
-    ) && let Err(e) = known.learn(id, slot - loaded.bias, emit - loaded.bias)
-    {
-        crate::field(&mut out, "known_slots", crate::err(&e));
+    ) {
+        let event = match (hooks.addr(EVENT_SLOT), hooks.addr("wire_event_dispatch")) {
+            (Ok(s), Ok(m)) => Some((s - loaded.bias, m - loaded.bias)),
+            _ => None,
+        };
+        if let Err(e) = known.learn(id, slot - loaded.bias, emit - loaded.bias, event) {
+            crate::field(&mut out, "known_slots", crate::err(&e));
+        }
     }
     out
+}
+
+/// Check the early event swap against the anchors, or swap the slot they
+/// resolve, and add the result to the report.
+fn report_event_hook(hooks: &Hooks, early: Option<usize>, out: &mut String) {
+    match (early, hooks.addr(EVENT_SLOT)) {
+        (Some(slot), Ok(r)) if slot == r => {
+            crate::field(out, "event_hook", format_args!("{slot:#x}(early,agreed)"));
+        }
+        // The early swap checked the slot's method, so it stays.
+        (Some(slot), Err(e)) => crate::field(
+            out,
+            "event_hook",
+            format_args!("{slot:#x}(early,unresolved:{})", crate::err(&e)),
+        ),
+        (early, Ok(r)) => {
+            if early.is_some() {
+                restore(&EVENT);
+            }
+            match swap_in(&EVENT, r, hooked_dispatch as *const () as usize) {
+                Ok(()) => crate::field(out, "event_hook", format_args!("{r:#x}")),
+                Err(e) => crate::field(out, "event_hook", crate::err(&e)),
+            }
+        }
+        (None, Err(e)) => crate::field(out, "event_hook", crate::err(&e)),
+    }
 }
 
 /// Swap the slot the anchors resolve, and add the result to the report.
@@ -168,12 +241,16 @@ fn report_install(hooks: &Hooks, out: &mut String) {
 /// library, where its emit slot is.
 const KNOWN_SLOTS: &str = "known-slots.json";
 
-/// One build's emit slot and the emit method it holds, as virtual addresses
-/// in the library.
+/// One build's emit slot and the emit method it holds, and its event slot
+/// and event method, as virtual addresses in the library.
 #[derive(Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 struct KnownSlot {
     slot: u64,
     emit: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    event_slot: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    event: Option<u64>,
 }
 
 /// [`KNOWN_SLOTS`], by build ID in hex.
@@ -188,12 +265,20 @@ impl KnownSlots {
             .unwrap_or_default()
     }
 
-    /// Record build `id`'s slot and emit method, unless the file already
-    /// holds them.
-    fn learn(mut self, id: String, slot: usize, emit: usize) -> anyhow::Result<()> {
+    /// Record build `id`'s slots and the methods they hold, unless the file
+    /// already holds them.
+    fn learn(
+        mut self,
+        id: String,
+        slot: usize,
+        emit: usize,
+        event: Option<(usize, usize)>,
+    ) -> anyhow::Result<()> {
         let k = KnownSlot {
             slot: slot as u64,
             emit: emit as u64,
+            event_slot: event.map(|(s, _)| s as u64),
+            event: event.map(|(_, m)| m as u64),
         };
         if self.0.get(&id) == Some(&k) {
             return Ok(());
@@ -219,15 +304,16 @@ enum Early {
     Mismatch(String),
 }
 
-/// Wait for the client's library to be loaded, then swap the emit slot if
-/// [`KNOWN_SLOTS`] knows the build.
+/// Wait for the client's library to be loaded, then swap the emit slot, and
+/// the event slot when it is recorded, if [`KNOWN_SLOTS`] knows the build.
+/// The event slot's address comes back too, if it was swapped.
 ///
 /// The wait polls `dl_iterate_phdr` every millisecond. A poll made while the
 /// linker loads the library blocks on the linker's lock and returns when the
 /// load is done, so the swap follows the load closely. A hook on the
 /// runtime's `android_dlopen_ext` would fire no earlier, since the slot
 /// holds nothing until the linker has relocated it.
-fn wait_and_swap(known: &KnownSlots) -> Option<(crate::image::Loaded, Early)> {
+fn wait_and_swap(known: &KnownSlots) -> Option<(crate::image::Loaded, Early, Option<usize>)> {
     let deadline = Instant::now() + IMAGE_WAIT;
     let loaded = loop {
         if let Some(l) = crate::image::loaded_image() {
@@ -244,26 +330,45 @@ fn wait_and_swap(known: &KnownSlots) -> Option<(crate::image::Loaded, Early)> {
         .and_then(|id| known.0.get(&crate::hex(id)));
     let early = match entry {
         None => Early::Unknown,
-        Some(k) => early_swap(loaded.bias, *k),
+        Some(k) => early_swap(
+            &EMIT,
+            loaded.bias,
+            (k.slot, k.emit),
+            hooked_emit as *const () as usize,
+        ),
     };
-    Some((loaded, early))
+    let event = entry
+        .and_then(|k| Some((k.event_slot?, k.event?)))
+        .and_then(|recorded| {
+            match early_swap(
+                &EVENT,
+                loaded.bias,
+                recorded,
+                hooked_dispatch as *const () as usize,
+            ) {
+                Early::Swapped(at) => Some(at),
+                _ => None,
+            }
+        });
+    Some((loaded, early, event))
 }
 
-/// Swap the slot `k` records, if it holds the emit method `k` records.
-fn early_swap(bias: usize, k: KnownSlot) -> Early {
-    let (Some(slot), Some(emit)) = (
-        rekindle_hook::elf::slot_address(bias, k.slot),
-        rekindle_hook::elf::slot_address(bias, k.emit),
+/// Swap the slot `recorded` names to `hook`, if it holds the method
+/// `recorded` names. Both are virtual addresses in the library.
+fn early_swap(which: &'static Slot, bias: usize, recorded: (u64, u64), hook: usize) -> Early {
+    let (Some(slot), Some(method)) = (
+        rekindle_hook::elf::slot_address(bias, recorded.0),
+        rekindle_hook::elf::slot_address(bias, recorded.1),
     ) else {
         return Early::Mismatch("overflow".into());
     };
     // SAFETY: the recorded slot is in the library's `PT_GNU_RELRO` data,
     // which the linker has mapped and relocated (see `loaded_image`).
     let held = unsafe { std::ptr::read_volatile(slot as *const usize) };
-    if held != emit {
+    if held != method {
         return Early::Mismatch(format!("slot_holds_{held:#x}"));
     }
-    match swap_in(slot) {
+    match swap_in(which, slot, hook) {
         Ok(()) => Early::Swapped(slot),
         Err(e) => Early::Mismatch(crate::err(&e)),
     }
@@ -279,13 +384,75 @@ fn build_engine() -> anyhow::Result<bool> {
     let json = std::fs::read_to_string(&path).map_err(|e| {
         anyhow::anyhow!("can't read {}: {e}", std::path::Path::new(&path).display())
     })?;
-    let work = Work::from_json(&json).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let base = Work::from_json(&json).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let panel = Panel::load(base)?;
+    let work = panel.work();
     if work.is_empty() {
         return Ok(false);
     }
     let engine = Engine::new(work).map_err(|e| anyhow::anyhow!("{e}"))?;
     *lock() = Some(engine);
+    *panel_lock() = Some(panel);
     Ok(true)
+}
+
+/// The file of [`Switches`] in the work's mounts, beside `work.json`.
+const SWITCHES: &str = "switches.json";
+/// Which switches are on, by element. Written in place like
+/// [`KNOWN_SLOTS`], so the shell creates it.
+const SWITCH_STATE: &str = "switch-state.json";
+
+/// The work as `work.json` gives it, and the switches in it with their
+/// state.
+struct Panel {
+    base: Work,
+    switches: Switches,
+    on: std::collections::BTreeMap<String, bool>,
+}
+
+impl Panel {
+    fn load(base: Work) -> anyhow::Result<Panel> {
+        let switches = match std::fs::read_to_string(config_file(SWITCHES)) {
+            Ok(json) => Switches::from_json(&json).map_err(|e| anyhow::anyhow!("{e}"))?,
+            Err(_) => Switches::default(),
+        };
+        let on = std::fs::read(config_file(SWITCH_STATE))
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or_default();
+        Ok(Panel { base, switches, on })
+    }
+
+    fn work(&self) -> Work {
+        self.switches.apply(&self.base, &self.on)
+    }
+
+    /// Flip the switch a press is for, and keep its state for the next
+    /// launch. The new work, or `None` when the press isn't for a switch.
+    fn press(&mut self, press: &PluginPress) -> Option<Work> {
+        let s = self.switches.get(&press.element)?;
+        let now = !self.on.get(&s.element).copied().unwrap_or(s.on);
+        self.on.insert(s.element.clone(), now);
+        log(&format!(
+            "switch {} {}",
+            s.element,
+            if now { "on" } else { "off" }
+        ));
+        if let Ok(json) = serde_json::to_vec_pretty(&self.on)
+            && let Err(e) = std::fs::write(config_file(SWITCH_STATE), json)
+        {
+            log(&format!("switch state not kept: {e}"));
+        }
+        Some(self.work())
+    }
+}
+
+static PANEL: Mutex<Option<Panel>> = Mutex::new(None);
+
+fn panel_lock() -> std::sync::MutexGuard<'static, Option<Panel>> {
+    PANEL
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 fn lock() -> std::sync::MutexGuard<'static, Option<Engine>> {
@@ -294,46 +461,46 @@ fn lock() -> std::sync::MutexGuard<'static, Option<Engine>> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// The swap in place, kept so a swap the anchors disagree with can be put
-/// back.
-static SWAP: Mutex<Option<rekindle_hook::SlotSwap>> = Mutex::new(None);
-
 /// Swap the emit slot the anchors resolve to [`hooked_emit`]. Returns the
 /// slot's address.
 pub(crate) fn install(hooks: &Hooks) -> anyhow::Result<usize> {
     let slot = hooks.addr(EMIT_SLOT)?;
-    swap_in(slot)?;
+    swap_in(&EMIT, slot, hooked_emit as *const () as usize)?;
     Ok(slot)
 }
 
-/// Swap the emit slot at `slot` to [`hooked_emit`].
-fn swap_in(slot: usize) -> anyhow::Result<()> {
+/// Swap the slot at `slot` to `hook`, which has the signature of the method
+/// the slot holds: [`hooked_emit`] for [`EMIT`], [`hooked_dispatch`] for
+/// [`EVENT`].
+fn swap_in(which: &'static Slot, slot: usize, hook: usize) -> anyhow::Result<()> {
+    let what = which.what;
     // SAFETY: the caller found the slot in this process's image: a mapped,
     // aligned pointer in the vtable's read-only data.
     let original = unsafe { std::ptr::read_volatile(slot as *const usize) };
     if original == 0 {
-        anyhow::bail!("the emit slot at {slot:#x} is empty");
+        anyhow::bail!("the {what} slot at {slot:#x} is empty");
     }
-    ORIGINAL.store(original, Ordering::SeqCst);
-    // SAFETY: the slot holds the emit method, whose signature is `EmitFn`,
-    // as `hooked_emit`'s is.
-    let swap =
-        unsafe { rekindle_hook::SlotSwap::install(slot, hooked_emit as *const () as usize)? };
+    which.original.store(original, Ordering::SeqCst);
+    // SAFETY: the slot holds the method `hook` stands in for, which has the
+    // same signature.
+    let swap = unsafe { rekindle_hook::SlotSwap::install(slot, hook)? };
     if swap.original() != original {
-        anyhow::bail!("the emit slot at {slot:#x} changed while it was swapped");
+        anyhow::bail!("the {what} slot at {slot:#x} changed while it was swapped");
     }
     // The hook stays for the life of the process, unless `restore` takes it
     // out.
-    *SWAP
+    *which
+        .swap
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(swap);
     Ok(())
 }
 
 /// Put back the method the swap in place replaced. A thread already inside
-/// [`hooked_emit`] still calls the original it read.
-fn restore() {
-    let swap = SWAP
+/// the hook still calls the original it read.
+fn restore(which: &'static Slot) {
+    let swap = which
+        .swap
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .take();
@@ -345,14 +512,19 @@ fn restore() {
 }
 
 /// The report's counts: turns, turns rewritten, turns the engine failed on,
-/// and host calls passed through.
+/// host calls passed through, events dispatched, events consumed, and turns
+/// of rekindle's own flushed.
 pub(crate) fn counts() -> String {
     format!(
-        "transport_turns={} transport_rewritten={} transport_failed={} transport_calls={}",
+        "transport_turns={} transport_rewritten={} transport_failed={} transport_calls={} \
+         dispatches={} consumed={} flushed={}",
         TURNS.load(Ordering::Relaxed),
         REWRITTEN.load(Ordering::Relaxed),
         FAILED.load(Ordering::Relaxed),
         CALLS.load(Ordering::Relaxed),
+        DISPATCHES.load(Ordering::Relaxed),
+        CONSUMED.load(Ordering::Relaxed),
+        FLUSHED.load(Ordering::Relaxed),
     )
 }
 
@@ -377,9 +549,11 @@ unsafe extern "C" fn hooked_emit(
     bytes: *const u8,
     len: usize,
 ) -> EmitResult {
-    // SAFETY: ORIGINAL was stored before the swap went live, and has this
-    // signature.
-    let original = unsafe { std::mem::transmute::<usize, EmitFn>(ORIGINAL.load(Ordering::SeqCst)) };
+    // SAFETY: the original was stored before the swap went live, and has
+    // this signature.
+    let original =
+        unsafe { std::mem::transmute::<usize, EmitFn>(EMIT.original.load(Ordering::SeqCst)) };
+    TRANSPORT.store(transport as usize, Ordering::Relaxed);
     // SAFETY: the guest passes `len` readable bytes.
     let buf = unsafe { std::slice::from_raw_parts(bytes, len) };
     let Some(ops) = op_stream(buf) else {
@@ -413,6 +587,116 @@ unsafe extern "C" fn hooked_emit(
             unsafe { original(transport, bytes, len) }
         }
     }
+}
+
+/// Called by the host in place of the runtime handle's event method.
+unsafe extern "C" fn hooked_dispatch(
+    data: *mut c_void,
+    bytes: *const u8,
+    len: usize,
+) -> *mut c_void {
+    // SAFETY: the original was stored before the swap went live, and has
+    // this signature.
+    let original =
+        unsafe { std::mem::transmute::<usize, EventFn>(EVENT.original.load(Ordering::SeqCst)) };
+    let n = DISPATCHES.fetch_add(1, Ordering::Relaxed);
+    if n < 4 {
+        log(&format!("dispatch #{n} len={len} tid={}", gettid()));
+    }
+    // SAFETY: the host passes `len` readable bytes.
+    let buf = unsafe { std::slice::from_raw_parts(bytes, len) };
+    match with_engine(|e| e.event(buf)) {
+        Some(Ok(Verdict::Consume(_))) => {
+            CONSUMED.fetch_add(1, Ordering::Relaxed);
+            // A panic can't unwind into the host's frame.
+            let _ = std::panic::catch_unwind(deliver_presses);
+            // Success, and the guest never saw the event.
+            std::ptr::null_mut()
+        }
+        Some(Ok(Verdict::Replace(ev))) => {
+            let b = ev.to_bytes();
+            // SAFETY: the host's handle, with an event the guest decodes as
+            // it decodes the host's, read within the call.
+            unsafe { original(data, b.as_ptr(), b.len()) }
+        }
+        Some(Ok(Verdict::Batch(b))) => {
+            // A panic can't unwind into the host's frame.
+            let _ = std::panic::catch_unwind(deliver_presses);
+            // SAFETY: as above.
+            unsafe { original(data, b.as_ptr(), b.len()) }
+        }
+        // SAFETY: the host's own arguments.
+        _ => unsafe { original(data, bytes, len) },
+    }
+}
+
+/// Hand the presses the engine kept to the switches, and flush the work
+/// they make. On the guest's thread, inside its dispatch, where the guest
+/// itself emits.
+fn deliver_presses() {
+    let presses = with_engine(Engine::take_presses).unwrap_or_default();
+    let mut work = None;
+    if let Some(panel) = panel_lock().as_mut() {
+        for p in &presses {
+            match panel.press(p) {
+                Some(w) => work = Some(w),
+                None => log(&format!("press {}/{}/{}", p.plugin, p.surface, p.element)),
+            }
+        }
+    }
+    let Some(work) = work else {
+        return;
+    };
+    let flushed = with_engine(|e| match e.set_work(work) {
+        Ok(()) => e.flush(),
+        Err(err) => {
+            log(&format!("switch work refused: {err}"));
+            None
+        }
+    })
+    .flatten();
+    if let Some(ops) = flushed {
+        flush(&ops);
+    }
+}
+
+/// Send a turn of rekindle's own through the transport the guest last
+/// emitted through, by the original emit.
+fn flush(ops: &[u8]) {
+    let transport = TRANSPORT.load(Ordering::Relaxed);
+    let emit = EMIT.original.load(Ordering::SeqCst);
+    if transport == 0 || emit == 0 {
+        log("flush: no transport yet");
+        return;
+    }
+    let mut framed = Vec::with_capacity(4 + ops.len());
+    framed.extend_from_slice(&0u32.to_le_bytes());
+    framed.extend_from_slice(ops);
+    let n = FLUSHED.fetch_add(1, Ordering::Relaxed);
+    // SAFETY: the original emit, with the transport the guest passed it and
+    // a turn the host reads within the call.
+    let r = unsafe {
+        std::mem::transmute::<usize, EmitFn>(emit)(
+            transport as *mut c_void,
+            framed.as_ptr(),
+            framed.len(),
+        )
+    };
+    if n < 8 {
+        log(&format!(
+            "flush #{n} len={} tid={} result={:#x},{:#x},{:#x}",
+            framed.len(),
+            gettid(),
+            r.0[0],
+            r.0[1],
+            r.0[2]
+        ));
+    }
+}
+
+fn gettid() -> i64 {
+    // SAFETY: `gettid` takes no arguments and always succeeds.
+    i64::from(unsafe { libc::gettid() })
 }
 
 /// How many of the first turns [`CAPTURE`] records.
