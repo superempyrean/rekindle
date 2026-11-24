@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use rekindle_wire::a11y::ids as a11y;
 use rekindle_wire::event::Event;
@@ -1227,5 +1227,119 @@ fn a_recolour_reaches_a_buttons_press_look() {
     assert_eq!(
         (0..a.len()).filter(|&i| a[i] != b[i]).collect::<Vec<_>>(),
         [22]
+    );
+}
+
+#[test]
+fn a_flush_carries_new_work_with_no_turn_from_the_guest() {
+    let (mut e, mut host) = engine(with_mounts(vec![plugin_button(PLUGIN, "open")]));
+    send(&mut e, &mut host, &first());
+    assert_eq!(e.flush(), None);
+    let mut changed = plugin_button(PLUGIN, "open");
+    changed.nodes[1].cells = vec![Cell::new(TEXT, str("opened"))];
+    e.set_work(with_mounts(vec![changed])).unwrap();
+    let flushed = Turn::from_bytes(&e.flush().unwrap()).unwrap();
+    assert_eq!(
+        flushed.ops,
+        vec![NodeOp::Update {
+            node: PLUGIN + 1,
+            props: vec![(TEXT, str("opened"))]
+        }]
+    );
+    host.apply(&flushed);
+    assert_eq!(host.props().get(PLUGIN + 1, TEXT), Some(&str("opened")));
+    // The guest's next turn doesn't write it again.
+    assert_eq!(e.flush(), None);
+    let (applied, _) = send(&mut e, &mut host, &quiet());
+    assert!(!mentions(&applied, PLUGIN + 1));
+}
+
+#[test]
+fn a_recolour_reaches_a_mounts_cells() {
+    let mut work = with_mounts(vec![plugin_button(PLUGIN, "open")]);
+    work.mounts[0].nodes[0]
+        .cells
+        .push(Cell::new(ids::BACKGROUND, rgba(0x3133_3880)));
+    let themed = Work {
+        recolors: recolours().recolors,
+        ..work.clone()
+    };
+    let (mut e, mut host) = engine(themed);
+    send(&mut e, &mut host, &first());
+    // The mount's alpha, times `to`'s.
+    assert_eq!(
+        host.props().get(PLUGIN, ids::BACKGROUND),
+        Some(&rgba(0x0b0d_1280))
+    );
+    // Without the theme the mount's own colour comes back.
+    e.set_work(work).unwrap();
+    host.apply(&Turn::from_bytes(&e.flush().unwrap()).unwrap());
+    assert_eq!(
+        host.props().get(PLUGIN, ids::BACKGROUND),
+        Some(&rgba(0x3133_3880))
+    );
+}
+
+/// A switch on [`plugin_button`]'s "open": its text says the state, a label
+/// is written only while off, and a recolour applies only while on.
+fn open_switch() -> Switches {
+    Switches::from_json(
+        r#"{"switches": [{
+            "element": "open",
+            "on": true,
+            "when_on": {
+                "cells": [{"node": 4026532097, "cells": [{"prop": "text", "value": {"str": "on"}}]}],
+                "recolors": [{"from": "313338", "to": "0b0d12ff"}]
+            },
+            "when_off": {
+                "cells": [{"node": 4026532097, "cells": [
+                    {"prop": "text", "value": {"str": "off"}},
+                    {"prop": "accessibilityLabel", "value": {"str": "switched off"}}
+                ]}]
+            }
+        }]}"#,
+    )
+    .unwrap()
+}
+
+#[test]
+fn a_switch_writes_its_states_cells_and_recolours() {
+    assert_eq!(PLUGIN + 1, 4_026_532_097);
+    let base = with_mounts(vec![plugin_button(PLUGIN, "open")]);
+    let switches = open_switch();
+    let on = switches.apply(&base, &BTreeMap::new());
+    assert_eq!(
+        on.mounts[0].nodes[1].cells,
+        vec![Cell::new(TEXT, str("on"))]
+    );
+    assert_eq!(on.recolors.len(), 1);
+    let off = switches.apply(&base, &BTreeMap::from([("open".to_string(), false)]));
+    assert_eq!(
+        off.mounts[0].nodes[1].cells,
+        vec![
+            Cell::new(TEXT, str("off")),
+            Cell::new(a11y::LABEL, str("switched off"))
+        ]
+    );
+    assert!(off.recolors.is_empty());
+
+    // Flipped while running, the mount keeps its nodes and only its cells
+    // change, the label cleared.
+    let (mut e, mut host) = engine(off);
+    send(&mut e, &mut host, &first());
+    e.set_work(on).unwrap();
+    let flushed = Turn::from_bytes(&e.flush().unwrap()).unwrap();
+    assert!(
+        !flushed
+            .ops
+            .iter()
+            .any(|op| matches!(op, NodeOp::Create { .. } | NodeOp::Delete { .. }))
+    );
+    host.apply(&flushed);
+    assert_eq!(host.props().get(PLUGIN + 1, TEXT), Some(&str("on")));
+    assert_eq!(host.props().get(PLUGIN + 1, a11y::LABEL), None);
+    assert_eq!(
+        host.props().get(PAGE, ids::BACKGROUND),
+        Some(&rgba(0x0b0d_12ff))
     );
 }

@@ -23,13 +23,16 @@
 //! - **Labels.** An `accessibilityLabel` for each node the guest left
 //!   without one, made from another of its cells.
 //! - **Recolours.** A colour the guest writes, replaced in every colour cell
-//!   that holds it. A theme's token values map to these, one recolour for
-//!   each token a plugin overrides.
+//!   that holds it, the guest's and the mounts'. A theme's token values map
+//!   to these, one recolour for each token a plugin overrides. A mount
+//!   written in the client's own palette follows the theme as the guest's
+//!   nodes do.
 //!
 //! [`Engine::set_work`] replaces the work while turns go through. Cells the
 //! old work wrote and the new one doesn't are set back to the guest's own
 //! values in the next turn. A mount the new work leaves out is taken out of
 //! the host's tree in the next turn, and a new one is created.
+//! [`Engine::flush`] makes that turn when the guest has none to send.
 //!
 //! [`Engine`] keeps two trees: the guest's, from the turns as the guest sent
 //! them, and a mirror of the host's, from the turns it rewrote. Rows,
@@ -54,6 +57,7 @@
 
 mod json;
 mod select;
+mod switches;
 mod work;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -67,6 +71,7 @@ use rekindle_wire::turn::{ON, create_props};
 use rekindle_wire::{DecodeError, NodeId, NodeOp, PropId, Tree, Turn, Value};
 
 pub use select::{Selector, TEXT};
+pub use switches::{NodeCells, Switch, SwitchState, Switches};
 pub use work::{
     Cell, Handler, LabelRule, Mount, MountNode, PluginPress, PressAction, PressRule, Recolor,
     RowAction, RowRule, Work, WorkError, Write,
@@ -164,16 +169,24 @@ impl Engine {
         Ok(engine)
     }
 
-    /// Set the cells of the mounts' nodes from the work, with each count
-    /// handler's count in its cell.
+    /// Set the cells of the mounts' nodes from the work, recoloured, with
+    /// each count handler's count in its cell.
     fn mount_cells(&mut self) {
+        let to = self.recolor_map();
         self.cells = self
             .work
             .mounts
             .iter()
             .flat_map(|m| &m.nodes)
             .map(|n| {
-                let cells = n.cells.iter().map(|c| (c.prop, c.value.clone())).collect();
+                let cells = n
+                    .cells
+                    .iter()
+                    .map(|c| {
+                        let value = recolor_cell(c.prop, &c.value, &to);
+                        (c.prop, value.unwrap_or_else(|| c.value.clone()))
+                    })
+                    .collect();
                 (n.id, cells)
             })
             .collect();
@@ -383,7 +396,22 @@ impl Engine {
         decoded.own_words()?;
         let original = self.guest.resolve(&decoded)?;
         self.guest.apply(&original);
-        let mut turn = self.intercept(&original);
+        Ok(self.rewrite(&original))
+    }
+
+    /// A turn of rekindle's own, for when the work changed and the guest
+    /// has nothing to send: the ops that bring the host's tree in line with
+    /// the work, as the guest's next turn would carry them. `None` when the
+    /// host's tree already is. A host applies it as it applies the guest's
+    /// turns, so it goes through the guest's transport like one.
+    pub fn flush(&mut self) -> Option<Vec<u8>> {
+        self.rewrite(&Turn::new())
+    }
+
+    /// The guest's turn `original`, already applied to the guest's tree, as
+    /// the host should receive it. `None` when that is unchanged.
+    fn rewrite(&mut self, original: &Turn) -> Option<Vec<u8>> {
+        let mut turn = self.intercept(original);
         let mut front = self.unmount();
         self.mirror.apply(&turn);
         let (mut created, mut back) = self.inject(&mut turn);
@@ -391,9 +419,9 @@ impl Engine {
         front.append(&mut turn.ops);
         front.append(&mut back);
         if front == original.ops {
-            return Ok(None);
+            return None;
         }
-        Ok(Some(Turn { ops: front }.to_bytes()))
+        Some(Turn { ops: front }.to_bytes())
     }
 
     /// The guest's nodes the row rules drop, and the rewrites they make, as
@@ -736,12 +764,7 @@ impl Engine {
         if self.work.recolors.is_empty() {
             return Vec::new();
         }
-        let to: BTreeMap<u32, u32> = self
-            .work
-            .recolors
-            .iter()
-            .map(|r| (r.from & 0x00ff_ffff, r.to))
-            .collect();
+        let to = self.recolor_map();
         let mut writes = Vec::new();
         for n in self.guest.nodes() {
             if self.mirror.node(n.id).is_none() {
@@ -751,9 +774,8 @@ impl Engine {
                 .iter()
                 .filter(|p| !ruled.contains(&(n.id, **p)))
                 .filter_map(|p| {
-                    let c = self.guest.props().get(n.id, *p)?.as_color()?;
-                    to.get(&(c & 0x00ff_ffff))
-                        .map(|t| (*p, Value::color(recolored(c >> 24, *t))))
+                    let v = self.guest.props().get(n.id, *p)?;
+                    recolor_cell(*p, v, &to).map(|v| (*p, v))
                 })
                 .collect();
             if !ruled.contains(&(n.id, WORKLET))
@@ -768,6 +790,16 @@ impl Engine {
         writes
     }
 
+    /// The recolours, by the red, green and blue they replace. A later
+    /// recolour of the same colour wins.
+    fn recolor_map(&self) -> BTreeMap<u32, u32> {
+        self.work
+            .recolors
+            .iter()
+            .map(|r| (r.from & 0x00ff_ffff, r.to))
+            .collect()
+    }
+
     /// The node's `worklet` cell with the recolours applied to its colours,
     /// if it is a `press_look` and one of them changed. The worklet paints
     /// a button's fill each frame from its own colours, over the
@@ -778,6 +810,17 @@ impl Engine {
         look.recolor(|c| to.get(&(c & 0x00ff_ffff)).map(|t| recolored(c >> 24, *t)))
             .then(|| look.to_worklet().to_value())
     }
+}
+
+/// The value a recolour gives cell `prop` holding `value`, if it gives one:
+/// `prop` is a colour cell and `value` a colour the map names.
+fn recolor_cell(prop: PropId, value: &Value, to: &BTreeMap<u32, u32>) -> Option<Value> {
+    if !COLOR_PROPS.contains(&prop) {
+        return None;
+    }
+    let c = value.as_color()?;
+    to.get(&(c & 0x00ff_ffff))
+        .map(|t| Value::color(recolored(c >> 24, *t)))
 }
 
 /// `to` (`0xRRGGBBAA`) with its alpha multiplied by `alpha` (0 to 255), as
