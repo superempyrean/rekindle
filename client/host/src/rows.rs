@@ -655,7 +655,7 @@ fn handler(plugin: &str, surface: &str, element: &str) -> Handler {
     }
 }
 
-/// The `uri` cell (531) of an image.
+/// The `uri` cell (542) of an image.
 fn uri() -> PropId {
     PropId::from_name("uri").expect("the PropId table has `uri`")
 }
