@@ -21,7 +21,8 @@ pub enum ToastStyle {
     Error,
 }
 
-const MAX_TOASTS: usize = 4;
+/// How many toasts are kept at once.
+pub const MAX_TOASTS: usize = 4;
 const LIFETIME: Duration = Duration::from_secs(5);
 /// Right inset of the stack, in logical pixels.
 const RIGHT: f32 = 16.0;
@@ -75,6 +76,30 @@ pub fn toast_texts() -> Vec<String> {
         .unwrap()
         .iter()
         .map(|t| t.text.clone())
+        .collect()
+}
+
+/// A toast that is up: what a client without a framework layer draws.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LiveToast {
+    /// Unique for the life of the process.
+    pub id: u64,
+    pub text: String,
+    pub style: ToastStyle,
+}
+
+/// The toasts that are up, oldest first. Those whose time is up are taken
+/// out first.
+pub fn live_toasts() -> Vec<LiveToast> {
+    let mut toasts = TOASTS.lock().unwrap();
+    toasts.retain(|t| t.born.elapsed() < t.lifetime);
+    toasts
+        .iter()
+        .map(|t| LiveToast {
+            id: t.id,
+            text: t.text.clone(),
+            style: t.style,
+        })
         .collect()
 }
 
@@ -260,6 +285,23 @@ mod tests {
         }
         let _ = stack(16.0);
         assert!(toast_texts().iter().any(|t| t == "held"));
+    }
+
+    #[test]
+    fn a_toast_whose_time_is_up_is_not_live() {
+        push_toast_for("gone", ToastStyle::Warning, Duration::from_secs(5));
+        push_toast_for("kept", ToastStyle::Success, Duration::from_secs(600));
+        {
+            let mut t = TOASTS.lock().unwrap();
+            let gone = t.iter_mut().find(|t| t.text == "gone").unwrap();
+            gone.born = Instant::now().checked_sub(LIFETIME * 2).unwrap();
+        }
+        let live = live_toasts();
+        assert!(!live.iter().any(|t| t.text == "gone"));
+        assert!(
+            live.iter()
+                .any(|t| t.text == "kept" && t.style == ToastStyle::Success)
+        );
     }
 
     #[test]

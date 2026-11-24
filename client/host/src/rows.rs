@@ -19,7 +19,7 @@
 use std::collections::BTreeMap;
 
 use rekindle_plugin_host::manager;
-use rekindle_ui_hook::{CardItem, PanelItem, UiInput, Widget};
+use rekindle_ui_hook::{CardItem, LiveToast, PanelItem, ToastStyle, UiInput, Widget};
 use rekindle_wire::a11y::{Role, ids as a11y};
 use rekindle_wire::{ElementKind, NodeId, PropId, Value};
 use rekindle_wire_inject::{Cell, Handler, Mount, MountNode, RESERVED, Selector, TEXT};
@@ -44,6 +44,13 @@ pub(crate) const PAGE_BACK: &str = "page.back";
 const SECTION_IDS: NodeId = RESERVED + 0x0200_0000;
 /// The first node id of a plugin's modal.
 const MODAL_IDS: NodeId = RESERVED + 0x0300_0000;
+/// The first node id of the toasts. Each set of toasts gets ids of its
+/// own, [`TOAST_STRIDE`] apart, so a new set is created while the old one
+/// is taken out without reusing an id.
+const TOAST_IDS: NodeId = RESERVED + 0x0500_0000;
+const TOAST_STRIDE: NodeId = 0x40;
+/// How many sets of toasts get ids before they are used again.
+const TOAST_SETS: u32 = 0x1_0000;
 /// The first node ids of rekindle's page: two blocks, so a page of another
 /// shape is created under new ids while the old one is taken out.
 const PAGE_IDS: [NodeId; 2] = [RESERVED + 0x0400_0000, RESERVED + 0x0480_0000];
@@ -123,6 +130,18 @@ pub(crate) struct Look {
     pub(crate) page_scroll: Vec<Cell>,
     #[serde(default)]
     pub(crate) page_content: Vec<Cell>,
+    /// The toasts: the layer over the screen that lays them out, takes no
+    /// press and lets one through to the screen, a toast's card, its text,
+    /// and the bar at its start, by style (`info`, `success`, `warning`,
+    /// `error`). Without a layer, toasts aren't shown.
+    #[serde(default)]
+    pub(crate) toast_layer: Vec<Cell>,
+    #[serde(default)]
+    pub(crate) toast: Vec<Cell>,
+    #[serde(default)]
+    pub(crate) toast_text: Vec<Cell>,
+    #[serde(default)]
+    pub(crate) toast_bar: BTreeMap<String, Vec<Cell>>,
     /// The `uri` of each row's icon, by the row's key: the key itself, then
     /// `<verb>:*` for a key `<verb>:<id>`. In the menu, `*` is the icon of a
     /// row with neither. A row with none has no icon.
@@ -571,6 +590,52 @@ pub(crate) fn modal(look: &Look, plugin: &str, panel: &PanelItem) -> Rendered {
         },
     );
     r
+}
+
+/// The toasts that are up as a mount over the screen, oldest on top. `set`
+/// counts the sets of toasts shown so far, and picks the mount's ids.
+/// Nothing when no toast is up, or the look has no place for them.
+pub(crate) fn toasts(look: &Look, toasts: &[LiveToast], set: u32) -> Rendered {
+    let Some(under) = &look.modal_under else {
+        return Rendered::default();
+    };
+    if toasts.is_empty() || look.toast_layer.is_empty() {
+        return Rendered::default();
+    }
+    let mut b = Builder::new(look, TOAST_IDS + (set % TOAST_SETS) * TOAST_STRIDE);
+    let root = b.next;
+    b.next += 1;
+    let mut cards = Vec::new();
+    for t in toasts.iter().take(rekindle_ui_hook::MAX_TOASTS) {
+        let mut children = Vec::new();
+        if let Some(bar) = look.toast_bar.get(toast_style(t.style)) {
+            children.push(b.node(ElementKind::VIEW, bar.clone(), Vec::new(), None));
+        }
+        children.push(b.text(&look.toast_text, &t.text));
+        let mut cells = look.toast.clone();
+        cells.push(Cell::new(a11y::LABEL, Value::Str(t.text.clone())));
+        cards.push(b.node(ElementKind::VIEW, cells, children, None));
+    }
+    let mut layer = look.toast_layer.clone();
+    layer.push(Cell::new(a11y::ID, Value::Str("rekindle.toasts".into())));
+    b.nodes.push(MountNode {
+        id: root,
+        kind: ElementKind::VIEW,
+        cells: layer,
+        children: cards,
+        on_press: None,
+    });
+    b.finish(under.clone(), None, None, root)
+}
+
+/// The key of a toast's style in [`Look::toast_bar`].
+fn toast_style(style: ToastStyle) -> &'static str {
+    match style {
+        ToastStyle::Info => "info",
+        ToastStyle::Success => "success",
+        ToastStyle::Warning => "warning",
+        ToastStyle::Error => "error",
+    }
 }
 
 /// Several renders as one.
@@ -1244,5 +1309,67 @@ mod tests {
         let mut no = look();
         no.modal_under = None;
         assert_eq!(modal(&no, "dev.a", &panel), Rendered::default());
+    }
+
+    fn toast(id: u64, text: &str, style: ToastStyle) -> LiveToast {
+        LiveToast {
+            id,
+            text: text.into(),
+            style,
+        }
+    }
+
+    #[test]
+    fn toasts_are_cards_on_a_layer_that_takes_no_press() {
+        let mut l = look();
+        // No layer in the look, no toasts.
+        let up = [
+            toast(1, "Saved", ToastStyle::Success),
+            toast(2, "Oops", ToastStyle::Error),
+        ];
+        assert_eq!(toasts(&l, &up, 0), Rendered::default());
+        l.toast_layer = vec![Cell::new(
+            PropId::from_name("absolute").unwrap(),
+            Value::Bool(true),
+        )];
+        l.toast_bar.insert(
+            "error".into(),
+            vec![Cell::new(
+                PropId::from_name("background").unwrap(),
+                Value::Str("red".into()),
+            )],
+        );
+        let r = toasts(&l, &up, 3);
+        assert!(r.presses.is_empty());
+        let [m] = r.mounts.as_slice() else {
+            panic!("one mount: {:?}", r.mounts)
+        };
+        assert_eq!(m.root, TOAST_IDS + 3 * TOAST_STRIDE);
+        assert!(m.nodes.iter().all(|n| n.on_press.is_none()));
+        let root = m.nodes.iter().find(|n| n.id == m.root).unwrap();
+        assert_eq!(root.children.len(), 2);
+        let texts: Vec<&Value> = m
+            .nodes
+            .iter()
+            .flat_map(|n| &n.cells)
+            .filter(|c| c.prop == TEXT)
+            .map(|c| &c.value)
+            .collect();
+        assert_eq!(
+            texts,
+            [&Value::Str("Saved".into()), &Value::Str("Oops".into())]
+        );
+        // Only the error toast has a bar: the look has none for success.
+        let error = m.nodes.iter().find(|n| n.id == root.children[1]).unwrap();
+        assert_eq!(error.children.len(), 2);
+        // The next set has ids of its own, and the work takes both.
+        let next = toasts(&l, &up[1..], 4);
+        let ids =
+            |r: &Rendered| -> Vec<NodeId> { r.mounts[0].nodes.iter().map(|n| n.id).collect() };
+        assert!(ids(&r).iter().all(|i| !ids(&next).contains(i)));
+        let mut work = Work::default();
+        work.mounts.extend(join([r, next]).mounts);
+        work.check().unwrap();
+        assert_eq!(toasts(&l, &[], 5), Rendered::default());
     }
 }
