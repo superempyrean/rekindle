@@ -1,0 +1,28 @@
+[package]
+name = "rekindle-playground"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "The theme playground: a wire capture replayed through rekindle's wire engine in the browser, painted as the client lays it out, recoloured live as a theme is edited."
+publish = false
+
+# The library is the wasm module the page loads (`cdylib`) and the engine
+# session the command and the tests use (`rlib`). The command serves the
+# page and makes fixtures.
+[lib]
+name = "playground"
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "rekindle-playground"
+path = "src/main.rs"
+
+[dependencies]
+rekindle-wire = { workspace = true }
+rekindle-wire-inject = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

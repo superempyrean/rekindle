@@ -6,3 +6,4 @@
 *.gif binary
 *.png binary
 *.wasm binary
+*.capture binary

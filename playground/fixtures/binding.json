@@ -1,0 +1,21 @@
+{
+ "call": {"method": 84, "dark": 583},
+ "tokens": [
+  {"token": "background-base-lower", "key": 587},
+  {"token": "background-base-lowest", "key": 587},
+  {"token": "background-base-low", "key": 603},
+  {"token": "background-surface-high", "key": 588},
+  {"token": "background-surface-higher", "key": 589},
+  {"token": "background-surface-highest", "key": 594},
+  {"token": "border-subtle", "key": 591},
+  {"token": "background-brand", "key": 596},
+  {"token": "status-danger", "key": 590, "role": "any"},
+  {"token": "text-strong", "key": 472},
+  {"token": "text-default", "key": 602},
+  {"token": "text-muted", "key": 599},
+  {"token": "background-mod-subtle", "dark": "#242429"},
+  {"token": "background-mod-normal", "dark": "#2e2e33"},
+  {"token": "text-subtle", "dark": "#abacb2"},
+  {"token": "icon-muted", "dark": "#97979f"}
+ ]
+}

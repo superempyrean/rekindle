@@ -1,0 +1,92 @@
+# The client's own labels the fixtures keep as they are. Every other string
+# in a capture is replaced (see playground/src/sanitize.rs). Names, messages,
+# server and channel names, and staff-only rows never go on this list.
+Accessibility
+Account
+Account Settings
+Acknowledgements
+Activity
+Add Friends
+Add Reaction
+Add a Server
+Add custom status
+Advanced
+App Icon
+App Settings
+App Version
+Appearance
+Apps
+Back
+Billing Settings
+Bookmarks
+Camera
+Chat
+Clips
+Connected Apps
+Content & Social
+Create Folder
+Dark
+Data & Privacy
+Devices
+Direct Messages
+Do Not Disturb
+Edit Profile
+Events
+Family Center
+Files
+Friends
+General
+Get Nitro
+Getting Started guide
+Gift Inventory
+Invite
+Invite your friends
+Join Voice Channel
+Jump To Present
+LOAD MORE MESSAGES
+Language
+Load more messages
+Log Out
+Main
+Mark As Read
+Message #general
+Messages
+More Options
+NEW
+NEW MESSAGES
+New Message
+Nitro
+Notifications
+Personalize your server
+Photos
+Poll
+Quests
+Record Voice Message
+Reply
+Scan QR Code
+Search
+Send
+Send a gift
+Server Boost
+Server Boosts
+Settings
+Shop
+Sponsored Content
+Start Video Call
+Start Voice Call
+Support
+Text Channels
+Thread
+Try Orbs
+Voice & Video
+Voice Activity
+Voice Channels
+Wave
+What's New
+Wishlist
+general
+1 Online
+67 Online
+73 Online
+75 Online
+This is the beginning of this server. Here are some steps to help you get started. For more, check out our 

@@ -1,0 +1,121 @@
+{
+ "_note": "Screens of Discord's Android client (build 356207), each the tree one capture left, with every name, message and image replaced (rekindle-playground sanitize). The light and dark palettes are the ones the guest named in the capture behind the two new-server screens, as rekindle's host logged them. binding.json is the build's theme binding.",
+ "binding": "binding.json",
+ "palettes": {
+  "light": {
+   "dark": false,
+   "colors": {
+    "400": "#97979f",
+    "472": "#28282d",
+    "587": "#f3f3f4",
+    "588": "#ffffff",
+    "589": "#ffffff",
+    "590": "#b92733",
+    "591": "#97979f",
+    "592": "#97979f",
+    "593": "#000000",
+    "594": "#ffffff",
+    "595": "#97979f",
+    "596": "#5865f2",
+    "597": "#5865f2",
+    "598": "#c5c6ca",
+    "599": "#6c6d76",
+    "600": "#000000",
+    "601": "#f9f9f9",
+    "602": "#2e2e34",
+    "603": "#fbfbfb"
+   }
+  },
+  "dark": {
+   "dark": true,
+   "colors": {
+    "400": "#97979f",
+    "472": "#ffffff",
+    "587": "#2c2d32",
+    "588": "#393a41",
+    "589": "#393a41",
+    "590": "#ffa09b",
+    "591": "#97979f",
+    "592": "#97979f",
+    "593": "#ffffff",
+    "594": "#3f4048",
+    "595": "#97979f",
+    "596": "#5865f2",
+    "597": "#949cf7",
+    "598": "#595a63",
+    "599": "#abacb2",
+    "600": "#000000",
+    "601": "#0c0c0d",
+    "602": "#f3f3f4",
+    "603": "#36373e"
+   }
+  },
+  "dark-modelled": {
+   "dark": true,
+   "_note": "Not logged: these captures were taken before the host logged palettes. Each key holds the colour the modelled dark palette gives the binding's first token for it.",
+   "colors": {
+    "587": "#1a1a1e",
+    "603": "#1c1c1f",
+    "588": "#202024",
+    "589": "#111214",
+    "596": "#5865f2",
+    "472": "#fbfbfb",
+    "599": "#96979e"
+   }
+  }
+ },
+ "screens": [
+  {
+   "id": "dms",
+   "name": "Direct messages",
+   "capture": "dms.capture",
+   "palette": "dark-modelled",
+   "width": 412,
+   "height": 846,
+   "note": "This capture's palette wasn't logged. Its token colours are modelled, so a token may miss cells it would reach on the client."
+  },
+  {
+   "id": "server",
+   "name": "Server and channels",
+   "capture": "server.capture",
+   "palette": "dark-modelled",
+   "width": 412,
+   "height": 846,
+   "note": "This capture's palette wasn't logged. Its token colours are modelled, so a token may miss cells it would reach on the client."
+  },
+  {
+   "id": "chat",
+   "name": "Chat",
+   "capture": "chat.capture",
+   "palette": "dark-modelled",
+   "width": 412,
+   "height": 846,
+   "note": "This capture's palette wasn't logged. Its token colours are modelled, so a token may miss cells it would reach on the client."
+  },
+  {
+   "id": "settings",
+   "name": "Settings",
+   "capture": "settings.capture",
+   "palette": "dark-modelled",
+   "width": 412,
+   "height": 846,
+   "note": "This capture's palette wasn't logged. Its token colours are modelled, so a token may miss cells it would reach on the client."
+  },
+  {
+   "id": "welcome-dark",
+   "name": "New server, dark",
+   "capture": "welcome-dark.capture",
+   "palette": "dark",
+   "width": 412,
+   "height": 846
+  },
+  {
+   "id": "welcome-light",
+   "name": "New server, light",
+   "capture": "welcome-light.capture",
+   "palette": "light",
+   "width": 412,
+   "height": 846
+  }
+ ]
+}

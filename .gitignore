@@ -29,3 +29,7 @@ node_modules/
 /crates/phoenix-guest/**/*.dll
 /crates/phoenix-guest/**/*.dylib
 /crates/phoenix-guest/**/*.dmp
+
+# The theme playground: the user's own captures, and the drawables and fonts
+# phoenix-view extracts from their APK.
+/playground/local/

@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Theme playground</title>
+<link rel="stylesheet" href="style.css">
+<script type="module" src="app.js"></script>
+</head>
+<body>
+<header>
+  <h1>Theme playground</h1>
+  <label>Screen <select id="screen"></select></label>
+  <label class="file">Open a capture<input id="open-capture" type="file" accept=".capture"></label>
+  <label>Turn <input id="turn" type="range" min="1" value="1"> <span id="turn-n" class="dim"></span></label>
+  <div class="seg" role="group" aria-label="View">
+    <button data-view="themed" aria-pressed="true">Themed</button>
+    <button data-view="original" aria-pressed="false">Original</button>
+    <button data-view="split" aria-pressed="false">Side by side</button>
+  </div>
+</header>
+<main>
+  <section id="stage">
+    <figure><div class="device" id="device-a"></div><figcaption class="label"></figcaption></figure>
+    <figure hidden><div class="device" id="device-b"></div><figcaption class="label"></figcaption></figure>
+    <p id="screen-note" class="dim"></p>
+  </section>
+  <aside>
+    <div class="meta">
+      <label>Name <input id="theme-name"></label>
+      <label>Id <input id="theme-id" spellcheck="false"></label>
+      <label>Version <input id="theme-version" spellcheck="false"></label>
+      <label>Variant <select id="variant" disabled><option value="">(none)</option></select></label>
+    </div>
+    <div class="actions">
+      <label class="file">Import .theme.json<input id="import" type="file" accept=".json"></label>
+      <button id="export">Export .theme.json</button>
+      <button id="reset">Clear</button>
+    </div>
+    <input id="filter" type="search" placeholder="Filter tokens" spellcheck="false">
+    <div id="tokens"></div>
+  </aside>
+</main>
+<footer id="status" class="dim">Loading the engine</footer>
+</body>
+</html>

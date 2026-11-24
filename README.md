@@ -42,6 +42,7 @@ GPUI like Zed and test applications of our own.
 | `crates/test-client`  | `rekindle-test` | What a Rust plugin's tests use under `rekindle test`. |
 | `crates/plugin-host`  | `rekindle-plugin-host` | Embeds wasmtime, loads plugin components and enforces per-plugin capabilities; first-party signing, the community index and store, developer mode and the install screen; the test harness. |
 | `crates/cli`          | `rekindle-cli` | The `rekindle` command: scaffold, build, preview, test, sign, install, submit to the community index. |
+| `playground/`         | `rekindle-playground` | The theme playground: the client's screens from wire captures, recoloured in the browser by `rekindle-wire-inject` built to wasm as a theme's tokens are edited ([playground/README.md](playground/README.md)). |
 | `plugins/`            | | Example plugins in `rust/` and their TypeScript ports in `ts/`, and theme files in `themes/`. |
 | **Shipping** | | |
 | `crates/install`      | `rekindle-install` | The install's layout and `state.json`: which version runs, and the fallback from one that doesn't come up. Shared by the launcher, the shim and the host. |

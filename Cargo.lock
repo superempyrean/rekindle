@@ -2907,6 +2907,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rekindle-playground"
+version = "0.0.0"
+dependencies = [
+ "rekindle-wire",
+ "rekindle-wire-inject",
+ "serde_json",
+]
+
+[[package]]
 name = "rekindle-plugin-api"
 version = "0.0.0"
 dependencies = [
