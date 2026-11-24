@@ -149,7 +149,11 @@ impl Driver {
         // button in the chat bar opens rekindle's own window.
         rekindle_ui_hook::window::set_button(!surfaces.settings);
         let backend = DetourBackend::new(shared.clone(), surfaces);
-        let rekindle = Rekindle::new(backend, args).map_err(|e| format!("{e:#}"))?;
+        // Gateway dispatches read the client through a backend of their own,
+        // so a plugin's call during an event filter never waits on the lock
+        // the filter would hold.
+        let reader = DetourBackend::new(shared.clone(), surfaces);
+        let rekindle = Rekindle::new(backend, reader, args).map_err(|e| format!("{e:#}"))?;
 
         let theme_hook = profile
             .theme
@@ -310,6 +314,40 @@ impl Driver {
             })
             .collect();
         rekindle_ui_hook::render::set_looks(looks);
+    }
+
+    /// How the plugins' renderers want `messages` to look, each an id and
+    /// its content, for a host that reads the client's messages off its
+    /// wire. Index `i` of the result is for `messages[i]`.
+    pub fn render_messages(
+        &mut self,
+        messages: &[(u64, String)],
+    ) -> Vec<rekindle_ui_hook::render::Look> {
+        use rekindle_plugin_host::api::{Message, RenderInput};
+        let inputs: Vec<RenderInput> = messages
+            .iter()
+            .map(|(id, content)| RenderInput {
+                message: Message {
+                    id: *id,
+                    content: content.clone(),
+                    ..Default::default()
+                },
+                author_roles: Vec::new(),
+                grouped: false,
+                dark: true,
+            })
+            .collect();
+        let rendered = self.rekindle.render(&inputs);
+        rendered
+            .iter()
+            .map(|per| {
+                convert::look(
+                    per,
+                    |id| self.rekindle.plugin_name(id),
+                    |t| self.rekindle.token_rgba(t),
+                )
+            })
+            .collect()
     }
 
     /// Wait up to `wait` for the client to send a message, and run it through

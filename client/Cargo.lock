@@ -4547,6 +4547,7 @@ dependencies = [
  "rekindle-native",
  "rekindle-plugin-host",
  "rekindle-ui-hook",
+ "serde_json",
  "url",
 ]
 

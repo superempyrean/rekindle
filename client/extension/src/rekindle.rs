@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex, mpsc};
 
 use anyhow::{Context as _, Result, bail};
 use rekindle_plugin_host::api::{Target, UserRef};
+use rekindle_plugin_host::backend::gateway::Dispatch;
 use rekindle_plugin_host::home::{Home, InstallState};
 use rekindle_plugin_host::manager::{self, DevPlugin, Effect, Manager, Synced};
 use rekindle_plugin_host::model::{LogLevel, LogRecord, Mods, ToastKind, UiEvent};
@@ -64,6 +65,8 @@ impl Source {
 pub struct Rekindle {
     runtime: Runtime,
     backend: Arc<Mutex<DetourBackend>>,
+    /// What gateway dispatches read the client through.
+    reader: DetourBackend,
     home: Home,
     sources: Vec<Source>,
     last_status: HashMap<String, Status>,
@@ -86,7 +89,11 @@ impl Rekindle {
     /// Fails if the home or the storage directory can't be opened or the
     /// runtime can't start. A plugin that doesn't load is reported, not an
     /// error.
-    pub(crate) fn new(backend: DetourBackend, opts: ExtArgs) -> Result<Self> {
+    pub(crate) fn new(
+        backend: DetourBackend,
+        reader: DetourBackend,
+        opts: ExtArgs,
+    ) -> Result<Self> {
         let home = match &opts.home {
             Some(root) => Home::new(root),
             None => Home::from_env()?,
@@ -141,6 +148,7 @@ impl Rekindle {
         let mut p = Rekindle {
             runtime,
             backend,
+            reader,
             home,
             sources: Vec::new(),
             last_status: HashMap::new(),
@@ -700,6 +708,34 @@ impl Rekindle {
             self.host_log(plugin, LogLevel::Warn, &format!("ui event dropped: {e:#}"));
         }
         self.check_faults();
+    }
+
+    // ---- gateway dispatches (`backend::gateway`) ----
+
+    /// The event kinds some plugin's `event-filter` sees now. A dispatch of
+    /// another kind needn't wait for [`Rekindle::gateway_filter`].
+    pub fn intercepted_kinds(&self) -> Vec<rekindle_plugin_host::api::EventKind> {
+        self.runtime.intercepted_kinds()
+    }
+
+    /// Run dispatch `t` past the plugins' event filters, before the client
+    /// processes it. `None`: a plugin dropped it. Otherwise its `d`, with a
+    /// message's content as a filter replaced it.
+    pub fn gateway_filter(&mut self, t: &str, d: serde_json::Value) -> Option<serde_json::Value> {
+        let dispatch = Dispatch::new(t, d, &self.reader).filter(&mut self.runtime, &self.reader);
+        self.check_faults();
+        dispatch.map(|x| x.d)
+    }
+
+    /// Deliver the events dispatch `t` caused, once the client has
+    /// processed it. Returns how many there were.
+    pub fn gateway_events(&mut self, t: &str, d: serde_json::Value, now_ms: u64) -> usize {
+        let events = Dispatch::new(t, d, &self.reader).events(&self.reader, now_ms);
+        if !events.is_empty() {
+            self.runtime.dispatch_events(&events);
+            self.check_faults();
+        }
+        events.len()
     }
 
     /// The user dismissed a plugin's modal: drop it from the client backend.

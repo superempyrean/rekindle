@@ -32,15 +32,19 @@ use std::sync::Mutex;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use rekindle_extension::theme::ThemeProfile;
 use rekindle_extension::{Driver, ExtArgs, RecoveredProfile};
 use rekindle_plugin_host::home::Home;
 use rekindle_plugin_host::manager;
 use rekindle_plugin_host::model::SLOT_CHAT_BAR_BUTTON;
 use rekindle_ui_hook::{Click, UiInput, Widget};
-use rekindle_wire_inject::{Handler, Mount, PluginPress, Recolor};
+use rekindle_wire_inject::{Handler, Mount, PluginPress, Recolor, Write};
 
 use super::log;
+use crate::gateway::{Decision, Passed};
+use crate::messages::MessageMap;
 use crate::rows::{self, Look, Press};
 use crate::wire::SlotMap;
 
@@ -61,6 +65,12 @@ pub(crate) const ANSWER_WAIT: Duration = Duration::from_millis(50);
 /// which took 170 to 490 ms for 38 plugins on the emulator, and an idle
 /// client can go seven seconds without a dispatch to flush a late answer.
 pub(crate) const PAGE_WAIT: Duration = Duration::from_millis(600);
+/// How long a dispatch waits for the plugins' event filters before the
+/// guest receives it unchanged. Filters run on the per-render budget, so
+/// only a runtime busy with something else makes one wait this long.
+const FILTER_WAIT: Duration = Duration::from_millis(250);
+/// How many dispatches' events are logged by name, then one in this many.
+const EVENTS_LOGGED: u64 = 64;
 
 /// What the runtime last made of its plugins.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -74,13 +84,33 @@ pub(crate) struct State {
     pub(crate) mounts: Vec<Mount>,
     /// What the system back does: close the modal or the page on top.
     pub(crate) back: Option<Handler>,
+    /// The cells the plugins' message renderers write on the messages
+    /// shown.
+    pub(crate) cells: Vec<Write>,
 }
 
-/// One of rekindle's nodes was pressed: run the press, and say when done.
-struct Request {
-    press: PluginPress,
-    done: mpsc::SyncSender<()>,
+/// What the guest's thread hands the runtime.
+enum Request {
+    /// One of rekindle's nodes was pressed: run the press, and say when
+    /// done.
+    Press {
+        press: PluginPress,
+        done: mpsc::SyncSender<()>,
+    },
+    /// Run a dispatch past the plugins' event filters, and send back its
+    /// `d`, or `None` if a plugin dropped it.
+    Filter {
+        t: String,
+        d: serde_json::Value,
+        done: mpsc::SyncSender<Option<serde_json::Value>>,
+    },
+    /// The guest received these dispatches: deliver their events.
+    Events(Vec<Passed>),
 }
+
+/// The event kinds some plugin's event filter sees, as bits by
+/// `EventKind as u8`. Read on the guest's thread for every dispatch.
+static INTERCEPTED: AtomicU64 = AtomicU64::new(0);
 
 static REQUESTS: Mutex<Option<mpsc::Sender<Request>>> = Mutex::new(None);
 
@@ -133,12 +163,9 @@ pub(crate) fn handles(p: &PluginPress) -> bool {
 /// if it answered in time; false if it didn't or isn't running.
 pub(crate) fn press(p: &PluginPress) -> bool {
     let (done, answered) = mpsc::sync_channel(1);
-    let sent = requests().as_ref().is_some_and(|tx| {
-        tx.send(Request {
-            press: p.clone(),
-            done,
-        })
-        .is_ok()
+    let sent = send(Request::Press {
+        press: p.clone(),
+        done,
     });
     let wait = if [rows::SECTION, rows::PAGE].contains(&p.surface.as_str()) {
         PAGE_WAIT
@@ -146,6 +173,65 @@ pub(crate) fn press(p: &PluginPress) -> bool {
         ANSWER_WAIT
     };
     sent && answered.recv_timeout(wait).is_ok()
+}
+
+/// Whether the runtime's thread is up.
+pub(crate) fn is_up() -> bool {
+    requests().is_some()
+}
+
+fn send(r: Request) -> bool {
+    requests().as_ref().is_some_and(|tx| tx.send(r).is_ok())
+}
+
+/// Whether some plugin's event filter sees the events dispatch `t` causes.
+pub(crate) fn intercepts(t: &str) -> bool {
+    rekindle_plugin_host::backend::gateway::dispatch_kind(t)
+        .is_some_and(|k| INTERCEPTED.load(Ordering::Relaxed) & (1 << (k as u8)) != 0)
+}
+
+/// Run dispatch `t` past the plugins' event filters, and wait up to
+/// [`FILTER_WAIT`] for them. On the guest's thread, before it receives the
+/// dispatch.
+pub(crate) fn filter(t: &str, d: &serde_json::Value) -> Decision {
+    let (done, answer) = mpsc::sync_channel(1);
+    let at = Instant::now();
+    if !send(Request::Filter {
+        t: t.to_string(),
+        d: d.clone(),
+        done,
+    }) {
+        return Decision::Pass;
+    }
+    let decision = match answer.recv_timeout(FILTER_WAIT) {
+        Ok(None) => Decision::Drop,
+        Ok(Some(new)) if new != *d => Decision::Replace(new),
+        Ok(Some(_)) => Decision::Pass,
+        Err(_) => {
+            log(&format!(
+                "gateway: {t} passed unfiltered after {} ms",
+                at.elapsed().as_millis()
+            ));
+            return Decision::Pass;
+        }
+    };
+    log(&format!(
+        "gateway: filter {t} -> {} in {} us",
+        match &decision {
+            Decision::Pass => "pass",
+            Decision::Drop => "drop",
+            Decision::Replace(_) => "replace",
+        },
+        at.elapsed().as_micros()
+    ));
+    decision
+}
+
+/// Hand the dispatches the guest received to the runtime, for their events.
+pub(crate) fn received(passed: Vec<Passed>) {
+    if !passed.is_empty() {
+        send(Request::Events(passed));
+    }
 }
 
 /// The plugin home: `rekindle` in the app's own files dir.
@@ -170,6 +256,12 @@ struct Surfaces {
     look: Option<Look>,
     /// The chat-bar slot, when the wire map has one.
     chat_bar: Option<SlotMap>,
+    /// Where the messages are, when the wire map says.
+    messages: Option<MessageMap>,
+    /// The turns the guest had sent when the messages were last read, and
+    /// the cells the renderers made of them.
+    read_at: Option<u64>,
+    message_cells: Vec<Write>,
     home: Home,
     /// The home's developer mode, read every [`DEVELOPER_MODE_EVERY`]
     /// ticks and after a press.
@@ -184,6 +276,9 @@ struct Surfaces {
     /// The page shown, and which block of ids it has.
     page: Option<Mount>,
     block: usize,
+    /// The toasts shown, by id, and how many sets of them were shown.
+    toasts: Vec<u64>,
+    toast_sets: u32,
 }
 
 impl Surfaces {
@@ -196,18 +291,24 @@ impl Surfaces {
                     .ok()
             });
         let path = super::config_file(WIRE_MAP);
-        let chat_bar = if path.exists() {
+        let map = if path.exists() {
             crate::wire::read_wire_map(&path)
                 .inspect_err(|e| log(&format!("runtime: {}", crate::err(e))))
                 .ok()
-                .and_then(|mut m| m.slots.remove(SLOT_CHAT_BAR_BUTTON))
         } else {
             None
+        };
+        let (chat_bar, messages) = match map {
+            Some(mut m) => (m.slots.remove(SLOT_CHAT_BAR_BUTTON), m.messages),
+            None => (None, None),
         };
         let developer_mode = home.developer_mode().unwrap_or(false);
         Surfaces {
             look,
             chat_bar,
+            messages,
+            read_at: None,
+            message_cells: Vec::new(),
             home,
             developer_mode,
             ticks: 0,
@@ -215,6 +316,8 @@ impl Surfaces {
             menu: Vec::new(),
             page: None,
             block: 0,
+            toasts: Vec::new(),
+            toast_sets: 0,
         }
     }
 
@@ -309,20 +412,42 @@ fn run(rx: &mpsc::Receiver<Request>) {
     let mut logs = 0;
     surfaces.menu = driver.rekindle().menu();
     publish(&mut driver, &mut surfaces);
+    let mut received = 0u64;
     loop {
         match rx.recv_timeout(TICK) {
-            Ok(r) => {
-                serve(&mut driver, &mut surfaces, &r.press);
+            Ok(Request::Press { press, done }) => {
+                serve(&mut driver, &mut surfaces, &press);
                 // The press may have stopped waiting.
-                let _ = r.done.send(());
+                let _ = done.send(());
                 // The menu's counts, after the press is answered: reading
                 // them reads every installed plugin.
                 surfaces.menu = driver.rekindle().menu();
+            }
+            Ok(Request::Filter { t, d, done }) => {
+                // The dispatch may have stopped waiting.
+                let _ = done.send(driver.rekindle().gateway_filter(&t, d));
+            }
+            Ok(Request::Events(passed)) => {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| d.as_millis() as u64);
+                for p in passed {
+                    let n = driver.rekindle().gateway_events(&p.t, p.d(), now);
+                    received += 1;
+                    if received <= EVENTS_LOGGED || received.is_multiple_of(EVENTS_LOGGED) {
+                        log(&format!("gateway #{received}: {} -> {n} event(s)", p.t));
+                    }
+                }
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => return,
         }
         driver.tick();
+        let kinds = driver.rekindle().intercepted_kinds();
+        let bits = kinds.iter().fold(0u64, |bits, k| bits | (1 << (*k as u8)));
+        if INTERCEPTED.swap(bits, Ordering::Relaxed) != bits {
+            log(&format!("gateway: intercepted kinds now {kinds:?}"));
+        }
         surfaces.ticks = surfaces.ticks.wrapping_add(1);
         if surfaces.ticks.is_multiple_of(DEVELOPER_MODE_EVERY) {
             let now = surfaces.home.developer_mode().unwrap_or(false);
@@ -408,6 +533,52 @@ fn page_title(state: &State) -> String {
                 .find(|c| c.prop == rekindle_wire_inject::TEXT)
         })
         .map_or_else(|| "-".into(), |c| format!("{:?}", c.value))
+}
+
+/// How many ticks the messages are read again after, with no new turn:
+/// a renderer's settings may have changed.
+const MESSAGES_EVERY: u32 = 20;
+
+/// The cells the plugins' message renderers write on the messages the
+/// guest shows. The guest's tree is read only after it sent a turn, or
+/// every [`MESSAGES_EVERY`] ticks, and only while a plugin renders
+/// messages.
+fn message_cells(driver: &mut Driver, surfaces: &mut Surfaces) -> Vec<Write> {
+    let Some(map) = surfaces.messages.clone() else {
+        return Vec::new();
+    };
+    let renders = driver
+        .rekindle()
+        .infos()
+        .iter()
+        .any(|p| p.granted.iter().any(|c| c.as_str() == "render-messages"));
+    if !renders {
+        surfaces.read_at = None;
+        surfaces.message_cells.clear();
+        return Vec::new();
+    }
+    let turns = super::TURNS.load(Ordering::Relaxed);
+    if surfaces.read_at == Some(turns) && !surfaces.ticks.is_multiple_of(MESSAGES_EVERY) {
+        return surfaces.message_cells.clone();
+    }
+    surfaces.read_at = Some(turns);
+    let shown = super::with_engine(|e| crate::messages::shown(e.guest(), &map)).unwrap_or_default();
+    let ids: Vec<(u64, String)> = shown.iter().map(|m| (m.id, m.content.clone())).collect();
+    let looks = driver.render_messages(&ids);
+    let cells: Vec<Write> = shown
+        .iter()
+        .zip(&looks)
+        .flat_map(|(m, look)| crate::messages::writes(&map, m, look))
+        .collect();
+    if cells != surfaces.message_cells {
+        log(&format!(
+            "messages: {} shown, {} with a look",
+            shown.len(),
+            looks.iter().filter(|l| !l.is_empty()).count()
+        ));
+    }
+    surfaces.message_cells.clone_from(&cells);
+    cells
 }
 
 /// The plugins running, by id.
@@ -507,7 +678,24 @@ fn publish(driver: &mut Driver, surfaces: &mut Surfaces) -> State {
             (None, None) => None,
         };
         let modal = modal.map(|(plugin, panel)| rows::modal(look, &plugin, &panel));
-        let rendered = rows::join(std::iter::once(menu).chain(page).chain(modal));
+        let up = rekindle_ui_hook::live_toasts();
+        let ids: Vec<u64> = up.iter().map(|t| t.id).collect();
+        if ids != surfaces.toasts {
+            surfaces.toasts = ids;
+            surfaces.toast_sets = surfaces.toast_sets.wrapping_add(1);
+            log(&format!(
+                "toasts: {} up (set {})",
+                up.len(),
+                surfaces.toast_sets
+            ));
+        }
+        let toasts = rows::toasts(look, &up, surfaces.toast_sets);
+        let rendered = rows::join(
+            std::iter::once(menu)
+                .chain(page)
+                .chain(modal)
+                .chain(std::iter::once(toasts)),
+        );
         mounts = rendered.mounts;
         surfaces.presses = rendered.presses;
     }
@@ -524,11 +712,13 @@ fn publish(driver: &mut Driver, surfaces: &mut Surfaces) -> State {
         None
     };
     let recolors = crate::wire::palette_recolors(&palettes, shown);
+    let cells = message_cells(driver, surfaces);
     let state = State {
         recolors,
         running,
         mounts,
         back,
+        cells,
     };
     super::set_plugins(state.clone());
     state

@@ -114,6 +114,11 @@ pub(crate) struct WireMap {
     /// The node of each named surface (`member-list`), by name.
     #[serde(default)]
     surfaces: BTreeMap<String, Selector>,
+    /// Where the message rows are, for the plugins' message renderers. Read
+    /// on Android, where the host reads the messages off the wire.
+    #[cfg(target_os = "android")]
+    #[serde(default)]
+    pub(crate) messages: Option<crate::messages::MessageMap>,
 }
 
 #[derive(Debug, Deserialize)]

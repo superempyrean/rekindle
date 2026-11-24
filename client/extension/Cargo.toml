@@ -19,6 +19,8 @@ rekindle-ui-hook = { workspace = true }
 # Colour conversions as gpui does them (no gpui dependency).
 rekindle-native = { workspace = true }
 anyhow = { workspace = true }
+# Gateway dispatches, as `backend::gateway` takes them.
+serde_json = { workspace = true }
 url = { workspace = true }
 # Decode overlay atlases (PNG/GIF).
 image = { workspace = true }

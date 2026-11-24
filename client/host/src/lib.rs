@@ -30,11 +30,15 @@ mod drive {
 #[cfg(target_os = "android")]
 mod android;
 mod debug;
+#[cfg(any(target_os = "android", test))]
+mod gateway;
 mod hooks;
 mod image;
 mod install;
 mod layout;
 mod live;
+#[cfg(any(target_os = "android", test))]
+mod messages;
 mod profile;
 #[cfg(any(target_os = "android", test))]
 mod rows;
@@ -172,6 +176,7 @@ fn android_worker() {
     loop {
         std::thread::sleep(std::time::Duration::from_secs(1));
         android::poll_test_press();
+        android::poll_test_gateway();
         tick += 1;
         if tick.is_multiple_of(5) {
             android::log(&android::counts());

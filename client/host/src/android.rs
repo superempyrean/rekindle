@@ -50,6 +50,7 @@
 
 mod runtime;
 
+use crate::gateway;
 use std::ffi::{CString, c_char, c_void};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -463,6 +464,7 @@ impl Panel {
         let mut work = self.switches.apply(&self.base, &on);
         if let Some(p) = &self.plugins {
             work.recolors.extend(p.recolors.iter().copied());
+            work.cells.extend(p.cells.iter().cloned());
             work.mounts.extend(p.mounts.iter().cloned());
             work.back.clone_from(&p.back);
         }
@@ -591,12 +593,13 @@ fn restore(which: &'static Slot) {
 }
 
 /// The report's counts: turns, turns rewritten, turns the engine failed on,
-/// host calls passed through, events dispatched, events consumed, and turns
-/// of rekindle's own flushed.
+/// host calls passed through, events dispatched, events consumed, turns of
+/// rekindle's own flushed, and the gateway's dispatches the guest received,
+/// the plugins dropped and the plugins replaced.
 pub(crate) fn counts() -> String {
     format!(
         "transport_turns={} transport_rewritten={} transport_failed={} transport_calls={} \
-         dispatches={} consumed={} flushed={}",
+         dispatches={} consumed={} flushed={} gateway={} gateway_dropped={} gateway_replaced={}",
         TURNS.load(Ordering::Relaxed),
         REWRITTEN.load(Ordering::Relaxed),
         FAILED.load(Ordering::Relaxed),
@@ -604,6 +607,9 @@ pub(crate) fn counts() -> String {
         DISPATCHES.load(Ordering::Relaxed),
         CONSUMED.load(Ordering::Relaxed),
         FLUSHED.load(Ordering::Relaxed),
+        GATEWAY.load(Ordering::Relaxed),
+        GATEWAY_DROPPED.load(Ordering::Relaxed),
+        GATEWAY_REPLACED.load(Ordering::Relaxed),
     )
 }
 
@@ -684,8 +690,46 @@ unsafe extern "C" fn hooked_dispatch(
     }
     // A test run's press goes through the engine as the host's would.
     let _ = std::panic::catch_unwind(dispatch_test_press);
+    // A test run's dispatches reach the guest ahead of this event, as the
+    // platform's own would.
+    for buf in std::panic::catch_unwind(take_test_dispatches).unwrap_or_default() {
+        // SAFETY: the host's handle, with an event the guest decodes as it
+        // decodes the platform's, read within the call.
+        let _ = unsafe { deliver(data, original, &buf) };
+    }
     // SAFETY: the host passes `len` readable bytes.
     let buf = unsafe { std::slice::from_raw_parts(bytes, len) };
+    // SAFETY: the host's own handle and event.
+    let r = unsafe { deliver(data, original, buf) };
+    // What the runtime changed outside a turn, after the guest's own turns
+    // for this event. A panic can't unwind into the host's frame.
+    let _ = std::panic::catch_unwind(flush_pending);
+    r
+}
+
+/// Hand `buf` to the guest's event method: past the plugins' event filters,
+/// then the engine. The dispatches the guest received go to the runtime
+/// for their events.
+///
+/// # Safety
+///
+/// `data` is the runtime handle's data and `original` its event method.
+unsafe fn deliver(data: *mut c_void, original: EventFn, buf: &[u8]) -> *mut c_void {
+    // A panic can't unwind into the host's frame.
+    let filtered = std::panic::catch_unwind(|| gateway_filter(buf)).unwrap_or_default();
+    let owned;
+    let buf = match filtered.change {
+        gateway::Change::Keep => buf,
+        gateway::Change::Bytes(b) => {
+            owned = b;
+            owned.as_slice()
+        }
+        gateway::Change::Drop => {
+            runtime::received(filtered.passed);
+            // Success, and the guest never saw the event.
+            return std::ptr::null_mut();
+        }
+    };
     let r = match with_engine(|e| e.event(buf)) {
         Some(Ok(Verdict::Consume(_))) => {
             CONSUMED.fetch_add(1, Ordering::Relaxed);
@@ -706,13 +750,56 @@ unsafe extern "C" fn hooked_dispatch(
             // SAFETY: as above.
             unsafe { original(data, b.as_ptr(), b.len()) }
         }
-        // SAFETY: the host's own arguments.
-        _ => unsafe { original(data, bytes, len) },
+        // SAFETY: the host's own handle, with its event or the one the
+        // filters left, read within the call.
+        _ => unsafe { original(data, buf.as_ptr(), buf.len()) },
     };
-    // What the runtime changed outside a turn, after the guest's own turns
-    // for this event. A panic can't unwind into the host's frame.
-    let _ = std::panic::catch_unwind(flush_pending);
+    runtime::received(filtered.passed);
     r
+}
+
+/// The gateway's dispatches in `buf`, past the plugins' event filters. While
+/// the runtime isn't up, nothing is read.
+fn gateway_filter(buf: &[u8]) -> gateway::Filtered {
+    if !runtime::is_up() {
+        return gateway::Filtered::default();
+    }
+    let f = gateway::filter(buf, &runtime::intercepts, &mut runtime::filter);
+    let seen = GATEWAY.fetch_add(f.passed.len() as u64, Ordering::Relaxed);
+    if seen < 8 {
+        for p in &f.passed {
+            log(&format!("gateway: {} ({} bytes)", p.t, p.message.len()));
+        }
+    }
+    for (event, len) in &f.unread {
+        if UNREAD.fetch_add(1, Ordering::Relaxed) < 8 {
+            log(&format!(
+                "gateway: a {event} socket message of {len} bytes isn't JSON"
+            ));
+        }
+    }
+    if !f.dropped.is_empty() {
+        GATEWAY_DROPPED.fetch_add(f.dropped.len() as u64, Ordering::Relaxed);
+        log(&format!("gateway: dropped {:?}", f.dropped));
+    }
+    GATEWAY_REPLACED.fetch_add(f.replaced as u64, Ordering::Relaxed);
+    if let Some(s) = &f.socket {
+        *lock_socket() = Some(s.clone());
+    }
+    f
+}
+
+static GATEWAY: AtomicU64 = AtomicU64::new(0);
+static GATEWAY_DROPPED: AtomicU64 = AtomicU64::new(0);
+static GATEWAY_REPLACED: AtomicU64 = AtomicU64::new(0);
+static UNREAD: AtomicU64 = AtomicU64::new(0);
+/// The socket the gateway's dispatches last arrived on.
+static SOCKET: Mutex<Option<gateway::Socket>> = Mutex::new(None);
+
+fn lock_socket() -> std::sync::MutexGuard<'static, Option<gateway::Socket>> {
+    SOCKET
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// Hand the presses the engine kept to the switches and the runtime, and
@@ -889,6 +976,71 @@ fn dispatch_test_press() {
         }
         other => log(&format!("test press passed to nobody: {other:?}")),
     }
+}
+
+/// A test run hands the guest gateway dispatches by writing them to this
+/// file in the config dir, one JSON object `{"t": ..., "d": ...}` a line.
+/// The host reads it every second and clears it. Each reaches the guest in
+/// the next dispatch, on the socket and with the sequence number of the
+/// gateway's last dispatch, through the plugins' event filters as the
+/// gateway's own would. A run can check the event and intercept path with
+/// nothing sent to Discord.
+const TEST_GATEWAY: &str = "gateway.txt";
+
+/// The test run's dispatches, until a dispatch takes them.
+static TEST_DISPATCHES: Mutex<Vec<(String, serde_json::Value)>> = Mutex::new(Vec::new());
+
+/// Take the test run's dispatches from [`TEST_GATEWAY`]. Called by the
+/// worker every second.
+pub(crate) fn poll_test_gateway() {
+    #[derive(serde::Deserialize)]
+    struct Line {
+        t: String,
+        d: serde_json::Value,
+    }
+    let path = config_file(TEST_GATEWAY);
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return;
+    };
+    if text.trim().is_empty() {
+        return;
+    }
+    // Written in place, as the app can't create files in the config dir.
+    let _ = std::fs::write(&path, "");
+    let mut queued = TEST_DISPATCHES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    for line in text.lines().filter(|l| !l.trim().is_empty()) {
+        match serde_json::from_str::<Line>(line) {
+            Ok(l) => {
+                log(&format!("test dispatch {} queued", l.t));
+                queued.push((l.t, l.d));
+            }
+            Err(e) => log(&format!("test dispatch unreadable: {e}")),
+        }
+    }
+}
+
+/// The test run's dispatches as the platform's `@ws` events, once the
+/// gateway's socket is known.
+fn take_test_dispatches() -> Vec<Vec<u8>> {
+    let mut queued = TEST_DISPATCHES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if queued.is_empty() {
+        return Vec::new();
+    }
+    let Some(socket) = lock_socket().clone() else {
+        log("test dispatches wait for the gateway's socket");
+        return Vec::new();
+    };
+    queued
+        .drain(..)
+        .map(|(t, d)| {
+            log(&format!("test dispatch {t} on socket {:?}", socket.id));
+            gateway::socket_event(&socket, &gateway::dispatch_message(&t, &d, socket.seq))
+        })
+        .collect()
 }
 
 /// How many of the first turns [`CAPTURE`] records.
