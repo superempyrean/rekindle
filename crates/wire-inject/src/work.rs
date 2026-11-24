@@ -229,9 +229,11 @@ pub struct LabelRule {
 /// Every colour cell of the guest's that holds `from` gets `to` in the
 /// host's tree. A cell is one of [`COLOR_PROPS`](crate::COLOR_PROPS) holding
 /// an integer colour, `0xAARRGGBB`, and it matches when its red, green and
-/// blue are `from`. The cell's alpha is kept, multiplied by `to`'s. When two recolours
-/// have the same `from`, the later one applies. A cell a `cells`, `labels`
-/// or row rule writes keeps the rule's value.
+/// blue are `from` and the cell is one `role` names. The cell's alpha is
+/// kept, multiplied by `to`'s. When two recolours have the same `from` and
+/// role, the later one applies, and one for the cell's own role applies
+/// over one for [`ColorRole::Any`]. A cell a `cells`, `labels` or row rule
+/// writes keeps the rule's value.
 ///
 /// Cells are matched in the guest's tree, so a cell the engine recoloured is
 /// still found by the colour the guest wrote.
@@ -244,6 +246,75 @@ pub struct Recolor {
     /// `0xRRGGBBAA`, spelled as eight hex digits.
     #[serde(with = "crate::json::rgba")]
     pub to: u32,
+    #[serde(default, skip_serializing_if = "ColorRole::is_any")]
+    pub role: ColorRole,
+}
+
+impl Recolor {
+    /// `from` to `to` in every colour cell.
+    pub fn new(from: u32, to: u32) -> Recolor {
+        Recolor {
+            from,
+            to,
+            role: ColorRole::Any,
+        }
+    }
+}
+
+/// Which colour cells a [`Recolor`] reaches, by what the cell paints. A
+/// light theme's text colour can be a dark theme's surface, and in one
+/// theme the white of a surface is also the label on a brand button, so a
+/// colour alone doesn't say which token a cell holds. The cell it's in
+/// does.
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum ColorRole {
+    /// Every colour cell.
+    #[default]
+    Any,
+    /// Surfaces: `background`, `activeBackground`, the scrims and
+    /// `elevationColor`, and the fills a press look's worklet paints.
+    Fill,
+    /// `borderColor`, `focusBorderColor` and `activeBorderColor`.
+    Border,
+    /// Text and icons: `color`, `tint`, `placeholderColor`,
+    /// `selectionColor` and `handleColor`.
+    Content,
+}
+
+impl ColorRole {
+    /// The role of colour cell `prop`, or `None` for a cell that isn't one
+    /// of [`COLOR_PROPS`](crate::COLOR_PROPS).
+    pub fn of(prop: PropId) -> Option<ColorRole> {
+        use rekindle_wire::ids;
+        Some(match prop {
+            ids::BACKGROUND
+            | ids::ACTIVE_BACKGROUND
+            | ids::SCRIM
+            | ids::SCRIM_COLOR
+            | ids::NAV_SCRIM_COLOR
+            | ids::ELEVATION_COLOR => ColorRole::Fill,
+            ids::BORDER_COLOR | ids::FOCUS_BORDER_COLOR | ids::ACTIVE_BORDER_COLOR => {
+                ColorRole::Border
+            }
+            ids::COLOR
+            | ids::TINT
+            | ids::PLACEHOLDER_COLOR
+            | ids::SELECTION_COLOR
+            | ids::HANDLE_COLOR => ColorRole::Content,
+            _ => return None,
+        })
+    }
+
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde's `skip_serializing_if` passes a reference"
+    )]
+    pub(crate) fn is_any(&self) -> bool {
+        *self == ColorRole::Any
+    }
 }
 
 /// The guest's colour cells that are one of `props`, given `to` whatever

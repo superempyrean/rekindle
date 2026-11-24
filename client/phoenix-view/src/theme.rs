@@ -31,7 +31,7 @@ pub enum ThemeSource {
     /// A `.theme.json`, with its tokens merged with the chosen variant's.
     Tokens(Vec<(String, u32)>),
     /// A `Work` given as JSON, used as it is.
-    Work(Work),
+    Work(Box<Work>),
 }
 
 fn hex(s: &str) -> Option<u32> {
@@ -84,15 +84,15 @@ impl ThemeSource {
     pub fn work_file(path: &Path) -> Result<ThemeSource> {
         let json =
             std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
-        Ok(ThemeSource::Work(
+        Ok(ThemeSource::Work(Box::new(
             Work::from_json(&json).map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))?,
-        ))
+        )))
     }
 
     /// The work for the guest's palette (the `AppState.setTheme` record).
     pub fn work(&self, palette: &Value) -> Result<Work> {
         let tokens = match self {
-            ThemeSource::Work(w) => return Ok(w.clone()),
+            ThemeSource::Work(w) => return Ok((**w).clone()),
             ThemeSource::Tokens(t) => t,
         };
         let Value::Object(fields) = palette else {
@@ -112,7 +112,7 @@ impl ThemeSource {
             };
             let from = from & 0x00ff_ffff;
             if recolors.iter().all(|r| r.from != from) {
-                recolors.push(Recolor { from, to: *to });
+                recolors.push(Recolor::new(from, *to));
             }
         }
         if recolors.is_empty() {
@@ -145,14 +145,8 @@ mod tests {
         assert_eq!(
             work.recolors,
             vec![
-                Recolor {
-                    from: 0x12_1214,
-                    to: 0x0506_09ff
-                },
-                Recolor {
-                    from: 0x58_65f2,
-                    to: 0x6d8c_ffff
-                },
+                Recolor::new(0x12_1214, 0x0506_09ff),
+                Recolor::new(0x58_65f2, 0x6d8c_ffff),
             ]
         );
         assert!(ThemeSource::Tokens(vec![]).work(&palette).is_err());

@@ -901,14 +901,8 @@ fn work_with_ids_outside_the_reserved_range_is_refused() {
 fn recolours() -> Work {
     Work {
         recolors: vec![
-            Recolor {
-                from: 0x31_3338,
-                to: 0x0b0d_12ff,
-            },
-            Recolor {
-                from: 0x94_9ba4,
-                to: 0xff00_0080,
-            },
+            Recolor::new(0x31_3338, 0x0b0d_12ff),
+            Recolor::new(0x94_9ba4, 0xff00_0080),
         ],
         ..Work::default()
     }
@@ -938,6 +932,146 @@ fn a_recolour_replaces_the_guests_colour_wherever_it_is_written() {
         host.props().get(HEAD, ids::BACKGROUND),
         Some(&rgba(0x1234_56ff))
     );
+}
+
+#[test]
+fn a_recolour_with_a_role_reaches_only_its_cells() {
+    // The light theme's surface is white, and so is the label on its brand
+    // button: the surface token recolours the fill, the text token the text.
+    let work = Work {
+        recolors: vec![
+            Recolor {
+                role: ColorRole::Fill,
+                ..Recolor::new(0xff_ffff, 0x0b0d_12ff)
+            },
+            Recolor {
+                role: ColorRole::Content,
+                ..Recolor::new(0x31_3338, 0xd6dc_e8ff)
+            },
+        ],
+        ..Work::default()
+    };
+    let (mut e, mut host) = engine(work);
+    send(&mut e, &mut host, &themed(0xffff_ffff, 0xffff_ffff));
+    assert_eq!(
+        host.props().get(PAGE, ids::BACKGROUND),
+        Some(&rgba(0x0b0d_12ff))
+    );
+    assert_eq!(host.props().get(RULE, ids::COLOR), Some(&rgba(0xffff_ffff)));
+    let mut t = Turn::new();
+    t.push(NodeOp::Update {
+        node: RULE,
+        props: vec![(ids::COLOR, rgba(0x3133_38ff))],
+    });
+    t.push(NodeOp::Update {
+        node: HEAD,
+        props: vec![(ids::BACKGROUND, rgba(0x3133_38ff))],
+    });
+    send(&mut e, &mut host, &t);
+    assert_eq!(host.props().get(RULE, ids::COLOR), Some(&rgba(0xd6dc_e8ff)));
+    assert_eq!(
+        host.props().get(HEAD, ids::BACKGROUND),
+        Some(&rgba(0x3133_38ff))
+    );
+}
+
+#[test]
+fn a_recolour_for_the_cells_role_applies_over_one_for_every_cell() {
+    let work = Work {
+        recolors: vec![
+            Recolor {
+                role: ColorRole::Fill,
+                ..Recolor::new(0x31_3338, 0x0b0d_12ff)
+            },
+            Recolor::new(0x31_3338, 0xff00_00ff),
+        ],
+        ..Work::default()
+    };
+    let (mut e, mut host) = engine(work);
+    send(&mut e, &mut host, &themed(0x3133_38ff, 0x3133_38ff));
+    assert_eq!(
+        host.props().get(PAGE, ids::BACKGROUND),
+        Some(&rgba(0x0b0d_12ff))
+    );
+    assert_eq!(host.props().get(RULE, ids::COLOR), Some(&rgba(0xff00_00ff)));
+}
+
+#[test]
+fn a_recolour_reaches_gradient_stops_and_text_spans_by_role() {
+    let work = Work {
+        recolors: vec![
+            Recolor {
+                role: ColorRole::Fill,
+                ..Recolor::new(0xfb_fbfb, 0x0b0d_12ff)
+            },
+            Recolor {
+                role: ColorRole::Content,
+                ..Recolor::new(0x28_282d, 0xd6dc_e8ff)
+            },
+        ],
+        ..Work::default()
+    };
+    let (mut e, mut host) = engine(work);
+    let span = |c: u32| {
+        Value::Object(vec![
+            (PropId(499), Value::Str("type".into())),
+            (ids::COLOR, Value::color(c)),
+        ])
+    };
+    let mut t = first();
+    t.push(NodeOp::Update {
+        node: PAGE,
+        props: vec![(
+            ids::BACKGROUND_GRADIENT,
+            Value::Array(vec![Value::color(0x00fb_fbfb), Value::color(0xfffb_fbfb)]),
+        )],
+    });
+    t.push(NodeOp::Update {
+        node: HEAD,
+        props: vec![(
+            ids::BACKGROUND_GRADIENT,
+            Value::U32Array(vec![0x00fb_fbfb, 0x8028_282d]),
+        )],
+    });
+    t.push(NodeOp::Update {
+        node: RULE,
+        props: vec![(
+            rekindle_wire::turn::SPANS,
+            Value::Array(vec![span(0xff28_282d), span(0xfffb_fbfb)]),
+        )],
+    });
+    send(&mut e, &mut host, &t);
+    // The fade keeps its transparent end, in the theme's colour.
+    assert_eq!(
+        host.props().get(PAGE, ids::BACKGROUND_GRADIENT),
+        Some(&Value::Array(vec![
+            Value::color(0x000b_0d12),
+            Value::color(0xff0b_0d12)
+        ]))
+    );
+    // A text colour in a fill's gradient is left alone.
+    assert_eq!(
+        host.props().get(HEAD, ids::BACKGROUND_GRADIENT),
+        Some(&Value::U32Array(vec![0x000b_0d12, 0x8028_282d]))
+    );
+    // A span's colour is text: the surface colour in a span is kept.
+    assert_eq!(
+        host.props().get(RULE, rekindle_wire::turn::SPANS),
+        Some(&Value::Array(vec![span(0xffd6_dce8), span(0xfffb_fbfb)]))
+    );
+}
+
+#[test]
+fn every_colour_cell_has_a_role() {
+    for p in COLOR_PROPS {
+        assert!(ColorRole::of(*p).is_some(), "{p:?}");
+    }
+    assert_eq!(ColorRole::of(PropId(322)), None);
+    let json = r#"{"recolors": [{"from": "ffffff", "to": "0b0d12ff", "role": "fill"}, {"from": "313338", "to": "ff0000ff"}]}"#;
+    let work = Work::from_json(json).unwrap();
+    assert_eq!(work.recolors[0].role, ColorRole::Fill);
+    assert_eq!(work.recolors[1].role, ColorRole::Any);
+    assert!(!work.to_json().contains("\"any\""));
 }
 
 /// Every grey `background` magenta.
@@ -1476,10 +1610,7 @@ fn a_recolour_reaches_a_buttons_press_look() {
         .collect();
     let cell = rekindle_wire::decode(&bytes[2..]).unwrap();
     let work = Work {
-        recolors: vec![Recolor {
-            from: 0xff_ffff,
-            to: 0x1e1f_22ff,
-        }],
+        recolors: vec![Recolor::new(0xff_ffff, 0x1e1f_22ff)],
         ..Work::default()
     };
     let (mut e, mut host) = engine(work);

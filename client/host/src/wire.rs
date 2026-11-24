@@ -639,10 +639,7 @@ fn recolors(palette: &rekindle_ui_hook::ThemePalette) -> Vec<Recolor> {
     palette
         .pairs
         .iter()
-        .map(|(from, to)| Recolor {
-            from: rgba(*from) >> 8,
-            to: rgba(*to),
-        })
+        .map(|(from, to)| Recolor::new(rgba(*from) >> 8, rgba(*to)))
         .filter(|r| seen.insert(r.from))
         .collect()
 }
@@ -676,7 +673,7 @@ pub(crate) fn shown_palette(
 }
 
 /// An HSLA colour as `0xRRGGBBAA`, each channel rounded to a byte.
-fn rgba(hsla: [f32; 4]) -> u32 {
+pub(crate) fn rgba(hsla: [f32; 4]) -> u32 {
     let c = rekindle_native::Rgba::from_hsla(hsla);
     (rgb8([c.r, c.g, c.b]) << 8) | byte(c.a)
 }

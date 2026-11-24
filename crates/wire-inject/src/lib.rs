@@ -29,10 +29,12 @@
 //! - **Labels.** An `accessibilityLabel` for each node the guest left
 //!   without one, made from another of its cells.
 //! - **Recolours.** A colour the guest writes, replaced in every colour cell
-//!   that holds it, the guest's and the mounts'. A theme's token values map
-//!   to these, one recolour for each token a plugin overrides. A mount
-//!   written in the client's own palette follows the theme as the guest's
-//!   nodes do.
+//!   that holds it, the guest's and the mounts', or only in the cells of
+//!   one [`ColorRole`]: fills, borders, or text and icons. A theme's tokens
+//!   map to these through the palette the guest names ([`theme`]), one
+//!   recolour for each token a plugin overrides, limited to the token's
+//!   role. A mount written in the client's own palette follows the theme
+//!   as the guest's nodes do.
 //! - **Prop recolours.** Colour cells replaced by which cell they are,
 //!   whatever colour they hold: a node's `background` in any theme. A light
 //!   and a dark theme write different colours in the same cell, and one
@@ -71,6 +73,7 @@
 mod json;
 mod select;
 mod switches;
+pub mod theme;
 mod work;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -80,14 +83,14 @@ use rekindle_wire::event::{self, Event, UiEvent};
 use rekindle_wire::frame::{self, Frame};
 use rekindle_wire::motion::ids::WORKLET;
 use rekindle_wire::motion::worklet::{PressLook, Worklet};
-use rekindle_wire::turn::{ON, create_props};
+use rekindle_wire::turn::{ON, SPANS, create_props};
 use rekindle_wire::{DecodeError, NodeId, NodeOp, PropId, Tree, Turn, Value};
 
 pub use select::{Selector, TEXT};
 pub use switches::{NodeCells, Switch, SwitchState, Switches};
 pub use work::{
-    Cell, Handler, LabelRule, Mount, MountNode, PluginPress, PressAction, PressRule, PropRecolor,
-    Recolor, RowAction, RowRule, Work, WorkError, Write,
+    Cell, ColorRole, Handler, LabelRule, Mount, MountNode, PluginPress, PressAction, PressRule,
+    PropRecolor, Recolor, RowAction, RowRule, Work, WorkError, Write,
 };
 
 /// The first of the node ids rekindle takes for its own nodes.
@@ -911,16 +914,36 @@ impl Engine {
                         .map(|v| (*p, v))
                 })
                 .collect();
-            if !roles.is_empty() {
-                cells.extend(
-                    GRADIENT_PROPS
-                        .iter()
-                        .filter(|p| !ruled.contains(&(n.id, **p)))
-                        .filter_map(|p| {
-                            let v = self.guest.props().get(n.id, *p)?;
-                            prop_recolor_gradient(*p, v, &roles).map(|v| (*p, v))
-                        }),
-                );
+            // A gradient's stops, by its cell's role: a fade from a
+            // surface's colour keeps fading from the theme's.
+            for p in GRADIENT_PROPS {
+                if ruled.contains(&(n.id, *p)) {
+                    continue;
+                }
+                let Some(v) = self.guest.props().get(n.id, *p) else {
+                    continue;
+                };
+                let role = if *p == rekindle_wire::ids::TEXT_GRADIENT {
+                    ColorRole::Content
+                } else {
+                    ColorRole::Fill
+                };
+                let painted = prop_recolor_gradient(*p, v, &roles);
+                let v = painted.as_ref().unwrap_or(v);
+                let recolored = map_stops(v, |c| to.get(c, role).map(|t| recolored(c >> 24, t)));
+                if let Some(v) = recolored.or(painted) {
+                    cells.push((*p, v));
+                }
+            }
+            // The colours of a text's spans, which the renderer reads over
+            // its `color` cell.
+            if !ruled.contains(&(n.id, SPANS))
+                && let Some(v) = self.guest.props().get(n.id, SPANS)
+                && let Some(v) = map_spans(v, |c| {
+                    to.get(c, ColorRole::Content).map(|t| recolored(c >> 24, t))
+                })
+            {
+                cells.push((SPANS, v));
             }
             if !ruled.contains(&(n.id, WORKLET))
                 && let Some(w) = self.recolored_worklet(n.id, &to)
@@ -934,37 +957,53 @@ impl Engine {
         writes
     }
 
-    /// The recolours, by the red, green and blue they replace. A later
-    /// recolour of the same colour wins.
-    fn recolor_map(&self) -> BTreeMap<u32, u32> {
-        self.work
-            .recolors
-            .iter()
-            .map(|r| (r.from & 0x00ff_ffff, r.to))
-            .collect()
+    /// The recolours, by the red, green and blue they replace and the role
+    /// of the cells they reach. A later recolour of the same colour and
+    /// role wins.
+    fn recolor_map(&self) -> RecolorMap {
+        RecolorMap(
+            self.work
+                .recolors
+                .iter()
+                .map(|r| ((r.from & 0x00ff_ffff, r.role), r.to))
+                .collect(),
+        )
     }
 
     /// The node's `worklet` cell with the recolours applied to its colours,
     /// if it is a `press_look` and one of them changed. The worklet paints
     /// a button's fill each frame from its own colours, over the
     /// `background` cell.
-    fn recolored_worklet(&self, node: NodeId, to: &BTreeMap<u32, u32>) -> Option<Value> {
+    fn recolored_worklet(&self, node: NodeId, to: &RecolorMap) -> Option<Value> {
         let cell = self.guest.props().get(node, WORKLET)?;
         let mut look = PressLook::from_worklet(&Worklet::from_value(cell)?)?;
-        look.recolor(|c| to.get(&(c & 0x00ff_ffff)).map(|t| recolored(c >> 24, *t)))
+        look.recolor(|c| to.get(c, ColorRole::Fill).map(|t| recolored(c >> 24, t)))
             .then(|| look.to_worklet().to_value())
     }
 }
 
-/// The value a recolour gives cell `prop` holding `value`, if it gives one:
-/// `prop` is a colour cell and `value` a colour the map names.
-fn recolor_cell(prop: PropId, value: &Value, to: &BTreeMap<u32, u32>) -> Option<Value> {
-    if !COLOR_PROPS.contains(&prop) {
-        return None;
+/// [`Recolor`]s by the colour they replace and their role.
+struct RecolorMap(BTreeMap<(u32, ColorRole), u32>);
+
+impl RecolorMap {
+    /// The colour a cell of `role` holding `argb` gets, if a recolour names
+    /// it: the one for `role` first, then the one for every cell.
+    fn get(&self, argb: u32, role: ColorRole) -> Option<u32> {
+        let rgb = argb & 0x00ff_ffff;
+        self.0
+            .get(&(rgb, role))
+            .or_else(|| self.0.get(&(rgb, ColorRole::Any)))
+            .copied()
     }
+}
+
+/// The value a recolour gives cell `prop` holding `value`, if it gives one:
+/// `prop` is a colour cell and `value` a colour the map names for the
+/// cell's role.
+fn recolor_cell(prop: PropId, value: &Value, to: &RecolorMap) -> Option<Value> {
+    let role = ColorRole::of(prop)?;
     let c = value.as_color()?;
-    to.get(&(c & 0x00ff_ffff))
-        .map(|t| Value::color(recolored(c >> 24, *t)))
+    to.get(c, role).map(|t| Value::color(recolored(c >> 24, t)))
 }
 
 /// The value the first of `roles` that paints cell `prop` holding `value`
@@ -984,35 +1023,76 @@ fn prop_recolor_cell<'w>(
 /// with a `colors` list, with each stop the first of `roles` paints
 /// painted. `None` when no stop changes.
 fn prop_recolor_gradient(prop: PropId, value: &Value, roles: &[&PropRecolor]) -> Option<Value> {
-    let stops = |items: &[Value]| -> Option<Vec<Value>> {
+    map_stops(value, |c| {
+        prop_recolor_cell(prop, &Value::color(c), roles.iter().copied()).and_then(|v| v.as_color())
+    })
+}
+
+/// Gradient `value`, a list of colours (values, or words) or an object
+/// with a `colors` list, with `f` applied to each stop, `0xAARRGGBB`.
+/// `None` when no stop changes.
+fn map_stops(value: &Value, f: impl Fn(u32) -> Option<u32>) -> Option<Value> {
+    let stops = |v: &Value| -> Option<Value> {
         let mut changed = false;
-        let out = items
-            .iter()
-            .map(
-                |v| match prop_recolor_cell(prop, v, roles.iter().copied()) {
-                    Some(new) => {
-                        changed = true;
-                        new
-                    }
-                    None => v.clone(),
-                },
-            )
-            .collect();
+        let mut map = |c: u32| match f(c) {
+            Some(new) => {
+                changed = true;
+                new
+            }
+            None => c,
+        };
+        let out = match v {
+            Value::Array(items) => Value::Array(
+                items
+                    .iter()
+                    .map(|v| match v.as_color() {
+                        Some(c) => Value::color(map(c)),
+                        None => v.clone(),
+                    })
+                    .collect(),
+            ),
+            Value::U32Array(words) => Value::U32Array(words.iter().map(|c| map(*c)).collect()),
+            _ => return None,
+        };
         changed.then_some(out)
     };
     match value {
-        Value::Array(items) => stops(items).map(Value::Array),
         Value::Object(fields) => {
             let mut fields = fields.clone();
             let (_, colors) = fields.iter_mut().find(|(p, _)| *p == COLORS)?;
-            let Value::Array(items) = colors else {
-                return None;
-            };
-            *colors = Value::Array(stops(items)?);
+            *colors = stops(colors)?;
             Some(Value::Object(fields))
         }
-        _ => None,
+        v => stops(v),
     }
+}
+
+/// A `spans` cell with `f` applied to each span's `color`. `None` when no
+/// span changes.
+fn map_spans(value: &Value, f: impl Fn(u32) -> Option<u32>) -> Option<Value> {
+    let Value::Array(spans) = value else {
+        return None;
+    };
+    let mut changed = false;
+    let out = spans
+        .iter()
+        .map(|span| {
+            let Value::Object(fields) = span else {
+                return span.clone();
+            };
+            let mut fields = fields.clone();
+            for (p, v) in &mut fields {
+                if *p == rekindle_wire::ids::COLOR
+                    && let Some(new) = v.as_color().and_then(&f)
+                {
+                    *v = Value::color(new);
+                    changed = true;
+                }
+            }
+            Value::Object(fields)
+        })
+        .collect();
+    changed.then_some(Value::Array(out))
 }
 
 /// `to` (`0xRRGGBBAA`) with its alpha multiplied by `alpha` (0 to 255), as
