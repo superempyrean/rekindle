@@ -353,7 +353,16 @@ pub fn message(
             .or(a.global_name.clone())
             .or(a.username.clone())
             .unwrap_or_default(),
-        _ => old.map_or_else(|| name(guild, author_id), |o| o.author.name.clone()),
+        (None, author) => match old {
+            Some(o) => o.author.name.clone(),
+            // A client whose users can't be read yet still has the name
+            // the dispatch carries.
+            None => Some(name(guild, author_id))
+                .filter(|n| !n.is_empty())
+                .or_else(|| author.and_then(|a| a.global_name.clone().or(a.username.clone())))
+                .unwrap_or_default(),
+        },
+        (Some(_), None) => old.map_or_else(|| name(guild, author_id), |o| o.author.name.clone()),
     };
     let reply_to = m
         .message_reference

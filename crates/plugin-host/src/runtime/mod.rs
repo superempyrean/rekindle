@@ -56,7 +56,7 @@ mod stores;
 mod themes;
 mod timefmt;
 
-pub use events::event_kind;
+pub use events::{INTERCEPTABLE, event_kind};
 pub use gestures::message_predicate;
 pub use host_state::redact;
 pub use http::{CALLS_PER_MINUTE, MAX_BODY, RequestOutcome, RestRequest, route_kind};

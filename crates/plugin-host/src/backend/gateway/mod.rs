@@ -65,6 +65,14 @@ fn never_forwarded(name: &str) -> bool {
     NEVER_FORWARDED.contains(&name) || NEVER_FORWARDED_PREFIXES.iter().any(|p| name.starts_with(p))
 }
 
+/// Whether a dispatch's `d` may reach rekindle at all. `READY` and
+/// `RESUMED` still cause `connection` events, which need only the name, so a
+/// host that reads dispatches off the wire can drop the rest of them while
+/// decoding.
+pub fn forwarded(name: &str) -> bool {
+    !never_forwarded(name)
+}
+
 /// A `GUILD_CREATE` for a guild the user joined longer ago than this is the
 /// client loading it (lazily, or after an outage), not a join.
 const JOIN_WINDOW_MS: u64 = 10 * 60_000;
@@ -597,7 +605,7 @@ fn display_name(client: &dyn ClientBackend, guild: Option<u64>, user: u64) -> St
 }
 
 /// The interceptable event kind a dispatch causes, if any.
-fn dispatch_kind(t: &str) -> Option<api::EventKind> {
+pub fn dispatch_kind(t: &str) -> Option<api::EventKind> {
     use api::EventKind as K;
     Some(match t {
         "MESSAGE_CREATE" | "MESSAGE_UPDATE" | "MESSAGE_DELETE" | "MESSAGE_DELETE_BULK" => {

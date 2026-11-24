@@ -16,24 +16,27 @@ pub fn event_kind(ev: &api::Event) -> Option<api::EventKind> {
 /// The kinds an `event-filter` may see: events that arrive from Discord.
 /// The client's own (selection, window, the user's own state, the
 /// composer) and `raw` can't be intercepted.
-pub(super) fn interceptable(kind: api::EventKind) -> bool {
+pub const INTERCEPTABLE: [api::EventKind; 13] = {
     use api::EventKind as K;
-    matches!(
-        kind,
-        K::Message
-            | K::Reaction
-            | K::PollVote
-            | K::Pins
-            | K::Typing
-            | K::Presence
-            | K::VoiceState
-            | K::Member
-            | K::Relationship
-            | K::Guild
-            | K::Channel
-            | K::Role
-            | K::Emoji
-    )
+    [
+        K::Message,
+        K::Reaction,
+        K::PollVote,
+        K::Pins,
+        K::Typing,
+        K::Presence,
+        K::VoiceState,
+        K::Member,
+        K::Relationship,
+        K::Guild,
+        K::Channel,
+        K::Role,
+        K::Emoji,
+    ]
+};
+
+pub(super) fn interceptable(kind: api::EventKind) -> bool {
+    INTERCEPTABLE.contains(&kind)
 }
 
 impl Runtime {
@@ -90,6 +93,14 @@ impl Runtime {
     /// backend checks this before building the event to show it.
     pub fn filters_kind(&self, kind: api::EventKind) -> bool {
         interceptable(kind) && (0..self.plugins.len()).any(|idx| self.intercepts(idx, kind))
+    }
+
+    /// The kinds some active plugin's `event-filter` sees.
+    pub fn intercepted_kinds(&self) -> Vec<api::EventKind> {
+        INTERCEPTABLE
+            .into_iter()
+            .filter(|k| self.filters_kind(*k))
+            .collect()
     }
 
     /// Whether plugin `idx` is active and its `event-filter` sees `kind`.

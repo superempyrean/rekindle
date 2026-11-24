@@ -454,3 +454,42 @@ fn profile_cosmetics_account_fields_and_message_extras_decode() {
     assert_eq!(role.bot, Some(77));
     assert!(!role.guild_connections);
 }
+
+/// On a client whose users can't be read, a message's author is named from
+/// the dispatch: the global name, else the username.
+#[test]
+fn an_unknown_author_is_named_from_the_dispatch() {
+    let client = MockBackend::with_world(World::empty());
+    let d = serde_json::json!({
+        "id": "5", "channel_id": "1002", "content": "hi",
+        "author": { "id": "101", "username": "alice", "global_name": "Alice" }
+    });
+    let events = step(
+        &mut MockBackend::with_world(World::empty()),
+        "MESSAGE_CREATE",
+        d,
+        0,
+    );
+    assert!(
+        matches!(events.first(), Some(Event::MessageCreated(m)) if m.author.name == "Alice"),
+        "{events:?}"
+    );
+    let m: wire::Message = serde_json::from_value(serde_json::json!({
+        "id": "5", "channel_id": "1002", "author": { "id": "101", "username": "alice" }
+    }))
+    .unwrap();
+    let names = |g, u| display_name(&client, g, u);
+    let msg = convert::message(&m, None, None, &names, &|_, _| None);
+    assert_eq!(msg.author.name, "alice");
+}
+
+#[test]
+fn ready_is_not_forwarded_but_messages_are() {
+    assert!(!forwarded("READY"));
+    assert!(!forwarded("AUTH_SESSION_CHANGE"));
+    assert!(forwarded("MESSAGE_CREATE"));
+    assert_eq!(
+        dispatch_kind("MESSAGE_CREATE"),
+        Some(api::EventKind::Message)
+    );
+}
