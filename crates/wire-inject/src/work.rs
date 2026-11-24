@@ -52,14 +52,22 @@ impl Cell {
 }
 
 /// A subtree rekindle creates once, the first time `under` finds a node in
-/// the host's tree, and appends to that node's children. When the guest
-/// rewrites the children, the root is spliced into the guest's own list, so
-/// the host's keyed diff keeps it. A mount is known by its `root`: new work
-/// that keeps the root and the subtree's shape only changes its cells.
+/// the host's tree, and adds to that node's children: after the first child
+/// `after` finds, or at the end. When the guest rewrites the children, the
+/// root is spliced into the guest's own list, so the host's keyed diff keeps
+/// it. A mount is known by its `root`: new work that keeps the root and the
+/// subtree's shape only changes its cells. When a turn deletes the node the
+/// mount is under, the mount is deleted with it and created again the next
+/// time `under` finds a node.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Mount {
     pub under: Selector,
+    /// The child of `under`'s node the root goes after. Matched in the
+    /// host's tree. Without one, or when it finds no child, the root goes
+    /// last.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after: Option<Selector>,
     /// The node appended under `under`. One of `nodes`.
     pub root: NodeId,
     /// Every node of the subtree. Ids are [`RESERVED`] and up.
@@ -241,6 +249,7 @@ impl Mount {
     /// changed: the same node, root, ids, kinds and children.
     pub(crate) fn same_shape(&self, other: &Mount) -> bool {
         self.under == other.under
+            && self.after == other.after
             && self.root == other.root
             && self.nodes.len() == other.nodes.len()
             && self

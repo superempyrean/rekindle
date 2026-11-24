@@ -64,6 +64,7 @@ fn mounts() -> Work {
     Work {
         mounts: vec![Mount {
             under: feed(),
+            after: None,
             root: BOX,
             nodes: vec![
                 MountNode {
@@ -384,22 +385,76 @@ fn a_guest_write_is_written_over_and_a_quiet_turn_passes() {
 }
 
 #[test]
-fn the_node_coming_back_gets_the_mount_again() {
+fn a_mount_goes_with_its_node_and_comes_back_with_the_next_one() {
     let (mut e, mut host) = engine(mounts());
     send(&mut e, &mut host, &first());
     let mut t = Turn::new();
     for node in [PAGE, FEED, HEAD, RULE, 30, 31] {
         t.push(NodeOp::Delete { nodes: vec![node] });
     }
-    send(&mut e, &mut host, &t);
-    assert!(host.node(FEED).is_none());
-    let (applied, _) = send(&mut e, &mut host, &first());
-    assert!(
-        !applied
-            .ops
-            .iter()
-            .any(|op| matches!(op, NodeOp::Create { node: BOX, .. }))
+    let (applied, _) = send(&mut e, &mut host, &t);
+    // Out of its node's list, then deleted, before the guest's own ops.
+    assert_eq!(
+        applied.ops[0],
+        NodeOp::Children {
+            node: FEED,
+            children: vec![HEAD, RULE, 30, 31],
+        }
     );
+    assert_eq!(
+        applied.ops[1],
+        NodeOp::Delete {
+            nodes: vec![BOX, BOX_TEXT, BUTTON, BUTTON_TEXT],
+        }
+    );
+    assert!(host.node(FEED).is_none() && host.node(BOX).is_none());
+    assert!(e.mirror().node(BOX).is_none());
+
+    let (applied, _) = send(&mut e, &mut host, &first());
+    assert!(creates(&applied, BOX));
+    assert_eq!(host.node(FEED).unwrap().children.last(), Some(&BOX));
+    assert_eq!(host.props().get(BUTTON_TEXT, TEXT), Some(&str("0 presses")));
+}
+
+#[test]
+fn a_mount_stays_when_a_turn_deletes_other_nodes() {
+    let (mut e, mut host) = engine(mounts());
+    send(&mut e, &mut host, &first());
+    let mut t = Turn::new();
+    t.push(NodeOp::Children {
+        node: FEED,
+        children: vec![HEAD, RULE, 30],
+    });
+    t.push(NodeOp::Delete { nodes: vec![31] });
+    let (applied, _) = send(&mut e, &mut host, &t);
+    assert!(!applied
+        .ops
+        .iter()
+        .any(|op| matches!(op, NodeOp::Delete { nodes } if nodes.contains(&BOX))));
+    assert_eq!(host.node(FEED).unwrap().children, vec![HEAD, RULE, 30, BOX]);
+}
+
+#[test]
+fn a_mount_goes_after_the_child_its_selector_finds() {
+    let mut work = mounts();
+    work.mounts[0].after = Some(tag("rule"));
+    let (mut e, mut host) = engine(work);
+    send(&mut e, &mut host, &first());
+    assert_eq!(host.node(FEED).unwrap().children, vec![HEAD, RULE, BOX, 30, 31]);
+    // The guest's next list keeps it there.
+    let mut t = Turn::new();
+    t.push(NodeOp::Children {
+        node: FEED,
+        children: vec![HEAD, RULE, 31],
+    });
+    send(&mut e, &mut host, &t);
+    assert_eq!(host.node(FEED).unwrap().children, vec![HEAD, RULE, BOX, 31]);
+
+    // With no such child, it goes last.
+    let mut work = mounts();
+    work.mounts[0].after = Some(tag("nothing"));
+    let (mut e, mut host) = engine(work);
+    send(&mut e, &mut host, &first());
     assert_eq!(host.node(FEED).unwrap().children.last(), Some(&BOX));
 }
 
@@ -944,6 +999,7 @@ fn a_drop_added_to_running_work_takes_the_subtree_out_and_removing_it_brings_it_
 fn plugin_button(root: NodeId, label: &str) -> Mount {
     Mount {
         under: feed(),
+        after: None,
         root,
         nodes: vec![
             MountNode {

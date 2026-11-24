@@ -6,10 +6,13 @@
 //! before the other side sees them, as a [`Work`] value says:
 //!
 //! - **Mounts.** Subtrees rekindle creates and mounts under a node of the
-//!   guest's. The root is spliced into the guest's own Children op when a
-//!   later turn rewrites that list, so the host's keyed diff keeps its node
-//!   across turns. A node with a press handler lists `press` in its `on`
-//!   (320) cell, since a platform raises only the events a node lists.
+//!   guest's, last or after a child a selector finds. The root is spliced
+//!   into the guest's own Children op when a later turn rewrites that list,
+//!   so the host's keyed diff keeps its node across turns. A turn that
+//!   deletes the node takes the mount out first, and the mount is created
+//!   again under the next node its selector finds. A node with a press
+//!   handler lists `press` in its `on` (320) cell, since a platform raises
+//!   only the events a node lists.
 //! - **Cells.** Cells written by `PropId` on the nodes a selector finds, after
 //!   the guest's ops. A cell is written again only when the host's tree holds
 //!   a different value, which happens when the guest writes its own.
@@ -413,6 +416,7 @@ impl Engine {
     fn rewrite(&mut self, original: &Turn) -> Option<Vec<u8>> {
         let mut turn = self.intercept(original);
         let mut front = self.unmount();
+        front.append(&mut self.orphans(&turn));
         self.mirror.apply(&turn);
         let (mut created, mut back) = self.inject(&mut turn);
         front.append(&mut created);
@@ -590,6 +594,63 @@ impl Engine {
         ops
     }
 
+    /// The ops that take out the mounts whose parent `turn` deletes, against
+    /// the host's tree before the turn: each root out of its parent's
+    /// children, then its nodes removed. The mount is created again the next
+    /// time its selector finds a node, so it never depends on the host
+    /// keeping a node whose parent went away.
+    fn orphans(&mut self, turn: &Turn) -> Vec<NodeOp> {
+        let deleted: BTreeSet<NodeId> = turn
+            .ops
+            .iter()
+            .filter_map(|op| match op {
+                NodeOp::Delete { nodes } => Some(nodes),
+                _ => None,
+            })
+            .flatten()
+            .copied()
+            .collect();
+        if deleted.is_empty() {
+            return Vec::new();
+        }
+        let mut ops = Vec::new();
+        let mut gone = Vec::new();
+        let view = select::View::new(&self.mirror);
+        for m in &self.work.mounts {
+            if !self.created.contains(&m.root) {
+                continue;
+            }
+            let Some(parent) = view.parent(m.root).filter(|p| deleted.contains(p)) else {
+                continue;
+            };
+            let children = view
+                .children(parent)
+                .iter()
+                .copied()
+                .filter(|c| *c != m.root)
+                .collect();
+            ops.push(NodeOp::Children {
+                node: parent,
+                children,
+            });
+            let nodes: Vec<NodeId> = m
+                .nodes
+                .iter()
+                .filter(|n| self.mirror.node(n.id).is_some())
+                .map(|n| n.id)
+                .collect();
+            if !nodes.is_empty() {
+                ops.push(NodeOp::Delete { nodes });
+            }
+            gone.push(m.root);
+        }
+        for root in gone {
+            self.created.remove(&root);
+        }
+        self.mirror.apply(&Turn { ops: ops.clone() });
+        ops
+    }
+
     /// The mounts and the cells rekindle writes: the ops to put in front of
     /// the turn and after it.
     fn inject(&mut self, turn: &mut Turn) -> (Vec<NodeOp>, Vec<NodeOp>) {
@@ -680,7 +741,13 @@ impl Engine {
             .map_or_else(Vec::new, |n| n.children.clone());
         if !listed.contains(&mount.root) {
             let mut mounted = listed;
-            mounted.push(mount.root);
+            let view = select::View::new(&self.mirror);
+            let at = mount
+                .after
+                .as_ref()
+                .and_then(|after| mounted.iter().position(|c| view.matches(*c, after)))
+                .map_or(mounted.len(), |i| i + 1);
+            mounted.insert(at, mount.root);
             // Splice into the guest's own op when this turn rewrote the list,
             // so the host diffs the list once and keeps the mount.
             let own = turn.ops.iter_mut().find_map(|op| match op {
