@@ -22,6 +22,13 @@ pub enum Selector {
         #[serde(with = "crate::json::value")]
         value: Value,
     },
+    /// A node whose `prop` cell is a string that starts with `prefix`: a
+    /// guest that puts an id after a fixed name (`message.avatar:<id>`).
+    Prefix {
+        #[serde(with = "crate::json::prop")]
+        prop: PropId,
+        prefix: String,
+    },
     /// A node of this kind.
     Kind(#[serde(with = "crate::json::kind")] ElementKind),
     /// A node whose `accessibilityLabel` (11) is this string.
@@ -107,6 +114,10 @@ impl<'t> View<'t> {
     pub(crate) fn matches(&self, node: NodeId, sel: &Selector) -> bool {
         match sel {
             Selector::Cell { prop, value } => self.tree.props().get(node, *prop) == Some(value),
+            Selector::Prefix { prop, prefix } => matches!(
+                self.tree.props().get(node, *prop),
+                Some(Value::Str(s)) if s.starts_with(prefix.as_str())
+            ),
             Selector::Kind(kind) => self.tree.node(node).is_some_and(|n| n.kind == *kind),
             Selector::Label(label) => {
                 matches!(self.tree.props().get(node, a11y::LABEL), Some(Value::Str(s)) if s == label)

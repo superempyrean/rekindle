@@ -92,6 +92,9 @@ pub(crate) struct State {
     pub(crate) cells: Vec<Write>,
     /// The plugins' slash commands, by name.
     pub(crate) commands: BTreeSet<String>,
+    /// The rules that put the plugins' values of the theme's tokens that
+    /// aren't colours on the guest's nodes.
+    pub(crate) rows: Vec<rekindle_wire_inject::RowRule>,
 }
 
 /// What the guest's thread hands the runtime.
@@ -281,6 +284,10 @@ struct Surfaces {
     messages: Option<MessageMap>,
     /// Where each menu is drawn, by slot, when the wire map says.
     menus: BTreeMap<String, MenuMap>,
+    /// The rules for the theme's tokens that aren't colours.
+    values: crate::wire::ValueMap,
+    /// The plugins' values of those tokens when last logged.
+    values_seen: Vec<(String, rekindle_plugin_host::model::ThemeValue)>,
     /// The turns the guest had sent when the messages were last read, and
     /// the cells the renderers made of them.
     read_at: Option<u64>,
@@ -326,9 +333,14 @@ impl Surfaces {
         } else {
             None
         };
-        let (chat_bar, messages, menus) = match map {
-            Some(mut m) => (m.slots.remove(SLOT_CHAT_BAR_BUTTON), m.messages, m.menus),
-            None => (None, None, BTreeMap::new()),
+        let (chat_bar, messages, menus, values) = match map {
+            Some(mut m) => (
+                m.slots.remove(SLOT_CHAT_BAR_BUTTON),
+                m.messages,
+                m.menus,
+                m.values,
+            ),
+            None => (None, None, BTreeMap::new(), BTreeMap::new()),
         };
         let developer_mode = home.developer_mode().unwrap_or(false);
         Surfaces {
@@ -336,6 +348,8 @@ impl Surfaces {
             chat_bar,
             messages,
             menus,
+            values,
+            values_seen: Vec::new(),
             read_at: None,
             message_cells: Vec::new(),
             home,
@@ -718,6 +732,7 @@ fn up() -> anyhow::Result<(Driver, Home)> {
         surfaces: Vec::new(),
         slash_commands: true,
         wire_menus: true,
+        wire_values: true,
     };
     let args = ExtArgs {
         dev_paths: Vec::new(),
@@ -774,6 +789,18 @@ fn live_recolors(driver: &mut Driver, surfaces: &mut Surfaces) -> Vec<Recolor> {
         surfaces.theme_report = report;
     }
     recolors
+}
+
+/// The rules that put the plugins' values of the theme's tokens that aren't
+/// colours on the guest's nodes. A change of values is logged.
+fn value_rules(driver: &Driver, surfaces: &mut Surfaces) -> Vec<rekindle_wire_inject::RowRule> {
+    let values = driver.theme_values();
+    let rows = crate::wire::value_rules(&values, &surfaces.values);
+    if values != surfaces.values_seen {
+        log(&format!("theme values: {values:?} -> {} rules", rows.len()));
+        surfaces.values_seen = values;
+    }
+    rows
 }
 
 /// Hand the engine what the plugins make now, if it changed.
@@ -872,6 +899,7 @@ fn publish(driver: &mut Driver, surfaces: &mut Surfaces) -> State {
         .into_iter()
         .map(|(_, c)| c.name)
         .collect();
+    let rows = value_rules(driver, surfaces);
     let state = State {
         recolors,
         running,
@@ -879,6 +907,7 @@ fn publish(driver: &mut Driver, surfaces: &mut Surfaces) -> State {
         back,
         cells,
         commands,
+        rows,
     };
     super::set_plugins(state.clone());
     state

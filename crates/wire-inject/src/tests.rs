@@ -2006,3 +2006,32 @@ fn a_slash_command_the_host_runs_is_kept_and_its_reply_replaces_the_text() {
     let flushed = Turn::from_bytes(&e.flush().unwrap()).unwrap();
     assert_eq!(force_value(&flushed, 41).unwrap().text, "(^_^)");
 }
+
+#[test]
+fn a_prefix_selector_finds_every_node_whose_cell_starts_with_it() {
+    let width = PropId::from_name("width").unwrap();
+    let (mut e, mut host) = engine(Work {
+        rows: vec![RowRule {
+            select: Selector::Prefix {
+                prop: a11y::ID,
+                prefix: "avatar:".into(),
+            },
+            action: RowAction::Cells(vec![Cell::new(width, Value::F64(24.0))]),
+        }],
+        ..Work::default()
+    });
+    let mut t = Turn::new();
+    for (node, id) in [(50, "avatar:1"), (51, "avatar:2"), (52, "author:1")] {
+        t.push(NodeOp::Create {
+            node,
+            kind: ElementKind::VIEW,
+            props: vec![(a11y::ID, str(id))],
+        });
+    }
+    let (applied, _) = send(&mut e, &mut host, &t);
+    let widths: Vec<NodeId> = [50, 51, 52]
+        .into_iter()
+        .filter(|n| host.props().get(*n, width) == Some(&Value::F64(24.0)))
+        .collect();
+    assert_eq!(widths, [50, 51], "{applied:?}");
+}

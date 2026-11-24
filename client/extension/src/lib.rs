@@ -69,6 +69,11 @@ pub struct RecoveredProfile {
     /// client's registries, `slots.add` on a menu fails with
     /// `unavailable`.
     pub wire_menus: bool,
+    /// The host puts the theme's tokens that aren't colours (lengths,
+    /// fonts, density) on the client's wire, and reads them back with
+    /// [`Driver::theme_values`]. Without it, setting one fails with
+    /// `wrong-kind`.
+    pub wire_values: bool,
 }
 
 /// How long a send waits for `compose` plugins before going out unchanged.
@@ -141,7 +146,13 @@ impl Driver {
     /// `rekindle_native::configure` has run with this client's spec.
     pub unsafe fn start(args: ExtArgs, profile: RecoveredProfile) -> Result<Driver, String> {
         let shared = Shared {
-            theme: Arc::new(Mutex::new(ThemeState::new(profile.theme.clone()))),
+            theme: Arc::new(Mutex::new({
+                let mut theme = ThemeState::new(profile.theme.clone());
+                if profile.wire_values {
+                    theme.take_values();
+                }
+                theme
+            })),
             commands: Arc::new(Mutex::new(Vec::new())),
             buttons: Arc::new(Mutex::new(Vec::new())),
             overlay: Arc::new(Mutex::new(OverlayState::default())),
@@ -403,6 +414,12 @@ impl Driver {
     /// plugins added them.
     pub fn chat_bar_buttons(&self) -> Vec<(String, Button)> {
         self.shared.buttons.lock().unwrap().clone()
+    }
+
+    /// The value in effect for each theme token that isn't a colour and a
+    /// plugin set: density, a length or a font.
+    pub fn theme_values(&self) -> Vec<(String, rekindle_plugin_host::model::ThemeValue)> {
+        self.shared.theme.lock().unwrap().values()
     }
 
     /// The plugins' context-menu rows, in the order they were added. Each

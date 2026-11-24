@@ -379,6 +379,7 @@ impl Panel {
         if let Some(p) = &self.plugins {
             work.recolors.extend(p.recolors.iter().copied());
             work.cells.extend(p.cells.iter().cloned());
+            work.rows.extend(p.rows.iter().cloned());
             work.mounts.extend(p.mounts.iter().cloned());
             work.back.clone_from(&p.back);
         }
@@ -430,9 +431,10 @@ fn set_plugins(state: runtime::State) {
             with_engine(|e| e.set_composer(composer(commands)));
         }
         log(&format!(
-            "plugins: running={:?} recolors={}",
+            "plugins: running={:?} recolors={} value rules={}",
             state.running,
-            state.recolors.len()
+            state.recolors.len(),
+            state.rows.len()
         ));
         panel.plugins = Some(state);
         panel.work()

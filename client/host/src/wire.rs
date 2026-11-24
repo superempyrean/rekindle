@@ -133,6 +133,55 @@ pub(crate) struct WireMap {
     #[cfg(any(target_os = "android", target_os = "ios"))]
     #[serde(default)]
     pub(crate) menus: BTreeMap<String, MenuMap>,
+    /// By theme token that isn't a colour (`density`), then by its value
+    /// (`compact`, or `*` for any): the row rules that put the value on the
+    /// guest's nodes ([`value_rules`]).
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    #[serde(default)]
+    pub(crate) values: ValueMap,
+}
+
+/// The rules for each theme token that isn't a colour, by token and value.
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub(crate) type ValueMap = BTreeMap<String, BTreeMap<String, Vec<RowRule>>>;
+
+/// The row rules that put the plugins' values of the theme's tokens that
+/// aren't colours on the guest's nodes: the rules `map` has for the value,
+/// or else for `*`. A string cell `$value` in a rule takes the value
+/// itself: a length as a number, a font's name or a choice as a string.
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub(crate) fn value_rules(
+    values: &[(String, rekindle_plugin_host::model::ThemeValue)],
+    map: &ValueMap,
+) -> Vec<RowRule> {
+    use rekindle_plugin_host::model::ThemeValue;
+    let mut out = Vec::new();
+    for (token, value) in values {
+        let Some(by_value) = map.get(token) else {
+            continue;
+        };
+        let (key, put) = match value {
+            ThemeValue::Choice(c) => (c.as_str(), Value::Str(c.clone())),
+            ThemeValue::Font(f) => ("*", Value::Str(f.clone())),
+            ThemeValue::Length(n) => ("*", Value::F64(f64::from(*n))),
+            ThemeValue::Color(_) => continue,
+        };
+        let Some(rules) = by_value.get(key).or_else(|| by_value.get("*")) else {
+            continue;
+        };
+        for rule in rules {
+            let mut rule = rule.clone();
+            if let RowAction::Cells(cells) = &mut rule.action {
+                for c in cells.iter_mut() {
+                    if matches!(&c.value, Value::Str(s) if s == "$value") {
+                        c.value = put.clone();
+                    }
+                }
+            }
+            out.push(rule);
+        }
+    }
+    out
 }
 
 /// Where a build's guest draws one context menu, for the plugins' rows on

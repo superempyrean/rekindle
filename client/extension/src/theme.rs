@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use anyhow::{Result, bail};
 use rekindle_hook::Detour as _;
 use rekindle_plugin_host::model::{Color, ThemeValue};
-use rekindle_plugin_host::tokens::ThemeError;
+use rekindle_plugin_host::tokens::{ThemeError, TokenInfo};
 
 /// The size of gpui's `Hsla`: four `f32`s.
 const HSLA: usize = 16;
@@ -82,6 +82,11 @@ pub struct ThemeState {
     profile: ThemeProfile,
     /// token -> stack of (plugin, colour bytes); the last entry is effective.
     stacks: BTreeMap<String, Vec<(String, [u8; HSLA])>>,
+    /// The tokens that aren't colours (lengths, fonts, density), with their
+    /// defaults, when the host puts their values on the client's wire.
+    others: BTreeMap<String, (TokenInfo, ThemeValue)>,
+    /// token -> stack of (plugin, value) for those tokens.
+    values: BTreeMap<String, Vec<(String, ThemeValue)>>,
 }
 
 impl ThemeState {
@@ -90,7 +95,28 @@ impl ThemeState {
         Self {
             profile,
             stacks: BTreeMap::new(),
+            others: BTreeMap::new(),
+            values: BTreeMap::new(),
         }
+    }
+
+    /// Take the tokens that aren't colours too, for a host that reads them
+    /// back with [`ThemeState::values`].
+    pub fn take_values(&mut self) {
+        self.others = rekindle_plugin_host::tokens::default_tokens()
+            .into_iter()
+            .filter(|(_, v)| !matches!(v, ThemeValue::Color(_)))
+            .map(|(i, v)| (i.name.clone(), (i, v)))
+            .collect();
+    }
+
+    /// The value in effect for each token that isn't a colour and a plugin
+    /// set.
+    pub fn values(&self) -> Vec<(String, ThemeValue)> {
+        self.values
+            .iter()
+            .filter_map(|(t, s)| s.last().map(|(_, v)| (t.clone(), v.clone())))
+            .collect()
     }
 
     fn recompute(&self) {
@@ -106,7 +132,12 @@ impl ThemeState {
     }
 
     pub fn token_names(&self) -> Vec<String> {
-        self.profile.offsets.keys().cloned().collect()
+        self.profile
+            .offsets
+            .keys()
+            .chain(self.others.keys())
+            .cloned()
+            .collect()
     }
 
     pub fn set_value(
@@ -116,7 +147,12 @@ impl ThemeState {
         value: &ThemeValue,
     ) -> Result<(), ThemeError> {
         let ThemeValue::Color(c) = *value else {
-            return Err(ThemeError::WrongKind);
+            let (info, _) = self.others.get(token).ok_or(ThemeError::WrongKind)?;
+            rekindle_plugin_host::tokens::validate(info, value)?;
+            let stack = self.values.entry(token.to_string()).or_default();
+            stack.retain(|(p, _)| p != plugin);
+            stack.push((plugin.to_string(), value.clone()));
+            return Ok(());
         };
         if !self.profile.offsets.contains_key(token) {
             return Err(ThemeError::UnknownToken);
@@ -129,6 +165,10 @@ impl ThemeState {
     }
 
     pub fn get_value(&self, token: &str) -> Option<ThemeValue> {
+        if let Some((_, default)) = self.others.get(token) {
+            let set = self.values.get(token).and_then(|s| s.last());
+            return Some(set.map_or(default, |(_, v)| v).clone());
+        }
         if let Some((_, color)) = self.stacks.get(token).and_then(|s| s.last()) {
             return Some(ThemeValue::Color(bytes_to_color(*color)));
         }
@@ -138,6 +178,12 @@ impl ThemeState {
     }
 
     pub fn reset_value(&mut self, plugin: &str, token: &str) {
+        if let Some(stack) = self.values.get_mut(token) {
+            stack.retain(|(p, _)| p != plugin);
+            if stack.is_empty() {
+                self.values.remove(token);
+            }
+        }
         if let Some(stack) = self.stacks.get_mut(token) {
             stack.retain(|(p, _)| p != plugin);
             if stack.is_empty() {
