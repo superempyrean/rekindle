@@ -4,8 +4,8 @@
 //! (`liblibdiscord_wasm_host.so`, build 356207), loaded natively by the
 //! `phoenix-guest` crate (`crates/phoenix-guest`). This binary is the platform the Android build's Java `UIManager` is: it
 //! applies the guest's turns, paints them, answers its host calls and sends
-//! it the window's input. It reaches the network only with `--live`, and
-//! then only Discord's hosts.
+//! it the window's input. A plain run is live: it reaches the network, and
+//! then only Discord's hosts. `--offline` holds it back.
 
 mod apk;
 mod axml;
@@ -54,8 +54,10 @@ usage: phoenix-view [options]
   --no-device-info   leave DeviceInfo.constants unanswered
   --trace <n>        the loader's import logging (0, 1 or 2; default 0)
   --live             let the guest reach Discord (its hosts only), and keep
-                     its Storage sealed with DPAPI on disk
-  --storage <file>   the sealed Storage file for --live (default
+                     its Storage sealed with DPAPI on disk. The default,
+                     except under --selftest or --snapshot
+  --offline          keep the guest off the network, whatever else is set
+  --storage <file>   the sealed Storage file when live (default
                      %LOCALAPPDATA%\\phoenix-view\\storage.dpapi)
   --snapshot <secs>  show the window off the desktop, then after <secs>
                      save snapshot.png and snapshot-tree.txt to the work dir
@@ -131,6 +133,9 @@ fn args() -> Result<Args, String> {
         size: PHONE,
         capture: None,
     };
+    // Live unless told otherwise: a plain run reaches Discord. `--selftest`
+    // and `--snapshot` stay offline by default, since that is their contract.
+    let mut live_flag: Option<bool> = None;
     let mut it = std::env::args_os().skip(1);
     while let Some(arg) = it.next() {
         let arg = arg.to_string_lossy().into_owned();
@@ -158,7 +163,8 @@ fn args() -> Result<Args, String> {
                     .map_err(|_| "--trace takes a number")?;
             }
             "--no-device-info" => a.device_info = false,
-            "--live" => a.live = true,
+            "--live" => live_flag = Some(true),
+            "--offline" => live_flag = Some(false),
             "--no-motion" => a.motion = false,
             "--capture" => a.capture = Some(val()?),
             "--storage" => a.storage = Some(val()?),
@@ -197,6 +203,7 @@ fn args() -> Result<Args, String> {
             other => return Err(format!("unknown argument {other}\n\n{HELP}")),
         }
     }
+    a.live = live_flag.unwrap_or(!(a.selftest || a.snapshot.is_some()));
     Ok(a)
 }
 
