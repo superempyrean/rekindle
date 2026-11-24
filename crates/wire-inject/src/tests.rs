@@ -2035,3 +2035,206 @@ fn a_prefix_selector_finds_every_node_whose_cell_starts_with_it() {
         .collect();
     assert_eq!(widths, [50, 51], "{applied:?}");
 }
+
+/// A settings sheet and a list of DM rows, as an iOS guest names them.
+fn picker_tree() -> Turn {
+    let mut t = Turn::new();
+    let node = |t: &mut Turn, node: NodeId, kind: ElementKind, cells: Vec<(PropId, Value)>| {
+        t.push(NodeOp::Create {
+            node,
+            kind,
+            props: vec![],
+        });
+        if !cells.is_empty() {
+            t.push(NodeOp::Update { node, props: cells });
+        }
+    };
+    let id = |s: &str| (a11y::ID, str(s));
+    let text = |s: &str| (TEXT, str(s));
+    node(&mut t, 1, ElementKind::VIEW, vec![id("settings-phone")]);
+    node(&mut t, 2, ElementKind::SCROLL, vec![]);
+    node(
+        &mut t,
+        3,
+        ElementKind::VIEW,
+        vec![id("settings.row.account"), (a11y::ROLE, str("button"))],
+    );
+    node(&mut t, 4, ElementKind::TEXT, vec![text("Account")]);
+    node(
+        &mut t,
+        7,
+        ElementKind::VIEW,
+        vec![(a11y::LABEL, str("Mute"))],
+    );
+    node(&mut t, 8, ElementKind::TEXT, vec![text("Mute")]);
+    node(&mut t, 9, ElementKind::VIEW, vec![]);
+    node(&mut t, 10, ElementKind::TEXT, vec![text("Help")]);
+    node(&mut t, 20, ElementKind::LIST, vec![id("dms")]);
+    node(
+        &mut t,
+        21,
+        ElementKind::VIEW,
+        vec![id("dm_row_1531461354488201407")],
+    );
+    node(&mut t, 22, ElementKind::TEXT, vec![text("alice")]);
+    node(
+        &mut t,
+        23,
+        ElementKind::VIEW,
+        vec![id("dm_row_1531461354488201999")],
+    );
+    node(&mut t, 24, ElementKind::TEXT, vec![text("bob")]);
+    node(&mut t, 25, ElementKind::VIEW, vec![]);
+    node(&mut t, 26, ElementKind::IMAGE, vec![id("dm-avatar")]);
+    node(&mut t, 27, ElementKind::VIEW, vec![]);
+    node(&mut t, 28, ElementKind::TEXT, vec![text("Help")]);
+    node(&mut t, 30, ElementKind::VIEW, vec![]);
+    for (n, children) in [
+        (30, vec![1, 20]),
+        (1, vec![2]),
+        (2, vec![3, 7, 9]),
+        (3, vec![4]),
+        (7, vec![8]),
+        (9, vec![10]),
+        (20, vec![21, 23, 25, 27]),
+        (21, vec![22]),
+        (23, vec![24]),
+        (25, vec![26]),
+        (27, vec![28]),
+    ] {
+        t.push(NodeOp::Children { node: n, children });
+    }
+    t.push(NodeOp::Root { node: 30 });
+    t
+}
+
+fn picker() -> Tree {
+    let mut tree = Tree::new();
+    tree.apply(&picker_tree());
+    tree
+}
+
+#[test]
+fn a_pick_prefers_the_nodes_own_id() {
+    let p = pick::pick(&picker(), 3).unwrap();
+    assert_eq!(
+        p.best.selector,
+        Selector::cell(a11y::ID, "settings.row.account")
+    );
+    assert_eq!(p.best.basis, Basis::Id);
+    assert_eq!((p.best.score, p.best.matches), (100, 1));
+    assert_eq!(p.name, "settings-row-account");
+    assert!(p.fallbacks.iter().all(|c| c.score < 100));
+    assert!(
+        p.fallbacks.iter().any(|c| c.basis == Basis::TextUnder),
+        "{:#?}",
+        p.fallbacks
+    );
+}
+
+#[test]
+fn an_entity_id_is_offered_whole_and_as_a_prefix() {
+    let p = pick::pick(&picker(), 21).unwrap();
+    assert_eq!(p.best.basis, Basis::IdEntity);
+    assert!(p.best.unique());
+    assert_eq!(p.name, "dm-row");
+    let prefix = p
+        .fallbacks
+        .iter()
+        .find(|c| c.basis == Basis::IdPrefix)
+        .unwrap();
+    assert_eq!(
+        prefix.selector,
+        Selector::Prefix {
+            prop: a11y::ID,
+            prefix: "dm_row_".into()
+        }
+    );
+    assert_eq!(prefix.matches, 2, "both rows");
+}
+
+#[test]
+fn a_node_without_an_id_is_found_under_the_nearest_one() {
+    let tree = picker();
+    let p = pick::pick(&tree, 7).unwrap();
+    assert_eq!(p.best.basis, Basis::LabelUnder);
+    assert!(p.best.unique());
+    assert_eq!(p.name, "settings-phone-mute-view");
+    let sheet = serde_json::json!({ "cell": { "prop": "accessibilityId", "value": { "str": "settings-phone" } } });
+    assert_eq!(
+        serde_json::to_value(&p.best.selector).unwrap(),
+        serde_json::json!({ "all": [{ "kind": "view" }, { "label": "Mute" }, { "within": sheet }] })
+    );
+    // The chain through the scroll matches the same one node, and costs
+    // more than `within` at depth 2, so it isn't offered.
+    assert!(p.fallbacks.iter().all(|c| c.basis != Basis::LabelUnder));
+
+    // "Help" is under the list too, and every view above either row holds
+    // it, so the text alone matches four nodes.
+    let p = pick::pick(&tree, 9).unwrap();
+    assert_eq!(p.best.basis, Basis::TextUnder);
+    assert!(p.best.unique());
+    let text = p.fallbacks.iter().find(|c| c.basis == Basis::Text).unwrap();
+    assert_eq!(text.matches, 4);
+}
+
+#[test]
+fn a_childs_id_finds_its_parent() {
+    let p = pick::pick(&picker(), 25).unwrap();
+    assert_eq!(p.best.basis, Basis::ChildId);
+    assert!(p.best.unique());
+    assert_eq!(p.name, "dm-avatar-view");
+}
+
+#[test]
+fn every_candidate_matches_the_picked_node() {
+    let tree = picker();
+    let view = select::View::new(&tree);
+    for n in tree.nodes().map(|n| n.id) {
+        let Some(p) = pick::pick(&tree, n) else {
+            continue;
+        };
+        for c in std::iter::once(&p.best).chain(&p.fallbacks) {
+            assert!(view.matches(n, &c.selector), "#{n}: {c:?}");
+            assert_eq!(view.select(&c.selector).len(), c.matches);
+        }
+    }
+    assert!(pick::pick(&tree, 999).is_none());
+}
+
+#[test]
+fn a_pick_consumes_the_next_press_only() {
+    let (mut e, mut host) = engine(Work::default());
+    send(&mut e, &mut host, &picker_tree());
+    assert!(e.take_pick().is_none());
+    e.pick();
+    assert!(e.picking());
+    assert_eq!(
+        e.event(&Event::press(3).to_bytes()),
+        Ok(Verdict::Consume(None))
+    );
+    assert!(!e.picking());
+    let p = e.take_pick().unwrap();
+    assert_eq!(p.node, 3);
+    assert_eq!(
+        p.best.selector,
+        Selector::cell(a11y::ID, "settings.row.account")
+    );
+    assert!(e.take_pick().is_none());
+    assert_eq!(e.event(&Event::press(3).to_bytes()), Ok(Verdict::Pass));
+    assert_eq!(e.pick_node(21).unwrap().name, "dm-row");
+
+    e.pick();
+    e.cancel_pick();
+    assert_eq!(e.event(&Event::press(3).to_bytes()), Ok(Verdict::Pass));
+}
+
+#[test]
+fn within_matches_an_ancestor_at_any_depth() {
+    let tree = picker();
+    let view = select::View::new(&tree);
+    let sheet = Selector::cell(a11y::ID, "settings-phone").within();
+    let help = Selector::All(vec![Selector::Kind(ElementKind::TEXT), sheet]);
+    assert_eq!(view.select(&help), vec![4, 8, 10]);
+    assert!(!view.matches(1, &Selector::cell(a11y::ID, "settings-phone").within()));
+}

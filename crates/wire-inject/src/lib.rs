@@ -45,6 +45,9 @@
 //!
 //! - **Text.** Text put into the guest's text field the user last used, at
 //!   its caret, as a `forceValue` ([`Engine::insert_text`], [`compose`]).
+//! - **Picks.** After [`Engine::pick`], the next press on one of the guest's
+//!   nodes is consumed, and its node's selectors are kept, ranked
+//!   ([`Engine::take_pick`], [`pick`]).
 //!
 //! [`Engine::set_work`] replaces the work while turns go through. Cells the
 //! old work wrote and the new one doesn't are set back to the guest's own
@@ -75,6 +78,7 @@
 
 pub mod compose;
 mod json;
+pub mod pick;
 mod select;
 mod switches;
 pub mod theme;
@@ -93,6 +97,7 @@ use rekindle_wire::{DecodeError, NodeId, NodeOp, PropId, Tree, Turn, Value};
 pub use compose::{
     CHANGE_TEXT, Composer, FORCE_VALUE, Field, Found, Inserted, SELECTION_CHANGE, Typed, VALUE,
 };
+pub use pick::{Basis, Candidate, Pick};
 pub use select::{Selector, TEXT};
 pub use switches::{NodeCells, Switch, SwitchState, Switches};
 pub use work::{
@@ -191,6 +196,9 @@ pub struct Engine {
     typed: Vec<Typed>,
     /// The last event of each name on one of the guest's nodes.
     last: BTreeMap<PropId, Event>,
+    /// Set by [`Engine::pick`] until a press arrives.
+    picking: bool,
+    picked: Option<Pick>,
 }
 
 impl Engine {
@@ -212,6 +220,8 @@ impl Engine {
             composer: Composer::default(),
             typed: Vec::new(),
             last: BTreeMap::new(),
+            picking: false,
+            picked: None,
         };
         engine.mount_cells();
         Ok(engine)
@@ -343,6 +353,37 @@ impl Engine {
     /// commands the host runs.
     pub fn set_composer(&mut self, composer: Composer) {
         self.composer = composer;
+    }
+
+    /// Consume the next press or tap on one of the guest's nodes, and make
+    /// selectors for its node ([`pick::pick`]), for [`Engine::take_pick`].
+    /// The guest never receives the press. A pick that hasn't been taken
+    /// is dropped.
+    pub fn pick(&mut self) {
+        self.picking = true;
+        self.picked = None;
+    }
+
+    /// Stop waiting for a press after [`Engine::pick`].
+    pub fn cancel_pick(&mut self) {
+        self.picking = false;
+    }
+
+    /// Whether [`Engine::pick`] is waiting for a press.
+    pub fn picking(&self) -> bool {
+        self.picking
+    }
+
+    /// The selectors made for the press after [`Engine::pick`], once it
+    /// arrived.
+    pub fn take_pick(&mut self) -> Option<Pick> {
+        self.picked.take()
+    }
+
+    /// Selectors for one of the guest's nodes, as a press on it would make
+    /// them.
+    pub fn pick_node(&self, node: NodeId) -> Option<Pick> {
+        pick::pick(&self.guest, node)
     }
 
     /// The first of the guest's nodes `sel` matches, in id order.
@@ -514,6 +555,11 @@ impl Engine {
                 }),
                 _ => {}
             }
+            return Ok(Verdict::Consume(None));
+        }
+        if self.picking && (ev.is_press() || ev.name == event::names::TAP) {
+            self.picking = false;
+            self.picked = pick::pick(&self.guest, ev.node);
             return Ok(Verdict::Consume(None));
         }
         self.last.insert(ev.name, ev.clone());

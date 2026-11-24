@@ -49,6 +49,10 @@ pub enum Selector {
     ChildOf(Box<Selector>),
     /// A node one of whose children the selector matches.
     ParentOf(Box<Selector>),
+    /// A node with an ancestor the selector matches, at any depth. Unlike
+    /// a chain of `ChildOf`, it still matches when the guest wraps the node
+    /// in one more `view`.
+    Within(Box<Selector>),
 }
 
 impl Selector {
@@ -66,6 +70,10 @@ impl Selector {
 
     pub fn parent_of(self) -> Self {
         Selector::ParentOf(Box::new(self))
+    }
+
+    pub fn within(self) -> Self {
+        Selector::Within(Box::new(self))
     }
 }
 
@@ -131,7 +139,29 @@ impl<'t> View<'t> {
             Selector::Any(any) => any.iter().any(|s| self.matches(node, s)),
             Selector::ChildOf(s) => self.parent(node).is_some_and(|p| self.matches(p, s)),
             Selector::ParentOf(s) => self.children(node).iter().any(|c| self.matches(*c, s)),
+            Selector::Within(s) => {
+                let mut seen = HashSet::new();
+                let mut at = node;
+                while let Some(p) = self.parent(at) {
+                    if !seen.insert(p) {
+                        return false;
+                    }
+                    if self.matches(p, s) {
+                        return true;
+                    }
+                    at = p;
+                }
+                false
+            }
         }
+    }
+
+    /// The `text` cells of `node` and the nodes under it, joined in tree
+    /// order.
+    pub(crate) fn text_of(&self, node: NodeId) -> String {
+        let mut text = String::new();
+        self.text(node, None, &mut HashSet::new(), &mut text);
+        text
     }
 
     /// The `text` cells of `node` and the nodes under it, in tree order.
