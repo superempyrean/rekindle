@@ -199,6 +199,66 @@ pub fn dispatch<R>(buf: &[u8], mut original: impl FnMut(Option<&[u8]>) -> R) -> 
 pub fn poll() {
     poll_test_press();
     poll_test_gateway();
+    poll_tree_dump();
+}
+
+/// A test run asks for the trees by leaving this file in the config dir:
+/// the guest's tree goes to `guest.capture` and the host's, as rekindle's
+/// turns left it, to `host.capture`, each one turn that creates the whole
+/// tree, in `rekindle_wire::capture`'s format. Then the file is cleared.
+const TREE_DUMP: &str = "tree.req";
+
+fn poll_tree_dump() {
+    let path = config_file(TREE_DUMP);
+    if !std::fs::metadata(&path).is_ok_and(|m| m.len() > 0) {
+        return;
+    }
+    let _ = std::fs::write(&path, "");
+    let turns = with_engine(|e| (whole(e.guest()), whole(e.mirror())));
+    let Some((guest, host)) = turns else {
+        log("tree dump: no engine");
+        return;
+    };
+    for (name, turn) in [("guest.capture", guest), ("host.capture", host)] {
+        let written = rekindle_wire::capture::Writer::create(config_file(name))
+            .and_then(|mut w| w.record(0, &turn.to_bytes()));
+        log(&format!(
+            "tree dump: {name} {} ops {}",
+            turn.ops.len(),
+            written.map_or_else(|e| e.to_string(), |()| "written".into())
+        ));
+    }
+}
+
+/// One turn that creates `tree` as it stands.
+fn whole(tree: &rekindle_wire::Tree) -> rekindle_wire::Turn {
+    use rekindle_wire::NodeOp;
+    let mut turn = rekindle_wire::Turn::new();
+    for n in tree.nodes() {
+        turn.push(NodeOp::Create {
+            node: n.id,
+            kind: n.kind.clone(),
+            props: rekindle_wire::turn::create_props(
+                tree.props()
+                    .node_props(n.id)
+                    .map(|(p, v)| (p, v.clone()))
+                    .collect(),
+            ),
+        });
+    }
+    for n in tree.nodes().filter(|n| !n.children.is_empty()) {
+        turn.push(NodeOp::Children {
+            node: n.id,
+            children: n.children.clone(),
+        });
+    }
+    if let Some(node) = tree.root() {
+        turn.push(NodeOp::Root { node });
+    }
+    if let Some(node) = tree.focus() {
+        turn.push(NodeOp::Focus { node: Some(node) });
+    }
+    turn
 }
 
 /// Build the engine from the `Work` a test run names, if it names one, or
