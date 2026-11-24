@@ -21,6 +21,11 @@
 //! the settings screen, the plugins' chat-bar buttons and a plugin's modal
 //! become its mounts. A press on any of them goes to the runtime.
 //!
+//! Text a plugin puts in the composer with `insert-text` is appended to the
+//! guest's text field the user last focused or typed in, as a `forceValue`
+//! in the next turn rekindle flushes (`Engine::insert_text`). With no such
+//! field on screen, the field `wire.json` names as `composer` takes it.
+//!
 //! Android's hooks are `crate::android`. Another platform's hooks link this
 //! crate as a library, call [`set_platform`] and then [`start`], and hand
 //! over what the guest sends and receives.
@@ -534,9 +539,11 @@ fn deliver_presses() {
     }
 }
 
-/// Flush the engine's work if it changed outside a turn. The length of the
-/// turn flushed, 0 for none.
+/// Flush the engine's work if it changed outside a turn, with the text the
+/// plugins put in the composer since. The length of the turn flushed, 0 for
+/// none.
 fn flush_pending() -> usize {
+    insert_queued();
     if !DIRTY.swap(false, Ordering::SeqCst) {
         return 0;
     }
@@ -552,6 +559,66 @@ fn flush_pending() -> usize {
             ops.len()
         }
         None => 0,
+    }
+}
+
+/// The composer's field as `wire.json` names it, read once.
+fn composer() -> Option<&'static rekindle_wire_inject::Selector> {
+    static COMPOSER: OnceLock<Option<rekindle_wire_inject::Selector>> = OnceLock::new();
+    COMPOSER
+        .get_or_init(|| {
+            let path = config_file("wire.json");
+            path.exists()
+                .then(|| crate::wire::read_wire_map(&path).ok())
+                .flatten()
+                .and_then(|m| m.composer)
+        })
+        .as_ref()
+}
+
+/// Put the text plugins queued with `insert-text` into the guest's text
+/// field, as a `forceValue` in the next turn rekindle flushes.
+fn insert_queued() {
+    let text = rekindle_ui_hook::take_inserts().concat();
+    if text.is_empty() {
+        return;
+    }
+    let done = with_engine(|e| match e.insert_text(&text, composer()) {
+        Some(i) => Ok(format!(
+            "compose: {text:?} into input #{} ({:?}) at {}, {} chars now, seq {:#x} eventCount {:?}",
+            i.node,
+            i.found,
+            i.force.start,
+            i.force.text.chars().count(),
+            i.force.seq,
+            i.force.event_count
+        )),
+        None => {
+            let a11y = rekindle_wire::a11y::ids::ID;
+            let fields: Vec<String> = e
+                .fields()
+                .keys()
+                .map(|n| format!("#{n} {:?}", e.guest().props().get(*n, a11y)))
+                .collect();
+            Err(format!(
+                "compose: no field for {text:?}; inputs: {}",
+                fields.join(", ")
+            ))
+        }
+    });
+    match done {
+        Some(Ok(line)) => {
+            DIRTY.store(true, Ordering::SeqCst);
+            log(&line);
+        }
+        Some(Err(line)) => {
+            rekindle_ui_hook::push_toast(
+                "There's no text field to put that in.",
+                rekindle_ui_hook::ToastStyle::Warning,
+            );
+            log(&line);
+        }
+        None => log("compose: no engine"),
     }
 }
 

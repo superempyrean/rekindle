@@ -43,6 +43,9 @@
 //!   to the nodes a selector finds, to greys or to opaque cells, and it
 //!   paints gradient stops too.
 //!
+//! - **Text.** Text put into the guest's text field the user last used, at
+//!   its caret, as a `forceValue` ([`Engine::insert_text`], [`compose`]).
+//!
 //! [`Engine::set_work`] replaces the work while turns go through. Cells the
 //! old work wrote and the new one doesn't are set back to the guest's own
 //! values in the next turn. A mount the new work leaves out is taken out of
@@ -70,6 +73,7 @@
 //! reaches them. The real client should supply how its guest allocates ids,
 //! or a range the host never hands out.
 
+pub mod compose;
 mod json;
 mod select;
 mod switches;
@@ -86,6 +90,7 @@ use rekindle_wire::motion::worklet::{PressLook, Worklet};
 use rekindle_wire::turn::{ON, SPANS, create_props};
 use rekindle_wire::{DecodeError, NodeId, NodeOp, PropId, Tree, Turn, Value};
 
+pub use compose::{CHANGE_TEXT, FORCE_VALUE, Field, Found, Inserted, SELECTION_CHANGE, VALUE};
 pub use select::{Selector, TEXT};
 pub use switches::{NodeCells, Switch, SwitchState, Switches};
 pub use work::{
@@ -175,6 +180,10 @@ pub struct Engine {
     /// Cells an earlier work wrote, to set back to the guest's values unless
     /// the current work writes them.
     restore: BTreeSet<(NodeId, PropId)>,
+    /// The guest's text fields.
+    fields: compose::Fields,
+    /// Ops of rekindle's own on the guest's nodes, for the next turn.
+    pending: Vec<NodeOp>,
 }
 
 impl Engine {
@@ -191,6 +200,8 @@ impl Engine {
             cells: BTreeMap::new(),
             counts: BTreeMap::new(),
             restore: BTreeSet::new(),
+            fields: compose::Fields::default(),
+            pending: Vec::new(),
         };
         engine.mount_cells();
         Ok(engine)
@@ -283,6 +294,26 @@ impl Engine {
     /// in order.
     pub fn take_presses(&mut self) -> Vec<PluginPress> {
         std::mem::take(&mut self.presses)
+    }
+
+    /// Put `text` at the caret of the guest's text field the user last
+    /// focused or typed in, over its selection, or else the one the guest focused, the one
+    /// `composer` names, or the only one on screen. The field's new text
+    /// goes out as a `forceValue` in the next turn, or in [`Engine::flush`].
+    /// `None` when no field is found.
+    pub fn insert_text(&mut self, text: &str, composer: Option<&Selector>) -> Option<Inserted> {
+        let (node, found) = self.fields.target(&self.guest, composer)?;
+        let force = self.fields.insert(node, text);
+        self.pending.push(NodeOp::Update {
+            node,
+            props: vec![(FORCE_VALUE, force.to_value())],
+        });
+        Some(Inserted { node, found, force })
+    }
+
+    /// The guest's text fields, by node.
+    pub fn fields(&self) -> &BTreeMap<NodeId, Field> {
+        self.fields.all()
     }
 
     /// The tree as the guest's own turns leave it.
@@ -409,6 +440,7 @@ impl Engine {
             return Ok(Verdict::Consume(None));
         }
         if !ev.is_press() {
+            self.fields.on_event(&ev);
             return Ok(Verdict::Pass);
         }
         let guest = select::View::new(&self.guest);
@@ -455,6 +487,7 @@ impl Engine {
         decoded.own_words()?;
         let original = self.guest.resolve(&decoded)?;
         self.guest.apply(&original);
+        self.fields.on_turn(&original, &self.guest);
         Ok(self.rewrite(&original))
     }
 
@@ -478,6 +511,11 @@ impl Engine {
         front.append(&mut created);
         front.append(&mut turn.ops);
         front.append(&mut back);
+        let mut pending = std::mem::take(&mut self.pending);
+        self.mirror.apply(&Turn {
+            ops: pending.clone(),
+        });
+        front.append(&mut pending);
         if front == original.ops {
             return None;
         }

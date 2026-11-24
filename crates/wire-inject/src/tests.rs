@@ -1811,3 +1811,129 @@ fn the_system_back_reaches_a_back_handler_instead_of_the_guest() {
     };
     assert!(counting.check().is_err());
 }
+
+/// A page with a search field and a composer, and the window's root on it.
+fn fields() -> Turn {
+    let mut t = Turn::new();
+    t.push(NodeOp::Create {
+        node: PAGE,
+        kind: ElementKind::VIEW,
+        props: vec![],
+    });
+    for (node, id) in [(40, "search"), (41, "composer")] {
+        t.push(NodeOp::Create {
+            node,
+            kind: ElementKind::INPUT,
+            props: vec![(a11y::ID, str(id)), (VALUE, str(""))],
+        });
+    }
+    t.push(NodeOp::Children {
+        node: PAGE,
+        children: vec![40, 41],
+    });
+    t.push(NodeOp::Root { node: PAGE });
+    t
+}
+
+fn change_text(node: NodeId, text: &str, count: i64) -> Vec<u8> {
+    let id = |n: &str| PropId::from_name(n).unwrap();
+    Event {
+        node,
+        name: CHANGE_TEXT,
+        value: Value::Object(vec![
+            (id("text"), str(text)),
+            (id("eventCount"), Value::int(count)),
+        ]),
+    }
+    .to_bytes()
+}
+
+fn force_value(turn: &Turn, id: NodeId) -> Option<rekindle_wire::text::ForceValue> {
+    turn.ops.iter().find_map(|op| match op {
+        NodeOp::Update { node, props } if *node == id => props
+            .iter()
+            .find(|(p, _)| *p == FORCE_VALUE)
+            .and_then(|(_, v)| rekindle_wire::text::ForceValue::from_value(v)),
+        _ => None,
+    })
+}
+
+#[test]
+fn inserted_text_goes_after_what_the_user_typed_in_the_field_they_used() {
+    let (mut e, mut host) = engine(Work::default());
+    send(&mut e, &mut host, &fields());
+    assert_eq!(e.insert_text("x", None), None, "two fields and none used");
+    assert_eq!(
+        e.event(&change_text(41, "hi ", 3)).unwrap(),
+        Verdict::Pass,
+        "the platform's edit reaches the guest"
+    );
+    let ins = e.insert_text("(^_^)", None).unwrap();
+    assert_eq!((ins.node, ins.found, ins.force.text.as_str()), (41, Found::Used, "hi (^_^)"));
+    let flushed = Turn::from_bytes(&e.flush().unwrap()).unwrap();
+    let force = force_value(&flushed, 41).unwrap();
+    assert_eq!(force.text, "hi (^_^)");
+    assert_eq!((force.start, force.end), (8, 8));
+    assert_eq!(force.event_count, Some(3), "the platform's count: no rebase");
+    assert_eq!(e.flush(), None, "written once");
+
+    // The guest writes the field back, then deletes it.
+    let mut t = Turn::new();
+    t.push(NodeOp::Update {
+        node: 41,
+        props: vec![(VALUE, str(""))],
+    });
+    send(&mut e, &mut host, &t);
+    assert_eq!(e.fields()[&41].text, "");
+    let mut t = Turn::new();
+    t.push(NodeOp::Children {
+        node: PAGE,
+        children: vec![40],
+    });
+    t.push(NodeOp::Delete { nodes: vec![41] });
+    send(&mut e, &mut host, &t);
+    let ins = e.insert_text("!", None).unwrap();
+    assert_eq!((ins.node, ins.found), (40, Found::Only));
+}
+
+#[test]
+fn a_composer_selector_finds_the_field_when_none_was_used() {
+    let (mut e, mut host) = engine(Work::default());
+    send(&mut e, &mut host, &fields());
+    let composer = Selector::cell(a11y::ID, "composer");
+    let ins = e.insert_text("hey", Some(&composer)).unwrap();
+    assert_eq!((ins.node, ins.found, ins.force.text.as_str()), (41, Found::Selector, "hey"));
+    // The guest's own next turn carries it.
+    let (applied, _) = send(&mut e, &mut host, &Turn::new());
+    assert_eq!(force_value(&applied, 41).unwrap().text, "hey");
+}
+
+fn selection(node: NodeId, start: i64, end: i64) -> Vec<u8> {
+    let id = |n: &str| PropId::from_name(n).unwrap();
+    Event {
+        node,
+        name: SELECTION_CHANGE,
+        value: Value::Object(vec![
+            (id("start"), Value::int(start)),
+            (id("end"), Value::int(end)),
+        ]),
+    }
+    .to_bytes()
+}
+
+#[test]
+fn inserted_text_replaces_the_selection_in_utf16_units() {
+    let (mut e, mut host) = engine(Work::default());
+    send(&mut e, &mut host, &fields());
+    e.event(&change_text(41, "a😀b", 2)).unwrap();
+    // The caret after the emoji: 3 UTF-16 units in.
+    e.event(&selection(41, 3, 3)).unwrap();
+    let ins = e.insert_text("(^_^)", None).unwrap();
+    assert_eq!(ins.force.text, "a😀(^_^)b");
+    assert_eq!((ins.force.start, ins.force.end), (8, 8));
+    // "😀(" selected, backwards.
+    e.event(&selection(41, 4, 1)).unwrap();
+    let ins = e.insert_text("x", None).unwrap();
+    assert_eq!(ins.force.text, "ax^_^)b");
+    assert_eq!((ins.force.start, ins.force.end), (2, 2));
+}

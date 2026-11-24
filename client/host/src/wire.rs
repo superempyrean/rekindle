@@ -119,6 +119,11 @@ pub(crate) struct WireMap {
     #[cfg(any(target_os = "android", target_os = "ios"))]
     #[serde(default)]
     pub(crate) messages: Option<crate::messages::MessageMap>,
+    /// The message composer's text field, for `insert-text` when the user
+    /// hasn't focused or typed in a field yet.
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    #[serde(default)]
+    pub(crate) composer: Option<Selector>,
 }
 
 #[derive(Debug, Deserialize)]

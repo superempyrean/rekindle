@@ -18,6 +18,12 @@ pub fn queue_insert(text: String) {
     INSERTS.lock().unwrap().push(text);
 }
 
+/// Take the queued text, for a client with no frame callback to put it in:
+/// one whose fields are on the other side of a wire.
+pub fn take_inserts() -> Vec<String> {
+    std::mem::take(&mut *INSERTS.lock().unwrap())
+}
+
 /// How many queued inserts reached a field (for self-tests).
 pub(crate) fn inserted_count() -> usize {
     INSERTED.load(Ordering::SeqCst)

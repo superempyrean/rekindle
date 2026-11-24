@@ -51,7 +51,7 @@ pub use framework::{
     FrameHook, FrameworkLayout, framework_failed, framework_frames, install_framework_layer,
     native_painted,
 };
-pub use insert::queue_insert;
+pub use insert::{queue_insert, take_inserts};
 pub use overlay::{
     OverlayItem, OverlayPicture, OverlayRect, OverlayView, overlay_view, set_overlay,
 };
