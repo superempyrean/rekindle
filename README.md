@@ -6,8 +6,8 @@ Compatibility matrix:
 
 | Platform | Status | Notes |
 | --- | --- | --- |
-| Android | ✅ Compatible | WIP |
-| iOS | 🗓️ Planned | |
+| Android | 🚧 WIP | Soon! |
+| iOS | 🚧 WIP | Soon! |
 | Windows | 🗓️ Planned | No public Phoenix build available yet. |
 | macOS | 🗓️ Planned | No public Phoenix build available yet. |
 | Linux | 🗓️ Planned | No public Phoenix build available yet. |
