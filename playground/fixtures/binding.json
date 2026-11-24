@@ -1,21 +1,22 @@
 {
- "call": {"method": 84, "dark": 583},
+ "_note": "The theme binding of Phoenix's Android build 356207. A token with a key takes the colour the guest names for it in AppState.setTheme (method 84). The rest carry the colour the guest's own cells held in each of the four themes, recorded across theme switches on the x86_64 emulator.",
+ "call": {"method": 84, "dark": 583, "theme": 587},
+ "themes": {"dark": "#2c2d32", "darker": "#121214", "midnight": "#000000", "light": "#f3f3f4"},
  "tokens": [
-  {"token": "background-base-lower", "key": 587},
+  {"token": "background-base-lower", "values": {"dark": "#323339", "darker": "#1a1a1e", "midnight": "#000000", "light": "#fbfbfb"}},
   {"token": "background-base-lowest", "key": 587},
   {"token": "background-base-low", "key": 603},
   {"token": "background-surface-high", "key": 588},
   {"token": "background-surface-higher", "key": 589},
   {"token": "background-surface-highest", "key": 594},
-  {"token": "border-subtle", "key": 591},
+  {"token": "input-background-default", "values": {"dark": "#3b3c43", "darker": "#242429", "midnight": "#19191c", "light": "#efeff1"}},
   {"token": "background-brand", "key": 596},
+  {"token": "border-subtle", "key": 591},
   {"token": "status-danger", "key": 590, "role": "any"},
   {"token": "text-strong", "key": 472},
   {"token": "text-default", "key": 602},
   {"token": "text-muted", "key": 599},
-  {"token": "background-mod-subtle", "dark": "#242429"},
-  {"token": "background-mod-normal", "dark": "#2e2e33"},
-  {"token": "text-subtle", "dark": "#abacb2"},
-  {"token": "icon-muted", "dark": "#97979f"}
+  {"token": "text-subtle", "values": {"dark": "#c5c6ca", "darker": "#abacb2", "midnight": "#96979e", "light": "#595a63"}},
+  {"token": "icon-muted", "values": {"dark": "#999aa1", "darker": "#81828a", "midnight": "#7a7b83", "light": "#666770"}}
  ]
 }
