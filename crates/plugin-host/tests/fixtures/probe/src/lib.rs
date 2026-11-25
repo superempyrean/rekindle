@@ -1,5 +1,5 @@
 //! Calls the 0.9.0, 0.10.0 and 0.11.0 additions on command and logs what they returned. Used by
-//! `plugin-host/tests/moderation_history_view.rs`, `http_filter.rs`, `wire_raw.rs` and `ledger.rs`.
+//! `plugin-host/tests/moderation_history_view.rs` and `http_filter.rs` and `wire_raw.rs`.
 
 use rekindle_sdk::prelude::*;
 use rekindle_sdk::view::{MemberField, UserField, Users};
@@ -40,26 +40,15 @@ impl Plugin for Probe {
             "raw-bad",
             "raw-clear",
             "elements",
-            "fetch",
-            "fetch-off-list",
         ] {
             ui::register_command(id, id);
         }
         Ok(Probe)
     }
 
-    #[expect(clippy::too_many_lines, reason = "one arm per command, each a call or two")]
     fn on_command(&mut self, id: &str) {
         match id {
             "open-dm" => info!("open-dm: {:?}", actions::open_dm(ALICE)),
-            "fetch" => info!(
-                "fetch: {:?}",
-                http::get("https://api.example.com/ok").map(|r| r.status())
-            ),
-            "fetch-off-list" => info!(
-                "fetch-off-list: {:?}",
-                http::get("https://evil.example.net/x").map(|r| r.status())
-            ),
             "raw" => {
                 let gift = rekindle_sdk::wire_raw::selector("composer.gift");
                 info!("raw selector: {gift:?}");
@@ -71,34 +60,15 @@ impl Plugin for Probe {
             }
             "raw-bad" => info!(
                 "raw-bad: {:?}",
-                rekindle_sdk::wire_raw::set_work(
-                    r#"{"back": {"plugin": {"plugin": "p", "surface": "s", "element": "e"}}}"#
-                )
+                rekindle_sdk::wire_raw::set_work(r#"{"back": {"plugin": {"plugin": "p", "surface": "s", "element": "e"}}}"#)
             ),
             "raw-clear" => rekindle_sdk::wire_raw::clear(),
             "elements" => {
                 use rekindle_sdk::elements::{self, Place, PressMode};
                 info!("names: {:?}", elements::names());
-                info!(
-                    "press: {:?}",
-                    elements::on_press("composer.gift", &PressMode::Consume)
-                );
-                info!(
-                    "retarget self: {:?}",
-                    elements::on_press(
-                        "composer.gift",
-                        &PressMode::Retarget("composer.gift".into())
-                    )
-                );
-                info!(
-                    "insert: {:?}",
-                    elements::insert(
-                        "hint",
-                        "composer.gift",
-                        Place::After,
-                        &Vec::new().button("go", "Go")
-                    )
-                );
+                info!("press: {:?}", elements::on_press("composer.gift", &PressMode::Consume));
+                info!("retarget self: {:?}", elements::on_press("composer.gift", &PressMode::Retarget("composer.gift".into())));
+                info!("insert: {:?}", elements::insert("hint", "composer.gift", Place::After, &Vec::new().button("go", "Go")));
                 info!("missing: {:?}", elements::hide("nope"));
             }
             "invite" => info!("invite: {:?}", actions::create_invite(GENERAL, 0, 0)),

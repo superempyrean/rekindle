@@ -253,60 +253,6 @@ pub enum Action {
     },
 }
 
-impl Action {
-    /// Its kind, as its `action` tag serializes: `react`, `send-message`.
-    pub fn kind(&self) -> &'static str {
-        match self {
-            Self::MarkRead { .. } => "mark-read",
-            Self::MarkGuildRead { .. } => "mark-guild-read",
-            Self::MarkAllRead { .. } => "mark-all-read",
-            Self::MarkUnread { .. } => "mark-unread",
-            Self::StartReply { .. } => "start-reply",
-            Self::StartEdit { .. } => "start-edit",
-            Self::InsertText { .. } => "insert-text",
-            Self::SetUserVolume { .. } => "set-user-volume",
-            Self::SetUserLocalMute { .. } => "set-user-local-mute",
-            Self::SetNote { .. } => "set-note",
-            Self::SaveMessage { .. } => "save-message",
-            Self::SetCategoryCollapsed { .. } => "set-category-collapsed",
-            Self::SetMuted { .. } => "set-muted",
-            Self::React { .. } => "react",
-            Self::Unreact { .. } => "unreact",
-            Self::SetPinned { .. } => "set-pinned",
-            Self::DeleteMessage { .. } => "delete-message",
-            Self::EditMessage { .. } => "edit-message",
-            Self::SuppressEmbeds { .. } => "suppress-embeds",
-            Self::Vote { .. } => "vote",
-            Self::JoinVoice { .. } => "join-voice",
-            Self::SetSelfMute { .. } => "set-self-mute",
-            Self::SetSelfDeaf { .. } => "set-self-deaf",
-            Self::SetThreadJoined { .. } => "set-thread-joined",
-            Self::SendMessage { .. } => "send-message",
-            Self::ForwardMessage { .. } => "forward-message",
-            Self::SetTyping { .. } => "set-typing",
-            Self::SetFriend { .. } => "set-friend",
-            Self::CreateInvite { .. } => "create-invite",
-            Self::JoinGuild { .. } => "join-guild",
-            Self::OpenDm { .. } => "open-dm",
-            Self::Kick { .. } => "kick",
-            Self::Ban { .. } => "ban",
-            Self::Unban { .. } => "unban",
-            Self::Timeout { .. } => "timeout",
-            Self::SetVoiceMute { .. } => "set-voice-mute",
-            Self::SetVoiceDeaf { .. } => "set-voice-deaf",
-            Self::MoveMember { .. } => "move-member",
-            Self::BulkDelete { .. } => "bulk-delete",
-            Self::SetStatus { .. } => "set-status",
-            Self::SetCustomStatus { .. } => "set-custom-status",
-            Self::SetNickname { .. } => "set-nickname",
-            Self::SetRichPresence { .. } => "set-rich-presence",
-            Self::Navigate { .. } => "navigate",
-            Self::OpenUrl { .. } => "open-url",
-            Self::OpenMedia { .. } => "open-media",
-        }
-    }
-}
-
 /// Why an action failed (mirrors `action-types.action-error`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -452,26 +398,5 @@ fn apply_member_field(m: &mut crate::api::Member, f: &crate::api::MemberField) {
         F::AvatarDecoration(v) => m.avatar_decoration = v,
         F::FlagBits(v) => m.flag_bits = v,
         F::TimedOutUntilMs(v) => m.timed_out_until_ms = v,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn kind_is_the_serialized_tag() {
-        let all = [
-            Action::MarkAllRead,
-            Action::SetTyping { channel: 1 },
-            Action::OpenUrl {
-                url: "https://example.com".into(),
-            },
-            Action::SetSelfDeaf { deafened: true },
-        ];
-        for a in all {
-            let v = serde_json::to_value(&a).unwrap();
-            assert_eq!(v["action"], a.kind());
-        }
     }
 }

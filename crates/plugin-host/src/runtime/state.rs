@@ -162,8 +162,6 @@ pub(crate) struct PluginState {
     /// `Some` while `on-compose` runs: whether it is a send, and the parts
     /// the plugin asked to split it into.
     pub composing: Option<Composing>,
-    /// What the plugin did, shared by both its stores and the runtime.
-    pub ledger: Arc<super::ledger::Ledger>,
 }
 
 /// The plugin's rate limits, one per kind of call.
@@ -233,7 +231,6 @@ impl PluginState {
         if self.grants.has(cap) {
             Ok(())
         } else {
-            self.ledger.denied(cap.as_str());
             Err(wasmtime::Error::msg(format!(
                 "plugin `{}` called a `{}` host function without the `{cap}` capability",
                 self.id,

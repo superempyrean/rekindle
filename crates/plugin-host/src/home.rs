@@ -15,7 +15,6 @@
 //! storage/<id>@<account>.json  plugin storage, per account (runtime::StorageLocation::Dir)
 //! storage/<id>.json            plugin storage from before an account was known
 //! storage/<id>.settings.json   plugin settings
-//! plugins/<id>/ledger.json     what the plugin did, a day at a time (`runtime::ledger`)
 //! ```
 //!
 //! The trust model (owner decisions 2026-11-07 and 2026-11-14) has three
@@ -443,20 +442,8 @@ impl Home {
         RuntimeConfig {
             storage: StorageLocation::Dir(self.storage_dir()),
             compile_cache: Some(self.compile_cache_dir()),
-            ledger: Some(self.plugins_dir()),
             ..Default::default()
         }
-    }
-
-    /// What plugin `id` did on each of the last days, as a runtime last
-    /// wrote it ([`Runtime::flush_activity`]).
-    pub fn activity(&self, id: &str) -> crate::runtime::ledger::Days {
-        if manifest::validate_id(id).is_err() {
-            return crate::runtime::ledger::Days::default();
-        }
-        crate::runtime::ledger::Days::load(
-            &self.plugin_dir(id).join(crate::runtime::ledger::FILE_NAME),
-        )
     }
 
     /// Compiled plugins, kept between launches (`RuntimeConfig::compile_cache`).

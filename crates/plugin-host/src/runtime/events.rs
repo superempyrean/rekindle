@@ -163,9 +163,6 @@ impl Runtime {
     /// timers are rescheduled; one-shots are removed. Drive this from the host's
     /// frame/tick loop (`rekindle dev` does, on its tick).
     pub fn fire_due_timers(&mut self) {
-        if self.ledger_flushed.elapsed() >= super::LEDGER_FLUSH {
-            self.flush_activity();
-        }
         let now = self.start.elapsed().as_millis() as u64;
         for idx in 0..self.plugins.len() {
             if self.plugins[idx].status != Status::Active {

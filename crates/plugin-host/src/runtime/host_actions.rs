@@ -34,7 +34,6 @@ impl PluginState {
     )]
     fn act(&mut self, budget: Budget, action: Action) -> ActResult {
         if !self.spend(budget) {
-            self.ledger.ungestured(action.kind());
             return Ok(Err(action_error_to_wit(ActionError::NoGesture)));
         }
         let now = self.now();
@@ -47,7 +46,6 @@ impl PluginState {
         if !rate_ok {
             return Ok(Err(action_error_to_wit(ActionError::RateLimited)));
         }
-        self.ledger.action(action.kind());
         let r = self.backend.lock().unwrap().perform(&self.id, action);
         Ok(r.map_err(action_error_to_wit))
     }
@@ -67,7 +65,6 @@ impl PluginState {
         {
             return Ok(Err(action_error_to_wit(ActionError::RateLimited)));
         }
-        self.ledger.action(action.kind());
         let r = self.backend.lock().unwrap().perform(&self.id, action);
         Ok(r.map_err(action_error_to_wit))
     }
@@ -85,14 +82,12 @@ impl PluginState {
         pick: impl FnOnce(ActionValue) -> Option<T>,
     ) -> wasmtime::Result<Result<T, wit::action_types::ActionError>> {
         if !self.spend(budget) {
-            self.ledger.ungestured(action.kind());
             return Ok(Err(action_error_to_wit(ActionError::NoGesture)));
         }
         let now = self.now();
         if matches!(budget, Budget::Outward) && !self.rates.outward.take(now, 5, 10_000) {
             return Ok(Err(action_error_to_wit(ActionError::RateLimited)));
         }
-        self.ledger.action(action.kind());
         let r = self.backend.lock().unwrap().perform_value(&self.id, action);
         Ok(match r {
             Ok(v) => pick(v).ok_or(action_error_to_wit(ActionError::Failed)),

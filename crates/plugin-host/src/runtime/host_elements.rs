@@ -2,7 +2,6 @@
 
 use crate::bindings::wit;
 use crate::capability::Capability;
-use crate::manifest::ElementVerb;
 use crate::model::{self, ElementInsert, ElementOp, ElementStyle, Place, PressMode, UiError};
 
 use super::convert::{self, color_from_wit};
@@ -23,16 +22,6 @@ impl PluginState {
     fn element_op(&mut self, call: &str, op: ElementOp) -> ElementResult {
         self.require(Capability::Ui)?;
         self.main_only(call)?;
-        let touched = match &op {
-            ElementOp::Hide { name } => Some((ElementVerb::Hide, name)),
-            ElementOp::Style { name, .. } => Some((ElementVerb::Style, name)),
-            ElementOp::OnPress { name, .. } => Some((ElementVerb::Press, name)),
-            ElementOp::Insert(i) => Some((ElementVerb::Insert, &i.name)),
-            ElementOp::Remove { .. } | ElementOp::Reset { .. } => None,
-        };
-        if let Some((verb, name)) = touched.filter(|(_, n)| valid_id(n)) {
-            self.ledger.element(verb, name);
-        }
         let r = self.backend.lock().unwrap().element_update(&self.id, op);
         Ok(r.map_err(to_wit))
     }
@@ -50,9 +39,6 @@ impl wit::wire_raw::Host for PluginState {
                 Err(e) => return Ok(Err(e)),
             }
         };
-        if work.is_some() {
-            self.ledger.wire_raw();
-        }
         let r = self.backend.lock().unwrap().set_raw_work(&self.id, work);
         Ok(r.map_err(|e| e.to_string()))
     }
