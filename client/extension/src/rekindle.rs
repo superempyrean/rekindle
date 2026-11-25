@@ -345,9 +345,6 @@ impl Rekindle {
             let from = logs.len().saturating_sub(300);
             self.manager.set_logs(logs[from..].to_vec());
         }
-        if self.manager.activity_of().is_some() {
-            self.runtime.flush_activity();
-        }
         let panel = self.manager.panel(&dev);
         // Only the plugin whose page is open has its panels drawn.
         rekindle_ui_hook::set_shown_plugin(self.manager.detail_of().map(String::from));
