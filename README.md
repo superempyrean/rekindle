@@ -8,9 +8,9 @@ Compatibility matrix:
 | --- | --- | --- |
 | Android | 🚧 WIP | Soon! |
 | iOS | 🚧 WIP | Soon! |
-| Windows | 🗓️ Planned | No public Phoenix build available yet. |
+| Windows | 🚧 WIP | Soon! |
+| Linux | 🚧 WIP | Soon! |
 | macOS | 🗓️ Planned | No public Phoenix build available yet. |
-| Linux | 🗓️ Planned | No public Phoenix build available yet. |
 
 rekindle is a client mod and plugin toolkit for Discord's upcoming rewrite
 in Rust/GPUI (codename Phoenix). Our goal is to restore themes, plugins, UI
