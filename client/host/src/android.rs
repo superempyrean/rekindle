@@ -156,6 +156,21 @@ pub(crate) fn package() -> Option<String> {
 #[repr(C)]
 pub(crate) struct EmitResult([u64; 3]);
 
+impl EmitResult {
+    /// The REPLY to a host call: `Ok(Some(Vec<u8>))`, laid out as
+    /// `{cap, ptr, len}`. `Ok(None)` is a `cap` of `-1` and an error `-2`
+    /// (the emit at `0x5ae4d2c` in the `x86_64` library of 356207).
+    fn reply(&self) -> Option<&[u8]> {
+        let [cap, ptr, len] = self.0;
+        if cap >= (1 << 63) || ptr == 0 || len > cap || len > (1 << 28) {
+            return None;
+        }
+        // SAFETY: an `Ok(Some(_))` result holds a live `Vec<u8>` of `len`
+        // bytes at `ptr`, which the caller owns until it drops it.
+        Some(unsafe { std::slice::from_raw_parts(ptr as *const u8, len as usize) })
+    }
+}
+
 type EmitFn = unsafe extern "C" fn(*mut c_void, *const u8, usize) -> EmitResult;
 /// The event method: the handle's data, the event's bytes and length. Null
 /// is success, anything else the guest's error.
@@ -200,6 +215,7 @@ pub(crate) fn run_worker() -> String {
         home: plugin_home(),
         log,
         emit: flush,
+        call: host_call,
     });
     // Before the swap: the guest names its palette in its first host calls,
     // and the first turn the hook sees has to reach the engine.
@@ -518,7 +534,11 @@ unsafe extern "C" fn hooked_emit(
         // A panic can't unwind into the guest's frame.
         let _ = std::panic::catch_unwind(|| app::host_call(buf));
         // SAFETY: the guest's own arguments.
-        return unsafe { original(transport, bytes, len) };
+        let result = unsafe { original(transport, bytes, len) };
+        if let Some(reply) = result.reply() {
+            let _ = std::panic::catch_unwind(|| app::host_reply(reply));
+        }
+        return result;
     };
     match std::panic::catch_unwind(|| app::turn(ops)).ok().flatten() {
         Some(rewritten) => {
@@ -587,6 +607,33 @@ fn flush(ops: &[u8]) {
             r.0[2]
         ));
     }
+}
+
+/// Make a host call of rekindle's own through the transport the guest last
+/// emitted through, by the original emit, and return the REPLY. On the
+/// guest's thread.
+fn host_call(frame: &[u8]) -> Option<Vec<u8>> {
+    let transport = TRANSPORT.load(Ordering::Relaxed);
+    let emit = EMIT.original.load(Ordering::SeqCst);
+    if transport == 0 || emit == 0 || op_stream(frame).is_some() {
+        return None;
+    }
+    // SAFETY: the original emit, with the transport the guest passed it and
+    // a CALL frame the host reads within the call.
+    let result = unsafe {
+        std::mem::transmute::<usize, EmitFn>(emit)(
+            transport as *mut c_void,
+            frame.as_ptr(),
+            frame.len(),
+        )
+    };
+    let reply = result.reply().map(<[u8]>::to_vec);
+    if reply.is_some() && result.0[0] != 0 {
+        // SAFETY: the reply is rekindle's to drop, and the library
+        // allocates with the system allocator, which is `malloc`.
+        unsafe { libc::free(result.0[1] as *mut c_void) };
+    }
+    reply
 }
 
 fn gettid() -> i64 {

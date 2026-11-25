@@ -212,16 +212,22 @@ pub(crate) fn value_rules(
 pub(crate) struct MenuMap {
     /// The node the plugins' rows go under, last, as one group. It is in
     /// the guest's tree only while the menu is open.
-    under: Selector,
+    pub(crate) under: Selector,
     /// The menu's sheet. After a press on a plugin's row the guest receives
     /// a `dismiss` on it, as when the user swipes it away.
     pub(crate) sheet: Selector,
-    /// The event on a list that opened the menu (`rowLongPress`). Its
-    /// `index` is the row the menu is for.
-    pub(crate) opened_by: String,
-    /// The start of the `accessibilityId` under that row that holds the
-    /// target's id (`message.content:`).
+    /// The events that open the menu: `rowLongPress` on a list, whose
+    /// `index` is the row the menu is for, or `longPress` or
+    /// `accessibilityAction` on the node itself. One name or several.
+    #[serde(deserialize_with = "one_or_many")]
+    pub(crate) opened_by: Vec<String>,
+    /// The start of the `accessibilityId` at or under the row or node that
+    /// holds the target's id (`message.content:`). An event whose node has
+    /// none didn't open this menu.
     pub(crate) target_prefix: String,
+    /// What the id after `target_prefix` is.
+    #[serde(default)]
+    pub(crate) target_is: TargetIs,
     /// Cells of the group, of each row, and of each row's text.
     #[serde(default)]
     group: Vec<Cell>,
@@ -232,6 +238,33 @@ pub(crate) struct MenuMap {
     /// Cells a dangerous row's text gets after `label`'s.
     #[serde(default)]
     danger: Vec<Cell>,
+}
+
+/// What the id a menu's target carries names.
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum TargetIs {
+    /// The menu's own target: the message, user, channel or server.
+    #[default]
+    Itself,
+    /// A message in the channel the user has open, whose author the menu
+    /// is for: a user's menu opened from the name on a message.
+    MessageAuthor,
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+fn one_or_many<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum OneOrMany {
+        One(String),
+        Many(Vec<String>),
+    }
+    Ok(match OneOrMany::deserialize(d)? {
+        OneOrMany::One(s) => vec![s],
+        OneOrMany::Many(v) => v,
+    })
 }
 
 #[derive(Debug, Deserialize)]
@@ -697,6 +730,12 @@ pub(crate) fn button_mounts(buttons: &[(String, Button)], slot: &SlotMap) -> Vec
 /// The first id of the plugins' menu groups, one per menu slot.
 #[cfg(any(target_os = "android", target_os = "ios"))]
 const MENU_GROUPS: NodeId = RESERVED + 0x0600_0000;
+
+/// The root of the `nth` menu's mount, and the menu a root belongs to.
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub(crate) fn menu_nth(root: NodeId) -> Option<u32> {
+    root.checked_sub(MENU_GROUPS).filter(|n| *n < 64)
+}
 
 /// The plugins' rows on one menu, as one mount: a group under the menu's
 /// node holding a `view` with the `button` role for each row, its label in

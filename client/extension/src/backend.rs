@@ -12,11 +12,13 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
+use rekindle_plugin_host::api;
 use rekindle_plugin_host::backend::ClientBackend;
+use rekindle_plugin_host::backend::cache::CacheStore;
 use rekindle_plugin_host::model::{
     Action, ActionError, Element, OverlaySprite, Panel, SLOT_CHANNEL_MENU, SLOT_CHAT_BAR_BUTTON,
-    SLOT_EXPRESSION_PICKER_TAB, SLOT_MESSAGE_MENU, SLOT_PROFILE_SECTION, SLOT_USER_MENU, SlotError,
-    SlotItem, SurfaceStyle, ThemeValue, Tint, ToastKind, UiError, UiOp,
+    SLOT_EXPRESSION_PICKER_TAB, SLOT_GUILD_MENU, SLOT_MESSAGE_MENU, SLOT_PROFILE_SECTION,
+    SLOT_USER_MENU, SlotError, SlotItem, SurfaceStyle, ThemeValue, Tint, ToastKind, UiError, UiOp,
 };
 use rekindle_plugin_host::tokens::{self, ThemeError, TokenInfo};
 use rekindle_ui_hook::registry::Surfaces;
@@ -119,6 +121,24 @@ impl SurfaceStyles {
     }
 }
 
+/// The client's cache store, when the host reads client state from one.
+static CACHE: Mutex<Option<Arc<CacheStore>>> = Mutex::new(None);
+
+/// Answer the plugins' `client-state` queries from `store`, the client's
+/// cache store, from now on.
+pub fn read_cache(store: CacheStore) {
+    *CACHE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Arc::new(store));
+}
+
+pub(crate) fn cache() -> Option<Arc<CacheStore>> {
+    CACHE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone()
+}
+
 /// rekindle's `ClientBackend` inside the client, built from recovered layout.
 pub(crate) struct DetourBackend {
     shared: Shared,
@@ -134,6 +154,9 @@ pub(crate) struct DetourBackend {
     menus: Option<Vec<(String, MenuItem)>>,
     /// rekindle is in the profile popout's registry.
     profiles_available: bool,
+    /// The host draws the menu rows on the client's wire, where a server
+    /// has a menu too.
+    wire_menus: bool,
 }
 
 impl DetourBackend {
@@ -153,6 +176,7 @@ impl DetourBackend {
             panels: Vec::new(),
             menus: (surfaces.menus || wire_menus).then(Vec::new),
             profiles_available: surfaces.profiles,
+            wire_menus,
         }
     }
 
@@ -187,6 +211,7 @@ impl DetourBackend {
         let kind = match slot {
             SLOT_MESSAGE_MENU => MenuKind::Message,
             SLOT_USER_MENU => MenuKind::User,
+            SLOT_GUILD_MENU if self.wire_menus => MenuKind::Guild,
             _ => MenuKind::Channel,
         };
         let row = MenuItem {
@@ -203,13 +228,19 @@ impl DetourBackend {
 }
 
 impl ClientBackend for DetourBackend {
-    // ---- client state: read from the client's memory, on its UI thread ----
+    // ---- client state: from the client's cache store when the host reads
+    // one, else from the client's memory, on its UI thread ----
 
-    fn selection(&self) -> rekindle_plugin_host::api::Selection {
-        let (guild, channel) = client::read(client::Client::selection).unwrap_or((None, 0));
-        rekindle_plugin_host::api::Selection {
+    fn selection(&self) -> api::Selection {
+        let (guild, channel) = if let Some(c) = cache() {
+            c.selection().unwrap_or((None, None))
+        } else {
+            let (g, c) = client::read(client::Client::selection).unwrap_or((None, 0));
+            (g, (c != 0).then_some(c))
+        };
+        api::Selection {
             guild,
-            channel: (channel != 0).then_some(channel),
+            channel,
             voice_channel: None,
             side_thread: None,
             focused: true,
@@ -217,19 +248,32 @@ impl ClientBackend for DetourBackend {
         }
     }
 
-    fn user(&self, id: u64) -> Option<rekindle_plugin_host::api::User> {
+    fn me(&self) -> Option<api::User> {
+        cache()?.me()
+    }
+
+    fn user(&self, id: u64) -> Option<api::User> {
+        if let Some(c) = cache() {
+            return c.user(id);
+        }
         client::read(move |c| c.user(id))
             .flatten()
             .map(|u| user_record(&u))
     }
 
     fn guild_ids(&self) -> Vec<u64> {
+        if let Some(c) = cache() {
+            return c.guild_ids();
+        }
         client::read(client::Client::guild_ids).unwrap_or_default()
     }
 
-    fn guild(&self, id: u64) -> Option<rekindle_plugin_host::api::Guild> {
+    fn guild(&self, id: u64) -> Option<api::Guild> {
+        if let Some(c) = cache() {
+            return c.guild(id);
+        }
         let g = client::read(move |c| c.guild(id)).flatten()?;
-        Some(rekindle_plugin_host::api::Guild {
+        Some(api::Guild {
             id: g.id,
             name: g.name,
             owner: g.owner,
@@ -247,7 +291,30 @@ impl ClientBackend for DetourBackend {
         })
     }
 
-    fn roles(&self, guild: u64) -> Vec<rekindle_plugin_host::api::Role> {
+    fn channel(&self, id: u64) -> Option<api::Channel> {
+        cache()?.channel(id)
+    }
+
+    fn channels(&self, guild: u64, include_hidden: bool) -> Vec<api::Channel> {
+        cache().map_or_else(Vec::new, |c| c.channels(guild, include_hidden))
+    }
+
+    fn threads(&self, parent: u64) -> Vec<api::Channel> {
+        cache().map_or_else(Vec::new, |c| c.threads(parent))
+    }
+
+    fn private_channels(&self) -> Vec<api::Channel> {
+        cache().map_or_else(Vec::new, |c| c.private_channels())
+    }
+
+    fn dm_channel(&self, user: u64) -> Option<u64> {
+        cache()?.dm_channel(user)
+    }
+
+    fn roles(&self, guild: u64) -> Vec<api::Role> {
+        if let Some(c) = cache() {
+            return c.roles(guild);
+        }
         client::read(move |c| c.roles(guild))
             .unwrap_or_default()
             .into_iter()
@@ -255,21 +322,36 @@ impl ClientBackend for DetourBackend {
             .collect()
     }
 
-    fn role(&self, guild: u64, id: u64) -> Option<rekindle_plugin_host::api::Role> {
+    fn role(&self, guild: u64, id: u64) -> Option<api::Role> {
         self.roles(guild).into_iter().find(|r| r.id == id)
     }
 
-    fn member(&self, guild: u64, user: u64) -> Option<rekindle_plugin_host::api::Member> {
+    fn my_member(&self, guild: u64) -> Option<api::Member> {
+        let c = cache()?;
+        c.member(guild, c.me()?.id)
+    }
+
+    fn my_permissions(&self, channel_or_guild: u64) -> u64 {
+        cache().map_or(0, |c| c.my_permissions(channel_or_guild))
+    }
+
+    fn permission_overwrites(&self, channel: u64) -> Vec<api::Overwrite> {
+        cache().map_or_else(Vec::new, |c| c.permission_overwrites(channel))
+    }
+
+    fn member(&self, guild: u64, user: u64) -> Option<api::Member> {
+        if let Some(c) = cache() {
+            return c.member(guild, user);
+        }
         client::read(move |c| c.member(guild, user))
             .flatten()
             .map(|m| member_record(guild, m))
     }
 
-    fn loaded_members(
-        &self,
-        guild: u64,
-        limit: u32,
-    ) -> (Vec<rekindle_plugin_host::api::Member>, u32) {
+    fn loaded_members(&self, guild: u64, limit: u32) -> (Vec<api::Member>, u32) {
+        if let Some(c) = cache() {
+            return c.loaded_members(guild, limit);
+        }
         let all = client::read(move |c| c.members(guild)).unwrap_or_default();
         let total = all.len() as u32;
         let members = all
@@ -281,21 +363,43 @@ impl ClientBackend for DetourBackend {
     }
 
     fn member_permissions(&self, user: u64, channel_or_guild: u64) -> Option<u64> {
+        if let Some(c) = cache() {
+            return c.member_permissions(user, channel_or_guild);
+        }
         client::read(move |c| permissions(c, channel_or_guild, user)).flatten()
     }
 
     fn member_color(&self, guild: u64, user: u64) -> Option<rekindle_plugin_host::model::Color> {
-        let rgb = client::read(move |c| {
-            let roles = c.roles(guild);
-            let mine = c.member(guild, user)?.roles;
-            roles
-                .into_iter()
-                .find(|r| r.color != 0 && mine.contains(&r.id))
-                .map(|r| r.color)
-        })
-        .flatten()?;
+        let rgb = match cache() {
+            Some(c) => c.member_color(guild, user)?,
+            None => client::read(move |c| {
+                let roles = c.roles(guild);
+                let mine = c.member(guild, user)?.roles;
+                roles
+                    .into_iter()
+                    .find(|r| r.color != 0 && mine.contains(&r.id))
+                    .map(|r| r.color)
+            })
+            .flatten()?,
+        };
         let [_, r, g, b] = rgb.to_be_bytes();
         Some(rekindle_plugin_host::model::Color { r, g, b, a: 255 })
+    }
+
+    fn relationships(&self) -> Vec<api::Relationship> {
+        cache().map_or_else(Vec::new, |c| c.relationships())
+    }
+
+    fn message(&self, channel: u64, id: u64) -> Option<api::Message> {
+        cache()?.message(channel, id)
+    }
+
+    fn loaded_messages(&self, channel: u64, before: Option<u64>, limit: u32) -> Vec<api::Message> {
+        cache().map_or_else(Vec::new, |c| c.loaded_messages(channel, before, limit))
+    }
+
+    fn raw_json(&self, target: &api::Target) -> Option<String> {
+        cache()?.raw_json(target)
     }
 
     fn theme_tokens(&self) -> Vec<TokenInfo> {
@@ -396,6 +500,9 @@ impl ClientBackend for DetourBackend {
         }
         if self.menus.is_some() {
             slots.extend([SLOT_MESSAGE_MENU, SLOT_USER_MENU, SLOT_CHANNEL_MENU].map(String::from));
+            if self.wire_menus {
+                slots.push(SLOT_GUILD_MENU.to_string());
+            }
         }
         if self.shared.picker_tabs.lock().unwrap().is_some() {
             slots.push(SLOT_EXPRESSION_PICKER_TAB.to_string());

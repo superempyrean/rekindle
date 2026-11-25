@@ -54,6 +54,8 @@ pub enum MenuKind {
     Message,
     User,
     Channel,
+    /// A server. Only a host that draws menus on a client's wire has one.
+    Guild,
 }
 
 /// A context-menu row rekindle contributes. `key` is a rekindle key
@@ -72,6 +74,7 @@ pub enum MenuTargetRef {
     Message { id: u64, channel: u64, author: u64 },
     User { id: u64 },
     Channel { id: u64 },
+    Guild { id: u64 },
 }
 
 impl MenuTargetRef {
@@ -80,6 +83,7 @@ impl MenuTargetRef {
             MenuTargetRef::Message { .. } => MenuKind::Message,
             MenuTargetRef::User { .. } => MenuKind::User,
             MenuTargetRef::Channel { .. } => MenuKind::Channel,
+            MenuTargetRef::Guild { .. } => MenuKind::Guild,
         }
     }
 }

@@ -49,6 +49,8 @@
 //! crate as a library, call [`set_platform`] and then [`start`], and hand
 //! over what the guest sends and receives.
 
+mod database;
+mod menus;
 mod runtime;
 mod theme;
 
@@ -78,6 +80,10 @@ pub struct Platform {
     /// byte, through the guest's transport. Called on the guest's thread,
     /// inside its dispatch.
     pub emit: fn(&[u8]),
+    /// Make a host call of rekindle's own, a CALL frame, through the
+    /// guest's transport, and return the module's REPLY frame, if it
+    /// replied. Called on the guest's thread.
+    pub call: fn(&[u8]) -> Option<Vec<u8>>,
 }
 
 static PLATFORM: OnceLock<Platform> = OnceLock::new();
@@ -107,6 +113,11 @@ pub fn log(msg: &str) {
     if let Some(p) = platform() {
         (p.log)(msg);
     }
+}
+
+/// Make a host call of rekindle's own through the platform.
+fn call(frame: &[u8]) -> Option<Vec<u8>> {
+    (platform()?.call)(frame)
 }
 
 static TURNS: AtomicU64 = AtomicU64::new(0);
@@ -163,7 +174,13 @@ pub fn turn(ops: &[u8]) -> Option<Vec<u8>> {
         ));
     }
     capture(n, ops);
-    match with_engine(|e| e.filter(ops)) {
+    // A panic can't unwind into the guest's frame.
+    let _ = std::panic::catch_unwind(database::serve);
+    let filtered = with_engine(|e| e.filter(ops));
+    if with_engine(|e| menus::after_turn(e)).unwrap_or(false) {
+        refresh_work();
+    }
+    match filtered {
         Some(Ok(Some(rewritten))) => {
             REWRITTEN.fetch_add(1, Ordering::Relaxed);
             Some(rewritten)
@@ -177,7 +194,8 @@ pub fn turn(ops: &[u8]) -> Option<Vec<u8>> {
 }
 
 /// A host call the guest made. If it names a palette, the plugins' theme is
-/// recoloured for it from the guest's next turn. On the guest's thread.
+/// recoloured for it from the guest's next turn. An open or close of the
+/// guest's store is noted for [`database`]. On the guest's thread.
 pub fn host_call(buf: &[u8]) {
     let n = CALLS.fetch_add(1, Ordering::Relaxed);
     if n < 8 {
@@ -190,6 +208,15 @@ pub fn host_call(buf: &[u8]) {
     if theme::on_call(buf) {
         retheme();
     }
+    database::on_call(buf);
+    // A panic can't unwind into the guest's frame.
+    let _ = std::panic::catch_unwind(database::serve);
+}
+
+/// The REPLY a host module gave to a call the guest made: the handle of
+/// the guest's store, when it opens one. On the guest's thread.
+pub fn host_reply(reply: &[u8]) {
+    database::on_reply(reply);
 }
 
 /// An event on its way to the guest. `original(Some(bytes))` hands the
@@ -201,6 +228,7 @@ pub fn dispatch<R>(buf: &[u8], mut original: impl FnMut(Option<&[u8]>) -> R) -> 
     if n < 4 {
         log(&format!("dispatch #{n} len={}", buf.len()));
     }
+    let _ = std::panic::catch_unwind(database::serve);
     // A test run's press goes through the engine as the host's would.
     let _ = std::panic::catch_unwind(dispatch_test_press);
     // A test run's dispatches reach the guest ahead of this event, as the
@@ -448,7 +476,8 @@ impl Panel {
             work.cells.extend(p.cells.iter().cloned());
             work.rows.extend(p.rows.iter().cloned());
             work.presses.extend(p.presses.iter().cloned());
-            work.mounts.extend(p.mounts.iter().cloned());
+            work.mounts
+                .extend(p.mounts.iter().filter(|m| menus::shown(m.root)).cloned());
             work.back.clone_from(&p.back);
             let raw = p.raw.clone();
             work.mounts.extend(raw.mounts);
@@ -549,6 +578,15 @@ pub(crate) fn turns() -> u64 {
 }
 
 /// Set `work` on the engine, for the next dispatch to flush.
+/// Set the work again, after what it shows changed outside the runtime: a
+/// menu opened or closed.
+fn refresh_work() {
+    let work = panel_lock().as_ref().map(Panel::work);
+    if let Some(work) = work {
+        set_work(work);
+    }
+}
+
 fn set_work(work: Work) {
     match with_engine(|e| e.set_work(work)) {
         Some(Ok(())) => DIRTY.store(true, Ordering::SeqCst),
@@ -617,7 +655,12 @@ fn deliver<R>(buf: &[u8], original: &mut impl FnMut(Option<&[u8]>) -> R) -> R {
             return original(None);
         }
     };
-    let r = match with_engine(|e| e.event(buf)) {
+    let verdict = with_engine(|e| e.event(buf));
+    // A long press may have opened a menu: its rows go on it.
+    if with_engine(|e| menus::opened(e)).unwrap_or(false) {
+        refresh_work();
+    }
+    let r = match verdict {
         Some(Ok(Verdict::Consume(_))) => {
             CONSUMED.fetch_add(1, Ordering::Relaxed);
             // A panic can't unwind into the host's frame.
@@ -737,7 +780,7 @@ fn deliver_presses() -> Option<Vec<u8>> {
         }
         let menu = wire_map().and_then(|m| m.menus.get(&p.surface));
         if let Some(map) = menu {
-            let target = with_engine(|e| menu_target(e, &p.surface, map)).flatten();
+            let target = menus::target(&p.surface);
             log(&format!("menu {}: target {target:?}", p.surface));
             runtime::set_menu_target(target);
             instead = with_engine(|e| dismiss(e, map)).flatten();
@@ -757,77 +800,6 @@ fn deliver_presses() -> Option<Vec<u8>> {
         ));
     }
     instead
-}
-
-/// What a menu of `slot` is about: the row of the list whose event opened
-/// it, and the id the `accessibilityId` under that row carries.
-fn menu_target(
-    e: &Engine,
-    slot: &str,
-    map: &crate::wire::MenuMap,
-) -> Option<rekindle_ui_hook::MenuTargetRef> {
-    use rekindle_plugin_host::model::{SLOT_CHANNEL_MENU, SLOT_MESSAGE_MENU, SLOT_USER_MENU};
-    use rekindle_ui_hook::MenuTargetRef;
-    let ev = e.last_event(rekindle_wire::PropId::from_name(&map.opened_by)?)?;
-    let tree = e.guest();
-    let number = |v: Option<&rekindle_wire::Value>| match v? {
-        rekindle_wire::Value::I32(n) => Some(i64::from(*n)),
-        rekindle_wire::Value::I64(n) => Some(*n),
-        rekindle_wire::Value::F64(f) => Some(*f as i64),
-        _ => None,
-    };
-    let field = |name: &str| match &ev.value {
-        rekindle_wire::Value::Object(props) => {
-            let id = rekindle_wire::PropId::from_name(name)?;
-            props.iter().find(|(p, _)| *p == id).map(|(_, v)| v)
-        }
-        rekindle_wire::Value::Map(entries) => {
-            entries.iter().find(|(k, _)| k == name).map(|(_, v)| v)
-        }
-        _ => None,
-    };
-    let index = number(field("index"))?;
-    let first = number(
-        tree.props()
-            .get(ev.node, rekindle_wire::PropId::from_name("first")?),
-    )
-    .unwrap_or(0);
-    let row = *tree
-        .node(ev.node)?
-        .children
-        .get(usize::try_from(index - first).ok()?)?;
-    let id = id_under(tree, row, &map.target_prefix)?;
-    match slot {
-        SLOT_MESSAGE_MENU => Some(MenuTargetRef::Message {
-            id,
-            // Which channel and author aren't read off the wire yet.
-            channel: 0,
-            author: 0,
-        }),
-        SLOT_USER_MENU => Some(MenuTargetRef::User { id }),
-        SLOT_CHANNEL_MENU => Some(MenuTargetRef::Channel { id }),
-        _ => None,
-    }
-}
-
-/// The id after `prefix` in an `accessibilityId` at or under `node`.
-fn id_under(tree: &rekindle_wire::Tree, node: rekindle_wire::NodeId, prefix: &str) -> Option<u64> {
-    let mut stack = vec![node];
-    while let Some(n) = stack.pop() {
-        if let Some(rekindle_wire::Value::Str(aid)) =
-            tree.props().get(n, rekindle_wire::a11y::ids::ID)
-            && let Some(id) = aid.strip_prefix(prefix).and_then(|i| i.parse().ok())
-        {
-            return Some(id);
-        }
-        stack.extend(
-            tree.node(n)
-                .map(|x| x.children.iter().copied())
-                .into_iter()
-                .flatten(),
-        );
-    }
-    None
 }
 
 /// The `dismiss` the guest receives on the menu's sheet, in place of the

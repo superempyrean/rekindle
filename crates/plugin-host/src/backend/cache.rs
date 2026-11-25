@@ -526,6 +526,21 @@ impl CacheStore {
             .unwrap_or(0)
     }
 
+    /// The row the client keeps for `target`, as its JSON.
+    pub fn raw_json(&self, target: &api::Target) -> Option<String> {
+        let raw = match target {
+            api::Target::Message(m) => self.reader.get("messages", &pair(m.channel, m.id))?,
+            api::Target::User((u, _)) => self.reader.get("users", &key(u.id))?,
+            api::Target::Channel(c) => {
+                let (guild, _) = self.locate(c.id)?;
+                self.reader.get("channels", &pair(guild, c.id))?
+            }
+            api::Target::Guild(g) => self.reader.get("guilds", &key(g.id))?,
+            _ => return None,
+        };
+        String::from_utf8(raw).ok()
+    }
+
     /// The colour of a member's highest coloured role.
     pub fn member_color(&self, guild: u64, user: u64) -> Option<u32> {
         let mine = self.member(guild, user)?.roles;

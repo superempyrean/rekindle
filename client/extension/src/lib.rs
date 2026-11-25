@@ -28,18 +28,18 @@ pub mod theme;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use rekindle_plugin_host::api::{ChannelRef, MessageRef, Target, UserRef};
+use rekindle_plugin_host::api::{ChannelRef, GuildRef, MessageRef, Target, UserRef};
 use rekindle_plugin_host::model::{
-    Color, SLOT_CHANNEL_MENU, SLOT_CHAT_BAR_BUTTON, SLOT_MESSAGE_MENU, SLOT_USER_MENU, UiEvent,
-    UiValue,
+    Color, SLOT_CHANNEL_MENU, SLOT_CHAT_BAR_BUTTON, SLOT_GUILD_MENU, SLOT_MESSAGE_MENU,
+    SLOT_USER_MENU, UiEvent, UiValue,
 };
 use rekindle_ui_hook::registry::RegistryLayout;
 use rekindle_ui_hook::{
     Button, Click, Command, ComposeLayout, FrameworkLayout, Hook as UiHook, MenuTargetRef, UiInput,
 };
 
-pub use backend::PickerTab;
 use backend::{DetourBackend, Shared};
+pub use backend::{PickerTab, read_cache};
 use overlay::OverlayState;
 pub use rekindle::Rekindle;
 use theme::{ThemeHook, ThemeProfile, ThemeState};
@@ -643,39 +643,65 @@ impl Driver {
     }
 }
 
-/// The slot and target a context-menu click goes to.
+/// The slot and target a context-menu click goes to. With the client's
+/// cache store, the target's names, guild and author are filled in from it.
 fn menu_target(target: MenuTargetRef) -> (&'static str, Target) {
+    let cache = backend::cache();
     match target {
         MenuTargetRef::Message {
             id,
             channel,
             author,
-        } => (
-            SLOT_MESSAGE_MENU,
-            Target::Message(MessageRef {
-                id,
-                channel,
-                guild: None,
-                author,
-            }),
-        ),
+        } => {
+            let found = cache.as_ref().and_then(|c| match channel {
+                0 => c.message_in_selected(id),
+                _ => c.message(channel, id),
+            });
+            let channel = found.as_ref().map_or(channel, |m| m.channel);
+            (
+                SLOT_MESSAGE_MENU,
+                Target::Message(MessageRef {
+                    id,
+                    channel,
+                    guild: cache.as_ref().and_then(|c| c.channel(channel)?.guild),
+                    author: found.map_or(author, |m| m.author.id),
+                }),
+            )
+        }
         MenuTargetRef::User { id } => (
             SLOT_USER_MENU,
             Target::User((
                 UserRef {
                     id,
-                    name: String::new(),
+                    name: cache
+                        .as_ref()
+                        .map(|c| c.display_name(None, id))
+                        .unwrap_or_default(),
                 },
                 None,
             )),
         ),
-        MenuTargetRef::Channel { id } => (
-            SLOT_CHANNEL_MENU,
-            Target::Channel(ChannelRef {
+        MenuTargetRef::Channel { id } => {
+            let found = cache.as_ref().and_then(|c| c.channel(id));
+            (
+                SLOT_CHANNEL_MENU,
+                Target::Channel(ChannelRef {
+                    id,
+                    name: found.as_ref().map(|c| c.name.clone()).unwrap_or_default(),
+                    guild: found.as_ref().and_then(|c| c.guild),
+                    kind: found.map_or(0, |c| c.kind),
+                }),
+            )
+        }
+        MenuTargetRef::Guild { id } => (
+            SLOT_GUILD_MENU,
+            Target::Guild(GuildRef {
                 id,
-                name: String::new(),
-                guild: None,
-                kind: 0,
+                name: cache
+                    .as_ref()
+                    .and_then(|c| c.guild(id))
+                    .map(|g| g.name)
+                    .unwrap_or_default(),
             }),
         ),
     }

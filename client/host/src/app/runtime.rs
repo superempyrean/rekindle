@@ -41,8 +41,8 @@ use rekindle_plugin_host::api::{ChannelRef, CommandReply};
 use rekindle_plugin_host::home::Home;
 use rekindle_plugin_host::manager;
 use rekindle_plugin_host::model::{
-    SLOT_CHANNEL_MENU, SLOT_CHAT_BAR_BUTTON, SLOT_EXPRESSION_PICKER_TAB, SLOT_MESSAGE_MENU,
-    SLOT_USER_MENU,
+    SLOT_CHANNEL_MENU, SLOT_CHAT_BAR_BUTTON, SLOT_EXPRESSION_PICKER_TAB, SLOT_GUILD_MENU,
+    SLOT_MESSAGE_MENU, SLOT_USER_MENU,
 };
 use rekindle_ui_hook::{Click, UiInput, Widget};
 use rekindle_wire_inject::{Handler, Mount, PluginPress, PluginText, Recolor, Write};
@@ -221,7 +221,7 @@ pub(crate) fn press(p: &PluginPress) -> bool {
     } else {
         ANSWER_WAIT
     };
-    sent && answered.recv_timeout(wait).is_ok()
+    sent && super::database::wait(&answered, wait).is_some()
 }
 
 /// Report the text the user typed in one of rekindle's fields, and wait
@@ -232,7 +232,7 @@ pub(crate) fn text(typed: &PluginText) -> bool {
         typed: typed.clone(),
         done,
     });
-    sent && answered.recv_timeout(ANSWER_WAIT).is_ok()
+    sent && super::database::wait(&answered, ANSWER_WAIT).is_some()
 }
 
 /// Run the slash command `text` names, and wait up to [`PAGE_WAIT`] for
@@ -243,7 +243,7 @@ pub(crate) fn slash(text: &str) -> Option<CommandReply> {
         text: text.to_string(),
         done,
     });
-    sent.then(|| answered.recv_timeout(PAGE_WAIT).ok())
+    sent.then(|| super::database::wait(&answered, PAGE_WAIT))
         .flatten()
 }
 
@@ -275,11 +275,11 @@ pub(crate) fn filter(t: &str, d: &serde_json::Value) -> Decision {
     }) {
         return Decision::Pass;
     }
-    let decision = match answer.recv_timeout(FILTER_WAIT) {
-        Ok(None) => Decision::Drop,
-        Ok(Some(new)) if new != *d => Decision::Replace(new),
-        Ok(Some(_)) => Decision::Pass,
-        Err(_) => {
+    let decision = match super::database::wait(&answer, FILTER_WAIT) {
+        Some(None) => Decision::Drop,
+        Some(Some(new)) if new != *d => Decision::Replace(new),
+        Some(Some(_)) => Decision::Pass,
+        None => {
             log(&format!(
                 "gateway: {t} passed unfiltered after {} ms",
                 at.elapsed().as_millis()
@@ -845,6 +845,10 @@ fn up() -> anyhow::Result<(Driver, Home)> {
     driver.use_framework_theme(palettes);
     driver.use_wire_theme();
     driver.use_wire_chat_bar();
+    // Plugins read the client from the guest's own store.
+    rekindle_extension::read_cache(rekindle_plugin_host::backend::cache::CacheStore::new(
+        Box::new(super::database::GuestStore),
+    ));
     Ok((driver, Home::new(home)))
 }
 
@@ -1075,6 +1079,7 @@ fn publish(driver: &mut Driver, surfaces: &mut Surfaces) -> State {
             SLOT_MESSAGE_MENU => rekindle_ui_hook::MenuKind::Message,
             SLOT_USER_MENU => rekindle_ui_hook::MenuKind::User,
             SLOT_CHANNEL_MENU => rekindle_ui_hook::MenuKind::Channel,
+            SLOT_GUILD_MENU => rekindle_ui_hook::MenuKind::Guild,
             _ => continue,
         };
         let items: Vec<_> = rows.iter().filter(|r| r.kind == kind).cloned().collect();

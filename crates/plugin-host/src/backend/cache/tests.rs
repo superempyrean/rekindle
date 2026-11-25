@@ -227,3 +227,18 @@ fn relationships_and_messages() {
         .collect();
     assert_eq!(older, vec![400]);
 }
+
+#[test]
+fn raw_rows() {
+    let s = store();
+    let target = api::Target::Guild(api::GuildRef {
+        id: GUILD,
+        name: String::new(),
+    });
+    assert!(s.raw_json(&target).unwrap().contains("Test Guild"));
+    let none = api::Target::Guild(api::GuildRef {
+        id: 1,
+        name: String::new(),
+    });
+    assert!(s.raw_json(&none).is_none());
+}
