@@ -14,7 +14,9 @@
 //! view of the Manager's panel is a page over the screen, which the system
 //! back closes as its back button does. The plugins' chat-bar buttons are
 //! mounted where the wire map (`wire.json`) puts the slot, and a plugin's
-//! modal goes over the screen.
+//! modal goes over the screen. The plugins' tabs go in the client's emoji
+//! picker ([`crate::picker`]), and a tab the user picks shows its plugin's
+//! panel there.
 //!
 //! A press on any of them reaches the runtime as the click the same control
 //! reports on the desktop: a row of the menu or a page as an interaction
@@ -39,7 +41,8 @@ use rekindle_plugin_host::api::{ChannelRef, CommandReply};
 use rekindle_plugin_host::home::Home;
 use rekindle_plugin_host::manager;
 use rekindle_plugin_host::model::{
-    SLOT_CHANNEL_MENU, SLOT_CHAT_BAR_BUTTON, SLOT_MESSAGE_MENU, SLOT_USER_MENU,
+    SLOT_CHANNEL_MENU, SLOT_CHAT_BAR_BUTTON, SLOT_EXPRESSION_PICKER_TAB, SLOT_MESSAGE_MENU,
+    SLOT_USER_MENU,
 };
 use rekindle_ui_hook::{Click, UiInput, Widget};
 use rekindle_wire_inject::{Handler, Mount, PluginPress, Recolor, Write};
@@ -93,8 +96,12 @@ pub(crate) struct State {
     /// The plugins' slash commands, by name.
     pub(crate) commands: BTreeSet<String>,
     /// The rules that put the plugins' values of the theme's tokens that
-    /// aren't colours on the guest's nodes.
+    /// aren't colours on the guest's nodes, and the ones a plugin's tab in
+    /// the emoji picker makes while it is shown.
     pub(crate) rows: Vec<rekindle_wire_inject::RowRule>,
+    /// What happens to presses on the guest's nodes: its own tabs in the
+    /// emoji picker while a plugin's tab is shown.
+    pub(crate) presses: Vec<rekindle_wire_inject::PressRule>,
 }
 
 /// What the guest's thread hands the runtime.
@@ -168,6 +175,9 @@ pub(crate) fn handles(p: &PluginPress) -> bool {
         rows::MODAL_SCRIM,
         rows::MODAL_CARD,
         SLOT_CHAT_BAR_BUTTON,
+        crate::picker::TAB,
+        crate::picker::BODY,
+        crate::picker::GUEST_TAB,
         SLOT_MESSAGE_MENU,
         SLOT_USER_MENU,
         SLOT_CHANNEL_MENU,
@@ -286,6 +296,17 @@ struct Surfaces {
     menus: BTreeMap<String, MenuMap>,
     /// The rules for the theme's tokens that aren't colours.
     values: crate::wire::ValueMap,
+    /// The client's emoji picker, when the wire map says where it is.
+    picker: Option<crate::picker::PickerMap>,
+    /// The plugin's tab shown in the picker, as (plugin, tab id).
+    picker_shown: Option<(String, String)>,
+    /// The picker as the guest's tree had it when last read, and the turns
+    /// the guest had sent then.
+    picker_colors: Option<crate::picker::Colors>,
+    picker_read_at: Option<u64>,
+    /// The body shown, and which block of ids it has.
+    picker_body: Option<Mount>,
+    picker_block: usize,
     /// The plugins' values of those tokens when last logged.
     values_seen: Vec<(String, rekindle_plugin_host::model::ThemeValue)>,
     /// The turns the guest had sent when the messages were last read, and
@@ -333,14 +354,15 @@ impl Surfaces {
         } else {
             None
         };
-        let (chat_bar, messages, menus, values) = match map {
+        let (chat_bar, messages, menus, values, picker) = match map {
             Some(mut m) => (
                 m.slots.remove(SLOT_CHAT_BAR_BUTTON),
                 m.messages,
                 m.menus,
                 m.values,
+                m.expression_picker,
             ),
-            None => (None, None, BTreeMap::new(), BTreeMap::new()),
+            None => (None, None, BTreeMap::new(), BTreeMap::new(), None),
         };
         let developer_mode = home.developer_mode().unwrap_or(false);
         Surfaces {
@@ -349,6 +371,12 @@ impl Surfaces {
             messages,
             menus,
             values,
+            picker,
+            picker_shown: None,
+            picker_colors: None,
+            picker_read_at: None,
+            picker_body: None,
+            picker_block: 0,
             values_seen: Vec::new(),
             read_at: None,
             message_cells: Vec::new(),
@@ -372,6 +400,13 @@ impl Surfaces {
         if p.surface == SLOT_CHAT_BAR_BUTTON {
             return Some(Click::Button {
                 plugin: p.plugin.clone(),
+                item: p.element.clone(),
+            });
+        }
+        if p.surface == crate::picker::TAB {
+            return Some(Click::Slot {
+                plugin: p.plugin.clone(),
+                slot: SLOT_EXPRESSION_PICKER_TAB.into(),
                 item: p.element.clone(),
             });
         }
@@ -457,13 +492,14 @@ fn run(rx: &mpsc::Receiver<Request>) {
         })
         .collect();
     log(&format!(
-        "runtime up in {} ms: pulley={} plugins=[{}] developer_mode={} section={} chat_bar={}",
+        "runtime up in {} ms: pulley={} plugins=[{}] developer_mode={} section={} chat_bar={} picker={}",
         started.elapsed().as_millis(),
         engine.map_or_else(|e| crate::err(&e), |p| p.to_string()),
         plugins.join(" "),
         surfaces.developer_mode,
         surfaces.look.is_some(),
         surfaces.chat_bar.is_some(),
+        surfaces.picker.is_some(),
     ));
     let mut logs = 0;
     surfaces.menu = driver.rekindle().menu();
@@ -534,6 +570,11 @@ fn deliver_events(driver: &mut Driver, passed: Vec<Passed>, received: &mut u64) 
 fn serve(driver: &mut Driver, surfaces: &mut Surfaces, p: &PluginPress) {
     let at = Instant::now();
     let before = running(driver);
+    match p.surface.as_str() {
+        crate::picker::TAB => surfaces.picker_shown = Some((p.plugin.clone(), p.element.clone())),
+        crate::picker::GUEST_TAB => surfaces.picker_shown = None,
+        _ => {}
+    }
     let click = surfaces.click(p, &before);
     let what = match &click {
         Some(Click::Ui {
@@ -549,6 +590,8 @@ fn serve(driver: &mut Driver, surfaces: &mut Surfaces, p: &PluginPress) {
             item,
             target,
         }) => format!("menu {plugin}/{item} on {target:?}"),
+        Some(Click::Slot { plugin, slot, item }) => format!("{slot} {plugin}/{item}"),
+        _ if p.surface == crate::picker::GUEST_TAB => "picker: the client's own tab".into(),
         _ => "nothing".into(),
     };
     if let Some(click) = click {
@@ -732,6 +775,7 @@ fn up() -> anyhow::Result<(Driver, Home)> {
         surfaces: Vec::new(),
         slash_commands: true,
         wire_menus: true,
+        wire_picker_tabs: picker_map().is_some(),
         wire_values: true,
     };
     let args = ExtArgs {
@@ -758,6 +802,89 @@ fn live_palette() -> (String, Vec<(String, u32)>) {
         .map(|b| (b.token, b.value))
         .collect();
     (super::theme::shown(), values)
+}
+
+/// The emoji picker in the wire map, if it has one.
+fn picker_map() -> Option<crate::picker::PickerMap> {
+    let path = super::config_file(WIRE_MAP);
+    path.exists()
+        .then(|| crate::wire::read_wire_map(&path).ok())
+        .flatten()?
+        .expression_picker
+}
+
+/// The plugins' tabs in the emoji picker, with the one the user picked
+/// shown while the picker is open. The guest's tree is read again only
+/// after it sent a turn.
+fn picker(driver: &mut Driver, surfaces: &mut Surfaces) -> crate::picker::Drawn {
+    let Some(map) = surfaces.picker.clone() else {
+        return crate::picker::Drawn::default();
+    };
+    let tabs: Vec<crate::picker::Tab> = driver
+        .picker_tabs()
+        .into_iter()
+        .map(|t| crate::picker::Tab {
+            plugin: t.plugin,
+            id: t.id,
+            title: t.title,
+        })
+        .collect();
+    if tabs.is_empty() {
+        surfaces.picker_shown = None;
+        return crate::picker::Drawn::default();
+    }
+    let turns = super::TURNS.load(Ordering::Relaxed);
+    if surfaces.picker_read_at != Some(turns) {
+        surfaces.picker_read_at = Some(turns);
+        let read =
+            super::with_engine(|e| crate::picker::read(e.guest(), &map, |s| e.find(s))).flatten();
+        // The guest animates its tabs' text from a worklet, and writes their
+        // `color` cells only when it creates them, so the colours are the
+        // ones read when the picker opened.
+        match (read, &surfaces.picker_colors) {
+            (None, Some(_)) => {
+                log("picker: closed");
+                surfaces.picker_colors = None;
+            }
+            (Some(read), None) => {
+                log(&format!("picker: open {read:?}"));
+                surfaces.picker_colors = Some(read);
+            }
+            _ => {}
+        }
+    }
+    let Some(colors) = surfaces.picker_colors.clone() else {
+        // The picker closing takes a plugin's tab down.
+        surfaces.picker_shown = None;
+        surfaces.picker_body = None;
+        return crate::picker::Drawn::default();
+    };
+    let shown = surfaces
+        .picker_shown
+        .as_ref()
+        .and_then(|(plugin, id)| tabs.iter().position(|t| &t.plugin == plugin && &t.id == id));
+    if shown.is_none() {
+        surfaces.picker_shown = None;
+    }
+    let panels = rekindle_ui_hook::panels();
+    let panel = shown.and_then(|i| {
+        panels
+            .iter()
+            .find(|p| p.plugin == tabs[i].plugin && p.id == tabs[i].id)
+    });
+    let draw = |block| crate::picker::draw(&map, &colors, &tabs, shown.map(|i| (i, panel)), block);
+    let mut drawn = draw(surfaces.picker_block);
+    // A body of another shape goes under the other block of ids, so the
+    // old one is taken out before the new one is made.
+    let body = |d: &crate::picker::Drawn| shown.and_then(|_| d.mounts.last().cloned());
+    if let (Some(old), Some(new)) = (&surfaces.picker_body, body(&drawn))
+        && !old.same_shape(&new)
+    {
+        surfaces.picker_block ^= 1;
+        drawn = draw(surfaces.picker_block);
+    }
+    surfaces.picker_body = body(&drawn);
+    drawn
 }
 
 /// How often, in ticks, the theme report is made.
@@ -820,9 +947,13 @@ fn publish(driver: &mut Driver, surfaces: &mut Surfaces) -> State {
         // plugin's own panels under the Manager's rows.
         let page = (!rows::is_grid(&widgets)).then(|| {
             let shown = driver.rekindle().detail_of();
+            // A tab's body in the emoji picker isn't one of the plugin's
+            // panels on its page.
+            let tabs = driver.picker_tabs();
             let own: Vec<_> = panels
                 .iter()
                 .filter(|p| shown.as_deref() == Some(p.plugin.as_str()))
+                .filter(|p| !tabs.iter().any(|t| t.plugin == p.plugin && t.id == p.id))
                 .cloned()
                 .collect();
             let mut page = rows::page(look, &widgets, &own, surfaces.block);
@@ -868,6 +999,12 @@ fn publish(driver: &mut Driver, surfaces: &mut Surfaces) -> State {
     if let Some(slot) = &surfaces.chat_bar {
         mounts.extend(crate::wire::button_mounts(&driver.chat_bar_buttons(), slot));
     }
+    let drawn = picker(driver, surfaces);
+    mounts.extend(drawn.mounts);
+    if surfaces.look.is_none() {
+        surfaces.presses.clear();
+    }
+    surfaces.presses.extend(drawn.clicks);
     let rows = driver.menu_items();
     for (nth, (slot, map)) in (0u32..).zip(&surfaces.menus) {
         let kind = match slot.as_str() {
@@ -899,7 +1036,8 @@ fn publish(driver: &mut Driver, surfaces: &mut Surfaces) -> State {
         .into_iter()
         .map(|(_, c)| c.name)
         .collect();
-    let rows = value_rules(driver, surfaces);
+    let mut rows = value_rules(driver, surfaces);
+    rows.extend(drawn.rows);
     let state = State {
         recolors,
         running,
@@ -908,6 +1046,7 @@ fn publish(driver: &mut Driver, surfaces: &mut Surfaces) -> State {
         cells,
         commands,
         rows,
+        presses: drawn.presses,
     };
     super::set_plugins(state.clone());
     state

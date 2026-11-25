@@ -41,6 +41,8 @@ mod layout;
 mod live;
 #[cfg(any(target_os = "android", target_os = "ios", test))]
 mod messages;
+#[cfg(any(target_os = "android", target_os = "ios", test))]
+mod picker;
 mod profile;
 #[cfg(any(target_os = "android", target_os = "ios", test))]
 mod rows;
@@ -390,6 +392,7 @@ fn framework_only(
         surfaces: crate::wire::surfaces(),
         slash_commands: false,
         wire_menus: false,
+        wire_picker_tabs: false,
         wire_values: false,
     };
     let (ext, n_plugins) = profile::ext_args();

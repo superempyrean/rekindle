@@ -31,6 +31,10 @@
 //! guest. The runtime runs it, and its reply replaces the composer's text.
 //! A reply only the user sees goes up as a toast.
 //!
+//! The plugins' tabs in the guest's emoji picker go beside its own, where
+//! `wire.json`'s `expression_picker` puts them, and a shown tab's body is
+//! the plugin's panel with the tab's id (`picker`).
+//!
 //! The plugins' context-menu rows go into the guest's own menu, as one
 //! group where `wire.json`'s `menus` puts it. A press on one reaches the
 //! plugin with the menu's target: the id under the list row whose event
@@ -272,9 +276,12 @@ fn write_pick(p: Option<&rekindle_wire_inject::Pick>, error: &str) {
 }
 
 /// A test run sets the text of the field `insert-text` would use by
-/// writing it to this file in the config dir. The host reads it every
-/// second and clears it, and the text goes out with the next dispatch.
+/// writing it to this file in the config dir, or empties the field by
+/// writing [`TEST_EMPTY`]. The host reads it every second and clears it,
+/// and the text goes out with the next dispatch.
 const TEST_COMPOSE: &str = "compose.txt";
+/// What [`TEST_COMPOSE`] holds to empty the field.
+const TEST_EMPTY: &str = "@empty";
 
 fn poll_test_compose() {
     let path = config_file(TEST_COMPOSE);
@@ -286,6 +293,7 @@ fn poll_test_compose() {
         return;
     }
     let _ = std::fs::write(&path, "");
+    let text = if text == TEST_EMPTY { "" } else { text };
     let set = with_engine(|e| {
         let (field, _) = e.text_field()?;
         e.set_text(field, text);
@@ -435,6 +443,7 @@ impl Panel {
             work.recolors.extend(p.recolors.iter().copied());
             work.cells.extend(p.cells.iter().cloned());
             work.rows.extend(p.rows.iter().cloned());
+            work.presses.extend(p.presses.iter().cloned());
             work.mounts.extend(p.mounts.iter().cloned());
             work.back.clone_from(&p.back);
         }
@@ -608,6 +617,12 @@ fn deliver<R>(buf: &[u8], original: &mut impl FnMut(Option<&[u8]>) -> R) -> R {
             }
         }
         Some(Ok(Verdict::Replace(ev))) => original(Some(&ev.to_bytes())),
+        Some(Ok(Verdict::Pass)) => {
+            // A press the guest receives may still be one the host is told
+            // of. A panic can't unwind into the host's frame.
+            let _ = std::panic::catch_unwind(deliver_presses);
+            original(Some(buf))
+        }
         Some(Ok(Verdict::Batch(b))) => {
             // A panic can't unwind into the host's frame.
             let _ = std::panic::catch_unwind(deliver_presses);

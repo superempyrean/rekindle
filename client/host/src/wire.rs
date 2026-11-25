@@ -139,6 +139,10 @@ pub(crate) struct WireMap {
     #[cfg(any(target_os = "android", target_os = "ios"))]
     #[serde(default)]
     pub(crate) values: ValueMap,
+    /// The client's emoji picker, for the plugins' tabs in it.
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    #[serde(default)]
+    pub(crate) expression_picker: Option<crate::picker::PickerMap>,
 }
 
 /// The rules for each theme token that isn't a colour, by token and value.
