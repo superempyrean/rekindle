@@ -1,5 +1,5 @@
 version 0.10.0
-wit-sha256 0d9b438a3f384e2b66f4ff49a01624eb51c4242ba033ac92235ea4632fb365a0
+wit-sha256 e35fc1f17cde019520367c4a8fd76428bd15dd3dfddbf41f72c52fe76b55b6ab
 func actions.create-invite
 func actions.delete-message
 func actions.edit-message
@@ -54,6 +54,13 @@ func clipboard.write-text
 func compose-control.split
 func compose-handler.on-compose
 func compose-handler.on-upload
+func elements.hide
+func elements.insert
+func elements.names
+func elements.on-press
+func elements.remove
+func elements.reset
+func elements.style
 func event-filter.on-intercept
 func event-handler.on-events
 func files.open

@@ -50,6 +50,8 @@ pub(crate) struct Shared {
     /// Slash commands, as (plugin, command). `None` when the host runs
     /// none.
     pub(crate) slash: Arc<Mutex<Option<SlashCommands>>>,
+    /// The client's elements by name, and what the plugins did to them.
+    pub(crate) elements: Arc<Mutex<rekindle_plugin_host::model::NamedElements>>,
 }
 
 /// A plugin's tab in the client's emoji picker. Its body is the plugin's
@@ -571,6 +573,18 @@ impl ClientBackend for DetourBackend {
         self.shared.surfaces.lock().unwrap().available.clone()
     }
 
+    fn elements(&self) -> Vec<String> {
+        self.shared.elements.lock().unwrap().available.clone()
+    }
+
+    fn element_update(
+        &mut self,
+        plugin: &str,
+        op: rekindle_plugin_host::model::ElementOp,
+    ) -> Result<(), UiError> {
+        self.shared.elements.lock().unwrap().apply(plugin, op)
+    }
+
     fn ui_update(&mut self, plugin: &str, op: UiOp) -> Result<(), UiError> {
         match op {
             UiOp::RegisterSlashCommand { command } => {
@@ -592,6 +606,7 @@ impl ClientBackend for DetourBackend {
 
     fn plugin_unloaded(&mut self, plugin: &str) {
         self.shared.surfaces.lock().unwrap().plugin_unloaded(plugin);
+        self.shared.elements.lock().unwrap().plugin_unloaded(plugin);
         if let Some(list) = self.shared.slash.lock().unwrap().as_mut() {
             list.retain(|(p, _)| p != plugin);
         }

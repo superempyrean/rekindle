@@ -24,16 +24,20 @@
 //! Text a plugin puts in the composer with `insert-text` is appended to the
 //! guest's text field the user last focused or typed in, as a `forceValue`
 //! in the next turn rekindle flushes (`Engine::insert_text`). With no such
-//! field on screen, the field `wire.json` names as `composer` takes it.
+//! field on screen, the element `wire.json` names `composer` takes it.
 //!
-//! A plugin's slash command, typed in the composer and sent with the button
-//! `wire.json` names as `send` or the field's own submit, never reaches the
-//! guest. The runtime runs it, and its reply replaces the composer's text.
-//! A reply only the user sees goes up as a toast.
+//! A plugin's slash command, typed in the composer and sent with the
+//! element `wire.json` names `composer.send` or the field's own submit,
+//! never reaches the guest. The runtime runs it, and its reply replaces the
+//! composer's text. A reply only the user sees goes up as a toast.
 //!
 //! The plugins' tabs in the guest's emoji picker go beside its own, where
-//! `wire.json`'s `expression_picker` puts them, and a shown tab's body is
-//! the plugin's panel with the tab's id (`picker`).
+//! `wire.json`'s `expression-picker.*` elements put them, and a shown tab's
+//! body is the plugin's panel with the tab's id (`picker`).
+//!
+//! What plugins do to the client's elements by name, through `elements`,
+//! becomes rules and mounts on the nodes `wire.json`'s `elements` finds
+//! (`crate::elements`).
 //!
 //! The plugins' context-menu rows go into the guest's own menu, as one
 //! group where `wire.json`'s `menus` puts it. A press on one reaches the
@@ -899,8 +903,8 @@ fn wire_map() -> Option<&'static crate::wire::WireMap> {
 /// The composer for the engine, with the slash commands the plugins run.
 fn composer(commands: std::collections::BTreeSet<String>) -> Composer {
     Composer {
-        field: wire_map().and_then(|m| m.composer.clone()),
-        send: wire_map().and_then(|m| m.send.clone()),
+        field: wire_map().and_then(|m| m.elements.get(crate::wire::COMPOSER).cloned()),
+        send: wire_map().and_then(|m| m.elements.get(crate::wire::SEND).cloned()),
         commands,
     }
 }

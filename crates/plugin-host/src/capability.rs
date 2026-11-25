@@ -229,6 +229,10 @@ impl Capability {
         if name == "compose-control" {
             return Some(Capability::Compose);
         }
+        // The client's own elements by name are UI too.
+        if name == "elements" {
+            return Some(Capability::Ui);
+        }
         Self::ALL.into_iter().find(|c| c.interface() == Some(name))
     }
 
@@ -393,5 +397,6 @@ mod tests {
         assert_eq!(Capability::for_interface("host"), None);
         assert_eq!(Capability::for_interface("inspect"), Some(ReadClient));
         assert_eq!(Capability::for_interface("compose-control"), Some(Compose));
+        assert_eq!(Capability::for_interface("elements"), Some(Ui));
     }
 }

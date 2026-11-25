@@ -33,6 +33,8 @@ mod android;
 pub mod app;
 mod debug;
 #[cfg(any(target_os = "android", target_os = "ios", test))]
+mod elements;
+#[cfg(any(target_os = "android", target_os = "ios", test))]
 mod gateway;
 mod hooks;
 mod image;
@@ -393,6 +395,7 @@ fn framework_only(
         slash_commands: false,
         wire_menus: false,
         wire_picker_tabs: false,
+        elements: Vec::new(),
         wire_values: false,
     };
     let (ext, n_plugins) = profile::ext_args();

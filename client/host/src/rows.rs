@@ -39,6 +39,9 @@ pub(crate) const MODAL_SCRIM: &str = "modal.scrim";
 pub(crate) const MODAL_CARD: &str = "modal.card";
 /// The key of a page's back button, on [`PAGE`].
 pub(crate) const PAGE_BACK: &str = "page.back";
+/// The handler surface of a row in a plugin's insert next to one of the
+/// client's elements.
+pub(crate) const INSERT: &str = "element.insert";
 
 /// The first node id of rekindle's menu.
 const SECTION_IDS: NodeId = RESERVED + 0x0200_0000;
@@ -597,6 +600,47 @@ pub(crate) fn modal(look: &Look, plugin: &str, panel: &PanelItem) -> Rendered {
     r
 }
 
+/// A plugin's insert `id`, `widgets` drawn as a panel's rows, as a mount
+/// with its nodes from `first` up: under the node `under` finds, before or
+/// after the child `before` or `after` finds. A press on a row reports what
+/// the same row of a panel `insert:<id>` would.
+pub(crate) fn insert(
+    look: &Look,
+    plugin: &str,
+    id: &str,
+    widgets: &[Widget],
+    at: (Selector, Option<Selector>, Option<Selector>),
+    first: NodeId,
+) -> Rendered {
+    let mut b = Builder::new(look, first);
+    b.icons = false;
+    // Two plugins' inserts can have rows with the same ids.
+    let items: Vec<Item> = widget_items(widgets)
+        .into_iter()
+        .map(|i| match i {
+            Item::Row(mut r) => {
+                r.key = format!("{plugin}/{id}/{}", r.key);
+                Item::Row(r)
+            }
+            other => other,
+        })
+        .collect();
+    let panel = format!("insert:{id}");
+    let content = b.content(&items, plugin, INSERT, &|(element, value)| Press::Ui {
+        plugin: plugin.into(),
+        panel: panel.clone(),
+        element,
+        value,
+    });
+    let cells = vec![Cell::new(
+        a11y::ID,
+        Value::Str(format!("rekindle.{plugin}.insert.{id}")),
+    )];
+    let root = b.node(ElementKind::VIEW, cells, content, None);
+    let (under, before, after) = at;
+    b.finish(under, before, after, root)
+}
+
 /// The toasts that are up as a mount over the screen, oldest on top. `set`
 /// counts the sets of toasts shown so far, and picks the mount's ids.
 /// Nothing when no toast is up, or the look has no place for them.
@@ -924,13 +968,19 @@ impl<'l> Builder<'l> {
     }
 }
 
+/// The look the tests draw with.
+#[cfg(test)]
+pub(crate) fn test_look() -> Look {
+    tests::look()
+}
+
 #[cfg(test)]
 mod tests {
     use rekindle_wire_inject::Work;
 
     use super::*;
 
-    fn look() -> Look {
+    pub(super) fn look() -> Look {
         Look::from_json(
             r#"{
             "under": {"cell": {"prop": "accessibilityId", "value": {"str": "list"}}},

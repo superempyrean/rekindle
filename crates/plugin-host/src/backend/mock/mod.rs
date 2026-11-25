@@ -107,6 +107,8 @@ pub struct MockBackend {
     settings_extra: BTreeMap<String, Vec<Element>>,
     /// surface -> stack of (plugin, style).
     surface_styles: BTreeMap<String, Vec<(String, SurfaceStyle)>>,
+    /// The client's elements by name, none until a test names some.
+    elements: crate::model::NamedElements,
     /// Posted desktop notifications.
     pub notifications: Vec<DesktopNotification>,
     tweaks: BTreeMap<String, TweakEntry>,
@@ -188,6 +190,7 @@ impl MockBackend {
             voice_status: BTreeMap::new(),
             settings_extra: BTreeMap::new(),
             surface_styles: BTreeMap::new(),
+            elements: crate::model::NamedElements::default(),
             notifications: Vec::new(),
             tweaks: fixtures::sample_tweaks()
                 .into_iter()
@@ -224,6 +227,20 @@ impl MockBackend {
     }
 
     /// Pretend this build does (or doesn't) have a slot's hook point.
+    /// Name the client's elements plugins can change (`elements`). The mock
+    /// draws none of them, so a test reads what plugins did from
+    /// [`MockBackend::named_elements`].
+    pub fn set_elements(&mut self, names: &[&str]) {
+        self.elements = crate::model::NamedElements::new(
+            names.iter().map(|n| (*n).to_string()).collect(),
+        );
+    }
+
+    /// What each plugin did to the client's elements.
+    pub fn named_elements(&self) -> &crate::model::NamedElements {
+        &self.elements
+    }
+
     pub fn set_slot_available(&mut self, slot: &str, available: bool) {
         self.available.retain(|s| s != slot);
         if available {
@@ -563,6 +580,7 @@ impl ClientBackend for MockBackend {
     }
 
     fn plugin_unloaded(&mut self, plugin: &str) {
+        self.elements.plugin_unloaded(plugin);
         self.slot_items.retain(|(p, _, _)| p != plugin);
         self.profile_sections.retain(|(p, _, _), _| p != plugin);
         self.modals.retain(|(p, _)| p != plugin);
@@ -1089,6 +1107,14 @@ impl ClientBackend for MockBackend {
 
     fn strings(&self) -> Vec<String> {
         STRINGS.map(String::from).to_vec()
+    }
+
+    fn elements(&self) -> Vec<String> {
+        self.elements.available.clone()
+    }
+
+    fn element_update(&mut self, plugin: &str, op: crate::model::ElementOp) -> Result<(), UiError> {
+        self.elements.apply(plugin, op)
     }
 
     fn ui_update(&mut self, plugin: &str, op: UiOp) -> Result<(), UiError> {

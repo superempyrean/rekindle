@@ -42,6 +42,7 @@ mod events;
 mod gestures;
 mod host_actions;
 mod host_core;
+mod host_elements;
 mod host_services;
 mod host_state;
 mod host_ui;
@@ -415,12 +416,14 @@ impl Runtime {
 }
 
 /// `host.features()`: slots, decoration kinds, `surface:`-prefixed surfaces,
+/// `element:`-prefixed names of the client's elements,
 /// `tweak:`-prefixed tweak ids and the backend's extra features.
 fn features_of(b: &dyn ClientBackend) -> Vec<String> {
     let mut f: BTreeSet<String> = BTreeSet::new();
     f.extend(b.available_slots());
     f.extend(b.available_decorations());
     f.extend(b.surfaces().into_iter().map(|s| format!("surface:{s}")));
+    f.extend(b.elements().into_iter().map(|e| format!("element:{e}")));
     f.extend(
         b.tweaks()
             .into_iter()

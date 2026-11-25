@@ -399,6 +399,19 @@ pub trait ClientBackend: Send {
         )
     }
 
+    // ===================== the client's elements by name =====================
+
+    /// The names of the client's elements this build can change
+    /// (`elements.names`). Empty when it names none.
+    fn elements(&self) -> Vec<String> {
+        Vec::new()
+    }
+    /// Apply one of a plugin's `elements` calls. The runtime has checked
+    /// the ids and the values; the backend checks the names.
+    fn element_update(&mut self, _plugin: &str, _op: crate::model::ElementOp) -> Result<(), UiError> {
+        Err(UiError::Unavailable)
+    }
+
     // ===================== services =====================
 
     /// Post a desktop notification (rate limit and label already applied).

@@ -59,25 +59,11 @@ fn selected() -> PropId {
         .expect("the PropId table has `accessibilitySelected`")
 }
 
-/// Where a build's guest draws its emoji picker, and the cells of what
-/// rekindle draws in it, as `wire.json` holds it under `expression_picker`.
-#[derive(Clone, Debug, Deserialize)]
+/// The cells of what rekindle draws in a build's emoji picker, as
+/// `wire.json` holds them under `expression_picker`.
+#[derive(Clone, Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct PickerMap {
-    /// Each of the guest's tabs. Their parent is the row the plugins' tabs
-    /// go in, last.
-    pub(crate) tab: Selector,
-    /// The column holding the tab strip, the search field and the body.
-    pub(crate) content: Selector,
-    /// The child of `content` that holds the tabs. The rest of `content`
-    /// is dropped while a plugin's tab is shown.
-    pub(crate) strip: Selector,
-    /// The row that draws the selection behind the selected tab, with a
-    /// spacer, the selection's fill and a spacer, by `flex`. It is dropped
-    /// while a plugin's tab is shown, and has a spacer of rekindle's
-    /// otherwise, so the guest's selection stays under the guest's tab.
-    #[serde(default)]
-    pub(crate) indicator: Option<Selector>,
+pub(crate) struct PickerLook {
     /// A tab, and what it adds when it is shown. The fill comes from the
     /// guest's selection.
     #[serde(default)]
@@ -118,6 +104,45 @@ pub(crate) struct PickerMap {
     pub(crate) cell: Vec<Cell>,
     #[serde(default)]
     pub(crate) cell_text: Vec<Cell>,
+}
+
+/// The element of each of the guest's tabs. Their parent is the row the
+/// plugins' tabs go in, last.
+pub(crate) const TAB_ELEMENT: &str = "expression-picker.tab";
+/// The column holding the tab strip, the search field and the body.
+pub(crate) const CONTENT: &str = "expression-picker.content";
+/// The child of the content that holds the tabs. The rest of the content is
+/// dropped while a plugin's tab is shown.
+pub(crate) const STRIP: &str = "expression-picker.strip";
+/// The row that draws the selection behind the selected tab, with a spacer,
+/// the selection's fill and a spacer, by `flex`. It is dropped while a
+/// plugin's tab is shown, and has a spacer of rekindle's otherwise, so the
+/// guest's selection stays under the guest's tab. A build may lack it.
+pub(crate) const INDICATOR: &str = "expression-picker.indicator";
+
+/// Where a build's guest draws its emoji picker, from the elements of
+/// `wire.json`, and the look of what rekindle draws in it.
+#[derive(Clone, Debug)]
+pub(crate) struct PickerMap {
+    pub(crate) tab: Selector,
+    pub(crate) content: Selector,
+    pub(crate) strip: Selector,
+    pub(crate) indicator: Option<Selector>,
+    pub(crate) look: PickerLook,
+}
+
+impl PickerMap {
+    /// The picker from `look` and the elements [`TAB_ELEMENT`], [`CONTENT`],
+    /// [`STRIP`] and [`INDICATOR`]. `None` without the first three.
+    pub(crate) fn new(look: PickerLook, elements: &BTreeMap<String, Selector>) -> Option<Self> {
+        Some(PickerMap {
+            tab: elements.get(TAB_ELEMENT)?.clone(),
+            content: elements.get(CONTENT)?.clone(),
+            strip: elements.get(STRIP)?.clone(),
+            indicator: elements.get(INDICATOR).cloned(),
+            look,
+        })
+    }
 }
 
 /// The colours of the guest's tabs as it draws them now: the selected
@@ -324,9 +349,9 @@ fn tab_mount(map: &PickerMap, colors: &Colors, tab: &Tab, i: u32, on: bool) -> M
         ),
         Cell::new(selected(), Value::Bool(on)),
     ];
-    push_cells(&mut cells, &map.tab_cells);
+    push_cells(&mut cells, &map.look.tab_cells);
     if on {
-        push_cells(&mut cells, &map.tab_on);
+        push_cells(&mut cells, &map.look.tab_on);
         if let Some(fill) = &colors.fill {
             push_cells(
                 &mut cells,
@@ -335,7 +360,7 @@ fn tab_mount(map: &PickerMap, colors: &Colors, tab: &Tab, i: u32, on: bool) -> M
         }
     }
     let mut text = vec![Cell::new(TEXT, Value::Str(tab.title.clone()))];
-    push_cells(&mut text, &map.tab_text);
+    push_cells(&mut text, &map.look.tab_text);
     if let Some(c) = if on { &colors.on } else { &colors.off } {
         push_cells(&mut text, &[Cell::new(rekindle_wire::ids::COLOR, c.clone())]);
     }
@@ -467,7 +492,7 @@ impl Body<'_> {
                 Widget::Button { id, label } => buttons.push((id, label)),
                 Widget::Heading(t) | Widget::Text(t) => {
                     self.grid(&mut buttons, &mut column);
-                    let label = self.map.label.clone();
+                    let label = self.map.look.label.clone();
                     let color = self.colors.off.clone();
                     column.push(self.text(&label, t, color.as_ref()));
                 }
@@ -475,8 +500,8 @@ impl Body<'_> {
             }
         }
         self.grid(&mut buttons, &mut column);
-        let inner = self.node(ElementKind::VIEW, self.map.column.clone(), column);
-        children.push(self.node(ElementKind::SCROLL, self.map.scroll.clone(), vec![inner]));
+        let inner = self.node(ElementKind::VIEW, self.map.look.column.clone(), column);
+        children.push(self.node(ElementKind::SCROLL, self.map.look.scroll.clone(), vec![inner]));
         let mut cells = vec![Cell::new(
             a11y::ID,
             Value::Str(format!(
@@ -484,7 +509,7 @@ impl Body<'_> {
                 self.plugin, self.panel
             )),
         )];
-        cells.extend(self.map.body.iter().cloned());
+        cells.extend(self.map.look.body.iter().cloned());
         self.nodes.push(MountNode {
             id: root,
             kind: ElementKind::VIEW,
@@ -505,15 +530,15 @@ impl Body<'_> {
                 &self.colors.off
             }
             .clone();
-            let text = self.text(&self.map.chip_text.clone(), o, color.as_ref());
+            let text = self.text(&self.map.look.chip_text.clone(), o, color.as_ref());
             let mut cells = vec![
                 Cell::new(a11y::ROLE, Value::Str(Role::Button.name().into())),
                 Cell::new(a11y::LABEL, Value::Str(o.clone())),
                 Cell::new(selected(), Value::Bool(on)),
             ];
-            cells.extend(self.map.chip.iter().cloned());
+            cells.extend(self.map.look.chip.iter().cloned());
             if on {
-                cells.extend(self.map.chip_on.iter().cloned());
+                cells.extend(self.map.look.chip_on.iter().cloned());
                 if let Some(fill) = &self.colors.fill {
                     cells.push(Cell::new(rekindle_wire::ids::BACKGROUND, fill.clone()));
                 }
@@ -528,31 +553,31 @@ impl Body<'_> {
             )],
             list,
         );
-        self.node(ElementKind::HSCROLL, self.map.chips.clone(), vec![row])
+        self.node(ElementKind::HSCROLL, self.map.look.chips.clone(), vec![row])
     }
 
     /// `buttons` as rows of the grid at the end of `column`, emptied.
     fn grid(&mut self, buttons: &mut Vec<(&str, &str)>, column: &mut Vec<NodeId>) {
-        let per = self.map.columns.unwrap_or(3).max(1);
+        let per = self.map.look.columns.unwrap_or(3).max(1);
         for chunk in std::mem::take(buttons).chunks(per) {
             let mut cells = Vec::new();
             for (id, label) in chunk {
                 let color = self.colors.on.clone();
-                let text = self.text(&self.map.cell_text.clone(), label, color.as_ref());
+                let text = self.text(&self.map.look.cell_text.clone(), label, color.as_ref());
                 let mut c = vec![
                     Cell::new(a11y::ROLE, Value::Str(Role::Button.name().into())),
                     Cell::new(a11y::LABEL, Value::Str((*label).into())),
                 ];
-                c.extend(self.map.cell.iter().cloned());
+                c.extend(self.map.look.cell.iter().cloned());
                 cells.push(self.pressable(c, text, (*id).into(), id, UiInput::Clicked));
             }
             // A short last row keeps the grid's columns.
             for _ in chunk.len()..per {
-                let mut c = self.map.cell.clone();
+                let mut c = self.map.look.cell.clone();
                 c.push(Cell::new(a11y::HIDDEN, Value::Bool(true)));
                 cells.push(self.node(ElementKind::VIEW, c, Vec::new()));
             }
-            column.push(self.node(ElementKind::VIEW, self.map.row.clone(), cells));
+            column.push(self.node(ElementKind::VIEW, self.map.look.row.clone(), cells));
         }
     }
 }
@@ -566,14 +591,13 @@ mod tests {
             prop: a11y::ID,
             prefix: "tabs:".into(),
         };
-        let v = |s: Selector| serde_json::to_value(s).unwrap();
-        serde_json::from_value(serde_json::json!({
-            "tab": v(seg.clone()),
-            "content": v(seg.clone().parent_of().parent_of()),
-            "strip": v(seg.parent_of()),
-            "indicator": v(Selector::cell(a11y::ID, "indicator")),
-        }))
-        .unwrap()
+        let elements = BTreeMap::from([
+            (TAB_ELEMENT.to_string(), seg.clone()),
+            (CONTENT.to_string(), seg.clone().parent_of().parent_of()),
+            (STRIP.to_string(), seg.parent_of()),
+            (INDICATOR.to_string(), Selector::cell(a11y::ID, "indicator")),
+        ]);
+        PickerMap::new(PickerLook::default(), &elements).unwrap()
     }
 
     fn tabs() -> Vec<Tab> {

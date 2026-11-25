@@ -1,0 +1,28 @@
+[package]
+name = "declutter"
+version = "0.1.0"
+edition = "2024"
+description = "Hides the parts of the client you list by name, such as the gift button."
+license = "GPL-3.0-or-later"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[package.metadata.rekindle]
+id = "dev.rekindle.declutter"
+name = "Declutter"
+capabilities = ["ui"]
+
+[[package.metadata.rekindle.settings]]
+key = "hide"
+type = "string-list"
+label = "Hidden"
+description = "The names of the client's elements to hide. The plugin's page lists the names this build has."
+default = ["composer.gift"]
+
+[dependencies]
+rekindle-sdk = { path = "../../../crates/sdk" }
+
+[lints]
+workspace = true

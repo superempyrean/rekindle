@@ -79,6 +79,11 @@ pub struct RecoveredProfile {
     /// wire, and reads them back with [`Driver::picker_tabs`]. Without it,
     /// adding to `expression-picker.tab` fails with `unavailable`.
     pub wire_picker_tabs: bool,
+    /// The names of the client's elements the host reaches on its wire, for
+    /// the `elements` interface. The host reads what the plugins did to
+    /// them back with [`Driver::named_elements`]. With none, every call
+    /// fails with `unavailable`.
+    pub elements: Vec<String>,
 }
 
 /// How long a send waits for `compose` plugins before going out unchanged.
@@ -101,6 +106,12 @@ pub struct ExtArgs {
     /// The plugin home, when it isn't `$REKINDLE_HOME` or `~/.rekindle`. An
     /// app on Android has no `HOME` and keeps it in its own files.
     pub home: Option<PathBuf>,
+}
+
+/// `elements` as the rows of a panel show them: what the host draws for a
+/// plugin's insert next to one of the client's elements.
+pub fn widgets_of(elements: &[rekindle_plugin_host::model::Element]) -> Vec<rekindle_ui_hook::Widget> {
+    convert::widgets_of(elements)
 }
 
 /// The routing key of a plugin's item. `\u{1f}` can't appear in a plugin or
@@ -167,6 +178,9 @@ impl Driver {
                 ..backend::SurfaceStyles::default()
             })),
             slash: Arc::new(Mutex::new(profile.slash_commands.then(Vec::new))),
+            elements: Arc::new(Mutex::new(
+                rekindle_plugin_host::model::NamedElements::new(profile.elements.clone()),
+            )),
         };
         let surfaces = profile
             .registry
@@ -429,6 +443,11 @@ impl Driver {
             .unwrap()
             .clone()
             .unwrap_or_default()
+    }
+
+    /// What each plugin did to the client's elements by name.
+    pub fn named_elements(&self) -> rekindle_plugin_host::model::NamedElements {
+        self.shared.elements.lock().unwrap().clone()
     }
 
     /// The plugins' chat-bar buttons, as (plugin, button), in the order the

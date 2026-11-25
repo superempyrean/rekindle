@@ -11,6 +11,7 @@ mod call_timer;
 mod channel_notes;
 mod compact_mode;
 mod copy_user_urls;
+mod declutter;
 mod focus_mode;
 mod friend_notifications;
 mod kaomoji;

@@ -114,20 +114,18 @@ pub(crate) struct WireMap {
     /// The node of each named surface (`member-list`), by name.
     #[serde(default)]
     surfaces: BTreeMap<String, Selector>,
+    /// The client's elements plugins reach by name (`composer.gift`), and
+    /// the ones the host draws its own surfaces against: the composer's
+    /// field and send button (`composer`, `composer.send`) and the emoji
+    /// picker's parts (`expression-picker.*`).
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    #[serde(default)]
+    pub(crate) elements: BTreeMap<String, Selector>,
     /// Where the message rows are, for the plugins' message renderers. Read
     /// on Android and iOS, where the host reads the messages off the wire.
     #[cfg(any(target_os = "android", target_os = "ios"))]
     #[serde(default)]
     pub(crate) messages: Option<crate::messages::MessageMap>,
-    /// The message composer's text field, for `insert-text` when the user
-    /// hasn't focused or typed in a field yet.
-    #[cfg(any(target_os = "android", target_os = "ios"))]
-    #[serde(default)]
-    pub(crate) composer: Option<Selector>,
-    /// The composer's send button, for the plugins' slash commands.
-    #[cfg(any(target_os = "android", target_os = "ios"))]
-    #[serde(default)]
-    pub(crate) send: Option<Selector>,
     /// By menu slot (`message.context-menu`): where the guest draws that
     /// menu.
     #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -139,10 +137,28 @@ pub(crate) struct WireMap {
     #[cfg(any(target_os = "android", target_os = "ios"))]
     #[serde(default)]
     pub(crate) values: ValueMap,
-    /// The client's emoji picker, for the plugins' tabs in it.
+    /// The look of the plugins' tabs in the client's emoji picker. Its
+    /// parts are `elements`.
     #[cfg(any(target_os = "android", target_os = "ios"))]
     #[serde(default)]
-    pub(crate) expression_picker: Option<crate::picker::PickerMap>,
+    expression_picker: Option<crate::picker::PickerLook>,
+}
+
+/// The element `insert-text` falls back on when the user hasn't focused or
+/// typed in a field yet: the message composer's text field.
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub(crate) const COMPOSER: &str = "composer";
+/// The composer's send button, for the plugins' slash commands.
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub(crate) const SEND: &str = "composer.send";
+
+impl WireMap {
+    /// The client's emoji picker, from the look `expression_picker` gives
+    /// and the parts `elements` names. `None` when either is missing.
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    pub(crate) fn picker(&self) -> Option<crate::picker::PickerMap> {
+        crate::picker::PickerMap::new(self.expression_picker.clone()?, &self.elements)
+    }
 }
 
 /// The rules for each theme token that isn't a colour, by token and value.

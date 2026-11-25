@@ -74,6 +74,9 @@ fn imports(m: &Manifest) -> Vec<&'static str> {
     if m.requests(Capability::Compose) {
         ifaces.push("compose-control");
     }
+    if m.requests(Capability::Ui) {
+        ifaces.push("elements");
+    }
     ifaces
 }
 

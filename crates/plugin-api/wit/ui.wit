@@ -303,3 +303,67 @@ interface ui {
     /// Open the client's media viewer on an image the client has.
     open-media: func(url: string) -> result<_, ui-error>;
 }
+
+/// The client's own elements, by the names the build's wire map gives them
+/// (`composer.gift`, `guild-search`). Requires `ui`. `host.features()` lists
+/// each name the build has as `element:<name>`, and a call with any other
+/// name fails with `unavailable`. Everything a plugin did here is undone
+/// when it unloads.
+interface elements {
+    use types.{color, element};
+
+    enum element-error {
+        /// This build has no element of that name.
+        unavailable,
+        /// An empty or too-long id, or a retarget at the element itself.
+        invalid,
+        /// Over 16 inserts, or over 32 elements in one.
+        limit,
+    }
+
+    /// A field left `none` keeps the client's own value.
+    record element-style {
+        background: option<color>,
+        /// Text and icons.
+        foreground: option<color>,
+        border: option<color>,
+        /// 0..1
+        opacity: option<f32>,
+        radius: option<f32>,
+    }
+
+    /// What a press on the element does. A press reaches the plugin's
+    /// `on-ui` as `clicked`, with surface `element:<name>` and element
+    /// `<name>`.
+    variant press-mode {
+        /// The client receives the press, and so does the plugin.
+        observe,
+        /// The plugin receives it, and the client doesn't.
+        consume,
+        /// The client receives it as a press on this other element, and the
+        /// plugin doesn't.
+        retarget(string),
+    }
+
+    enum place {
+        before,
+        after,
+        /// After the element's own children.
+        inside,
+    }
+
+    /// The names this build has, sorted.
+    names: func() -> list<string>;
+    /// Take the element and everything in it off the screen.
+    hide: func(name: string) -> result<_, element-error>;
+    /// A style with every field `none` drops the plugin's style.
+    style: func(name: string, style: element-style) -> result<_, element-error>;
+    on-press: func(name: string, mode: press-mode) -> result<_, element-error>;
+    /// Draw `elements` next to or inside `name`, drawn as a panel's rows
+    /// are. Calling it again with the same `id` replaces them. Interactions
+    /// reach `on-ui` with surface `insert:<id>`.
+    insert: func(id: string, name: string, at: place, elements: list<element>) -> result<_, element-error>;
+    remove: func(id: string);
+    /// Undo `hide`, `style` and `on-press` for `name`.
+    reset: func(name: string);
+}

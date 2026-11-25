@@ -181,6 +181,8 @@ pub(crate) fn handles(p: &PluginPress) -> bool {
         SLOT_MESSAGE_MENU,
         SLOT_USER_MENU,
         SLOT_CHANNEL_MENU,
+        crate::elements::PRESS,
+        rows::INSERT,
     ]
     .contains(&p.surface.as_str())
 }
@@ -298,6 +300,10 @@ struct Surfaces {
     values: crate::wire::ValueMap,
     /// The client's emoji picker, when the wire map says where it is.
     picker: Option<crate::picker::PickerMap>,
+    /// The client's elements by name, from the wire map, and the ids of the
+    /// plugins' inserts next to them.
+    elements: BTreeMap<String, rekindle_wire_inject::Selector>,
+    insert_slots: crate::elements::Slots,
     /// The plugin's tab shown in the picker, as (plugin, tab id).
     picker_shown: Option<(String, String)>,
     /// The picker as the guest's tree had it when last read, and the turns
@@ -354,15 +360,16 @@ impl Surfaces {
         } else {
             None
         };
-        let (chat_bar, messages, menus, values, picker) = match map {
+        let (chat_bar, messages, menus, values, picker, elements) = match map {
             Some(mut m) => (
                 m.slots.remove(SLOT_CHAT_BAR_BUTTON),
-                m.messages,
-                m.menus,
-                m.values,
-                m.expression_picker,
+                m.messages.take(),
+                std::mem::take(&mut m.menus),
+                std::mem::take(&mut m.values),
+                m.picker(),
+                m.elements,
             ),
-            None => (None, None, BTreeMap::new(), BTreeMap::new(), None),
+            None => (None, None, BTreeMap::new(), BTreeMap::new(), None, BTreeMap::new()),
         };
         let developer_mode = home.developer_mode().unwrap_or(false);
         Surfaces {
@@ -372,6 +379,8 @@ impl Surfaces {
             menus,
             values,
             picker,
+            elements,
+            insert_slots: crate::elements::Slots::default(),
             picker_shown: None,
             picker_colors: None,
             picker_read_at: None,
@@ -409,6 +418,9 @@ impl Surfaces {
                 slot: SLOT_EXPRESSION_PICKER_TAB.into(),
                 item: p.element.clone(),
             });
+        }
+        if p.surface == crate::elements::PRESS {
+            return Some(crate::elements::click(&p.plugin, &p.element));
         }
         if self.menus.contains_key(&p.surface) {
             let target = MENU_TARGET
@@ -759,6 +771,7 @@ fn up() -> anyhow::Result<(Driver, Home)> {
     // A token's place in the client's theme value. With no theme function
     // to detour, only the names count: they are the tokens plugins can set.
     let tokens: Vec<&String> = names.iter().collect();
+    let map = wire_map();
     let profile = RecoveredProfile {
         theme: ThemeProfile {
             addr: None,
@@ -775,7 +788,8 @@ fn up() -> anyhow::Result<(Driver, Home)> {
         surfaces: Vec::new(),
         slash_commands: true,
         wire_menus: true,
-        wire_picker_tabs: picker_map().is_some(),
+        wire_picker_tabs: map.as_ref().and_then(crate::wire::WireMap::picker).is_some(),
+        elements: map.map(|m| m.elements.into_keys().collect()).unwrap_or_default(),
         wire_values: true,
     };
     let args = ExtArgs {
@@ -804,13 +818,12 @@ fn live_palette() -> (String, Vec<(String, u32)>) {
     (super::theme::shown(), values)
 }
 
-/// The emoji picker in the wire map, if it has one.
-fn picker_map() -> Option<crate::picker::PickerMap> {
+/// The wire map in the config dir, if it has one it can read.
+fn wire_map() -> Option<crate::wire::WireMap> {
     let path = super::config_file(WIRE_MAP);
     path.exists()
         .then(|| crate::wire::read_wire_map(&path).ok())
-        .flatten()?
-        .expression_picker
+        .flatten()
 }
 
 /// The plugins' tabs in the emoji picker, with the one the user picked
@@ -1005,6 +1018,15 @@ fn publish(driver: &mut Driver, surfaces: &mut Surfaces) -> State {
         surfaces.presses.clear();
     }
     surfaces.presses.extend(drawn.clicks);
+    let named = crate::elements::draw(
+        &driver.named_elements(),
+        &surfaces.elements,
+        surfaces.look.as_ref(),
+        rekindle_extension::widgets_of,
+        &mut surfaces.insert_slots,
+    );
+    mounts.extend(named.mounts);
+    surfaces.presses.extend(named.clicks);
     let rows = driver.menu_items();
     for (nth, (slot, map)) in (0u32..).zip(&surfaces.menus) {
         let kind = match slot.as_str() {
@@ -1038,6 +1060,9 @@ fn publish(driver: &mut Driver, surfaces: &mut Surfaces) -> State {
         .collect();
     let mut rows = value_rules(driver, surfaces);
     rows.extend(drawn.rows);
+    rows.extend(named.rows);
+    let mut presses = drawn.presses;
+    presses.extend(named.presses);
     let state = State {
         recolors,
         running,
@@ -1046,7 +1071,7 @@ fn publish(driver: &mut Driver, surfaces: &mut Surfaces) -> State {
         cells,
         commands,
         rows,
-        presses: drawn.presses,
+        presses,
     };
     super::set_plugins(state.clone());
     state

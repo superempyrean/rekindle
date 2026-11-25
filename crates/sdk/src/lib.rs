@@ -45,6 +45,7 @@
 //! | [`messages`] | `read-messages` | loaded and visible messages, pins, message links |
 //! | [`events`] | per kind | subscribe to client events |
 //! | [`ui`], [`slots`], [`decorations`], [`commands`] | `ui` | panels, menus, buttons, badges, keybinds, slash commands |
+//! | [`elements`] | `ui` | hide, restyle, add to and take presses on the client's own elements, by name |
 //! | [`render`] | `render-messages` | change how messages look ([`Plugin::render`]) |
 //! | [`compose`] | `compose` | rewrite the user's outgoing messages ([`Plugin::on_compose`]) |
 //! | [`actions`] | `act-local`, `react`, `act` | act as the user, on their click |
@@ -72,6 +73,7 @@ pub mod commands;
 pub mod compose;
 pub mod consts;
 pub mod decorations;
+pub mod elements;
 pub mod events;
 pub mod files;
 pub mod history;

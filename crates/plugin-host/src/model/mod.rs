@@ -7,6 +7,7 @@
 mod actions;
 mod color;
 mod elements;
+mod named;
 mod services;
 mod slots;
 mod ui;
@@ -14,6 +15,7 @@ mod ui;
 pub use actions::*;
 pub use color::*;
 pub use elements::*;
+pub use named::*;
 pub use services::*;
 pub use slots::*;
 pub use ui::*;

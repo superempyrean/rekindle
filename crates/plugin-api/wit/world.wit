@@ -186,6 +186,7 @@ interface notification-filter {
 ///   inspect           read-client (+ read-users / read-messages per target)
 ///   render-control    render-messages
 ///   ui                ui
+///   elements          ui
 ///   theming           theming
 ///   overlay           overlay
 ///   audio             audio
@@ -215,6 +216,7 @@ world plugin {
     import inspect;
     import render-control;
     import ui;
+    import elements;
     import theming;
     import overlay;
     import audio;
