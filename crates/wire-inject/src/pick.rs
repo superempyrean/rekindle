@@ -16,6 +16,11 @@
 //! one entity. Its `Prefix` selector finds every node of the same kind of
 //! row, and the whole id finds this one only, so both are offered. Text and
 //! labels with digits in them (counts, times) lose points too.
+//!
+//! When no selector matches the node alone, the best one is offered first
+//! as a [`Selector::Nth`] too: the node's place among the nodes it matches,
+//! in tree order. A guest that draws an element twice gives both copies the
+//! same cells and subtree, so their place is all that tells them apart.
 
 use std::collections::HashSet;
 
@@ -41,6 +46,8 @@ const PER_LEVEL: u32 = 4;
 const WITHIN: u32 = 6;
 /// Points text or a label with digits in it costs.
 const DIGITS: u32 = 15;
+/// Points telling a node from its copies by their order costs.
+const NTH: u32 = 10;
 
 /// What a selector is built from, most durable first.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -68,6 +75,9 @@ pub enum Basis {
     KindUnder,
     /// The node's `role`.
     Role,
+    /// The best selector, which matches copies of the node, and which of
+    /// them in tree order.
+    Nth,
 }
 
 /// One selector for the picked node.
@@ -140,14 +150,37 @@ pub fn pick(tree: &Tree, node: NodeId) -> Option<Pick> {
     let mut kept = HashSet::new();
     ranked.retain(|c| kept.insert((c.basis, c.matches)));
     ranked.truncate(MAX_FALLBACKS + 1);
+    let first = ranked.first()?;
+    let name = name(tree, &view, node, &n.kind, first);
+    if let Some(nth) = Some(first)
+        .filter(|c| !c.unique())
+        .and_then(|c| nth(&view, node, c))
+    {
+        ranked.insert(0, nth);
+    }
     let mut ranked = ranked.into_iter();
     let best = ranked.next()?;
     Some(Pick {
         node,
         kind: n.kind.clone(),
-        name: name(tree, &view, node, &n.kind, &best),
+        name,
         best,
         fallbacks: ranked.collect(),
+    })
+}
+
+/// `best`, which matches more nodes than `node`, narrowed to `node` by its
+/// place among them. A guest that draws an element twice makes both copies
+/// alike, so where nothing else tells them apart, their order does. It
+/// scores less than `best`, since a guest that draws one more copy ahead
+/// of it moves the count.
+fn nth(view: &View<'_>, node: NodeId, best: &Candidate) -> Option<Candidate> {
+    let n = view.select_in_order(&best.selector).iter().position(|m| *m == node)?;
+    Some(Candidate {
+        selector: best.selector.clone().nth(n),
+        basis: Basis::Nth,
+        score: best.score.saturating_sub(NTH),
+        matches: 1,
     })
 }
 
@@ -397,7 +430,7 @@ fn name(
         Basis::LabelUnder | Basis::TextUnder | Basis::KindUnder => {
             anchor().map(|a| format!("{a}-{}", thing()))
         }
-        Basis::Label | Basis::Text | Basis::Role => None,
+        Basis::Label | Basis::Text | Basis::Role | Basis::Nth => None,
     };
     let mut name = name.unwrap_or_else(thing);
     if name.chars().count() > 48 {

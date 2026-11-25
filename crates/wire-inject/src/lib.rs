@@ -20,7 +20,8 @@
 //!   the node or a node under it is left out of the turn), have a string
 //!   cell rewritten inside the guest's own op, or get cells written.
 //! - **Presses.** A press on a guest node a selector finds is consumed,
-//!   retargeted at another node, or passed on with the host told of it. A
+//!   retargeted at another node, or kept for a plugin, and then passed on
+//!   to the guest or not. A
 //!   press on rekindle's own nodes is always consumed, after its
 //!   [`Handler`] runs. A [`Handler::Plugin`] keeps the press for the host to
 //!   deliver ([`Engine::take_presses`]).
@@ -584,20 +585,23 @@ impl Engine {
                         return Ok(Verdict::Replace(Event { node: target, ..ev }));
                     }
                 }
-                PressAction::Notify(Handler::Plugin {
+                PressAction::Plugin {
                     plugin,
                     surface,
                     element,
-                }) => {
+                    forward,
+                } => {
                     self.presses.push(PluginPress {
                         plugin: plugin.clone(),
                         surface: surface.clone(),
                         element: element.clone(),
                     });
-                    return Ok(Verdict::Pass);
+                    return Ok(if *forward {
+                        Verdict::Pass
+                    } else {
+                        Verdict::Consume(None)
+                    });
                 }
-                // `Work::check` refuses it.
-                PressAction::Notify(Handler::Count { .. }) => {}
             }
         }
         Ok(Verdict::Pass)

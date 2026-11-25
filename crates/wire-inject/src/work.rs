@@ -211,11 +211,17 @@ pub enum PressAction {
     /// The guest receives the press on the first node this selector finds
     /// instead. If it finds none, the next rule applies.
     Retarget(Selector),
-    /// The guest receives the press, and the host is told of it as of a
-    /// press on one of rekindle's nodes with this handler
-    /// ([`Engine::take_presses`](crate::Engine::take_presses)). Only a
-    /// [`Handler::Plugin`] is allowed here.
-    Notify(Handler),
+    /// The press is kept for the host as a press on one of rekindle's nodes
+    /// with a [`Handler::Plugin`] would be
+    /// ([`Engine::take_presses`](crate::Engine::take_presses)). The guest
+    /// receives it too when `forward` is set, and never otherwise.
+    Plugin {
+        plugin: String,
+        surface: String,
+        element: String,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        forward: bool,
+    },
 }
 
 /// An `accessibilityLabel` for each node `select` finds that the guest
@@ -432,13 +438,6 @@ impl Work {
         let err = |m: String| Err(WorkError(m));
         if matches!(self.back, Some(Handler::Count { .. })) {
             return err("the back handler counts nothing: use a plugin handler".into());
-        }
-        if self
-            .presses
-            .iter()
-            .any(|p| matches!(p.action, PressAction::Notify(Handler::Count { .. })))
-        {
-            return err("a notify rule counts nothing: use a plugin handler".into());
         }
         if let Some(p) = self
             .prop_recolors

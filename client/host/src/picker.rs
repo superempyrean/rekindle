@@ -279,7 +279,7 @@ pub(crate) fn draw(
     }
     out.presses.push(PressRule {
         select: map.tab.clone(),
-        action: PressAction::Notify(handler(&tab.plugin, GUEST_TAB, "")),
+        action: guest_tab_press(&tab.plugin),
     });
     let mut b = Body {
         map,
@@ -360,6 +360,17 @@ fn tab_mount(map: &PickerMap, colors: &Colors, tab: &Tab, i: u32, on: bool) -> M
                 on_press: None,
             },
         ],
+    }
+}
+
+/// A press on one of the guest's tabs while `plugin`'s tab is shown: the
+/// guest receives it, and the host takes the plugin's tab down.
+fn guest_tab_press(plugin: &str) -> PressAction {
+    PressAction::Plugin {
+        plugin: plugin.into(),
+        surface: GUEST_TAB.into(),
+        element: String::new(),
+        forward: true,
     }
 }
 
@@ -745,7 +756,7 @@ mod tests {
         assert!(matches!(d.rows[0].action, RowAction::Drop));
         assert_eq!(
             d.presses[0].action,
-            PressAction::Notify(handler("dev.k", GUEST_TAB, ""))
+            guest_tab_press("dev.k")
         );
         // Two chips and three buttons report as the panel's own controls.
         assert_eq!(d.clicks.len(), 5);

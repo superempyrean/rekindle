@@ -144,6 +144,18 @@ node ranks above any that doesn't. An id that ends in four digits or more
 (`dm_row_1531461354488201407`) is offered whole and as a `prefix`, which
 finds every row of that kind.
 
+Phoenix draws some elements twice, with the same ids and the same subtree,
+and no selector made from cells tells the copies apart. When the best
+selector matches more than the pressed node, the pick leads with an `nth`
+of it, which counts the matches in tree order from 0:
+
+```json
+{ "nth": { "of": { "cell": { "prop": "accessibilityId", "value": { "str": "guild-search" } } }, "n": 1 } }
+```
+
+It scores 10 points under the selector it counts, since a copy drawn ahead
+of the node changes the number.
+
 ## Limitations
 
 Built and tested on x86-64 Windows and Linux. The x86-64 Android build has run

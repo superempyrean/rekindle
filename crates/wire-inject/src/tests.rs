@@ -742,44 +742,43 @@ fn presses_on_the_guests_nodes_are_dropped_retargeted_or_passed() {
     }
 }
 
-#[test]
-fn a_notify_rule_passes_the_press_and_keeps_it_for_the_host() {
-    let mut w = mounts();
-    w.presses = vec![PressRule {
+fn plugin_rule(forward: bool) -> PressRule {
+    PressRule {
         select: Selector::Label("Other".into()),
-        action: PressAction::Notify(Handler::Plugin {
+        action: PressAction::Plugin {
             plugin: "p".into(),
             surface: "s".into(),
             element: "e".into(),
-        }),
+            forward,
+        },
+    }
+}
+
+#[test]
+fn a_plugin_rule_keeps_the_press_for_the_host() {
+    let kept = vec![PluginPress {
+        plugin: "p".into(),
+        surface: "s".into(),
+        element: "e".into(),
     }];
+    let mut w = mounts();
+    w.presses = vec![plugin_rule(true)];
     let (mut e, mut host) = engine(w);
     send(&mut e, &mut host, &with_buttons());
     assert_eq!(e.event(&Event::press(82).to_bytes()), Ok(Verdict::Pass));
     assert_eq!(e.event(&Event::press(80).to_bytes()), Ok(Verdict::Pass));
-    assert_eq!(
-        e.take_presses(),
-        vec![PluginPress {
-            plugin: "p".into(),
-            surface: "s".into(),
-            element: "e".into(),
-        }]
-    );
+    assert_eq!(e.take_presses(), kept, "forwarded and kept");
 
     let mut w = mounts();
-    w.presses = vec![PressRule {
-        select: Selector::Label("Other".into()),
-        action: PressAction::Notify(Handler::Count {
-            node: BUTTON_TEXT,
-            prop: TEXT,
-            one: String::new(),
-            many: String::new(),
-        }),
-    }];
-    assert!(
-        Engine::new(w).is_err(),
-        "a notify rule needs a plugin handler"
+    w.presses = vec![plugin_rule(false)];
+    let (mut e, mut host) = engine(w);
+    send(&mut e, &mut host, &with_buttons());
+    assert_eq!(
+        e.event(&Event::press(82).to_bytes()),
+        Ok(Verdict::Consume(None))
     );
+    assert_eq!(e.event(&Event::press(80).to_bytes()), Ok(Verdict::Pass));
+    assert_eq!(e.take_presses(), kept, "consumed and kept");
 }
 
 #[test]
@@ -2295,4 +2294,98 @@ fn within_matches_an_ancestor_at_any_depth() {
     let help = Selector::All(vec![Selector::Kind(ElementKind::TEXT), sheet]);
     assert_eq!(view.select(&help), vec![4, 8, 10]);
     assert!(!view.matches(1, &Selector::cell(a11y::ID, "settings-phone").within()));
+}
+
+/// A channel list drawn twice, as Phoenix draws a server's: two copies of
+/// `guild-search` with the same id and subtree. The second copy's nodes
+/// have the lower ids, so tree order and id order differ.
+fn twice_tree() -> Turn {
+    let mut t = Turn::new();
+    let mut node = |node: NodeId, kind, cells: Vec<(PropId, Value)>| {
+        t.push(NodeOp::Create {
+            node,
+            kind,
+            props: vec![],
+        });
+        if !cells.is_empty() {
+            t.push(NodeOp::Update { node, props: cells });
+        }
+    };
+    node(50, ElementKind::VIEW, vec![]);
+    node(60, ElementKind::VIEW, vec![]);
+    node(61, ElementKind::VIEW, vec![(a11y::ID, str("guild-search"))]);
+    node(62, ElementKind::TEXT, vec![(TEXT, str("Search"))]);
+    node(40, ElementKind::VIEW, vec![]);
+    node(41, ElementKind::VIEW, vec![(a11y::ID, str("guild-search"))]);
+    node(42, ElementKind::TEXT, vec![(TEXT, str("Search"))]);
+    for (n, children) in [
+        (50, vec![60, 40]),
+        (60, vec![61]),
+        (61, vec![62]),
+        (40, vec![41]),
+        (41, vec![42]),
+    ] {
+        t.push(NodeOp::Children { node: n, children });
+    }
+    t.push(NodeOp::Root { node: 50 });
+    t
+}
+
+#[test]
+fn nth_counts_matches_in_tree_order() {
+    let mut tree = Tree::new();
+    tree.apply(&twice_tree());
+    let view = select::View::new(&tree);
+    let search = Selector::cell(a11y::ID, "guild-search");
+    assert_eq!(view.select(&search), vec![41, 61]);
+    assert_eq!(view.select(&search.clone().nth(0)), vec![61], "drawn first");
+    assert_eq!(view.select(&search.clone().nth(1)), vec![41]);
+    assert!(view.select(&search.clone().nth(2)).is_empty());
+    let text = Selector::All(vec![
+        Selector::Kind(ElementKind::TEXT),
+        search.clone().nth(1).within(),
+    ]);
+    assert_eq!(view.select(&text), vec![42]);
+    let json = serde_json::to_value(search.nth(1)).unwrap();
+    assert_eq!(
+        json,
+        serde_json::json!({ "nth": { "of": { "cell": { "prop": "accessibilityId", "value": { "str": "guild-search" } } }, "n": 1 } })
+    );
+    assert_eq!(serde_json::from_value::<Selector>(json.clone()).unwrap(), Selector::cell(a11y::ID, "guild-search").nth(1));
+}
+
+#[test]
+fn a_pick_tells_copies_apart_by_their_place() {
+    let mut tree = Tree::new();
+    tree.apply(&twice_tree());
+    let view = select::View::new(&tree);
+    for (node, n) in [(61, 0), (41, 1)] {
+        let p = pick::pick(&tree, node).unwrap();
+        assert_eq!(p.best.basis, Basis::Nth);
+        assert_eq!(
+            p.best.selector,
+            Selector::cell(a11y::ID, "guild-search").nth(n)
+        );
+        assert!(p.best.unique());
+        assert_eq!(p.best.score, 90);
+        assert_eq!(view.select(&p.best.selector), vec![node]);
+        assert_eq!(p.name, "guild-search");
+        let id = &p.fallbacks[0];
+        assert_eq!((id.basis, id.matches), (Basis::Id, 2));
+    }
+}
+
+#[test]
+fn a_hidden_copy_is_one_rule() {
+    let w = Work {
+        rows: vec![RowRule {
+            select: Selector::cell(a11y::ID, "guild-search").nth(1),
+            action: RowAction::Drop,
+        }],
+        ..Work::default()
+    };
+    let (mut e, mut host) = engine(w);
+    send(&mut e, &mut host, &twice_tree());
+    assert!(host.node(61).is_some() && host.node(62).is_some());
+    assert!(host.node(41).is_none() && host.node(42).is_none());
 }

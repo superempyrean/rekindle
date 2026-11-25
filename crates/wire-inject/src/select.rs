@@ -1,5 +1,6 @@
 //! Selectors: which nodes of a tree a rule applies to.
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
 use rekindle_wire::a11y::ids as a11y;
@@ -56,6 +57,11 @@ pub enum Selector {
     /// a chain of `ChildOf`, it still matches when the guest wraps the node
     /// in one more `view`.
     Within(Box<Selector>),
+    /// The `n`th node `of` matches, counted from 0 in tree order: the root
+    /// first, then each node's children in their order, depth first. A
+    /// guest that draws one element twice gives both copies the same cells
+    /// and the same subtree, and only their place tells them apart.
+    Nth { of: Box<Selector>, n: usize },
 }
 
 impl Selector {
@@ -78,13 +84,31 @@ impl Selector {
     pub fn within(self) -> Self {
         Selector::Within(Box::new(self))
     }
+
+    /// The `n`th node this selector matches, in tree order.
+    pub fn nth(self, n: usize) -> Self {
+        Selector::Nth {
+            of: Box::new(self),
+            n,
+        }
+    }
 }
 
 /// A tree with each node's parent, for matching selectors.
 pub(crate) struct View<'t> {
     tree: &'t Tree,
     parents: HashMap<NodeId, NodeId>,
+    /// Every node in tree order, made the first time a [`Selector::Nth`]
+    /// needs it.
+    order: RefCell<Option<Vec<NodeId>>>,
+    /// The node each [`Selector::Nth`] matched, by the address of its `of`.
+    /// The selector is kept with it, so a selector made at an address
+    /// another one used isn't taken for it.
+    nth: RefCell<HashMap<*const Selector, NthFound>>,
 }
+
+/// What a [`Selector::Nth`] matched: its `of`, its `n` and the node.
+type NthFound = (Selector, usize, Option<NodeId>);
 
 impl<'t> View<'t> {
     pub(crate) fn new(tree: &'t Tree) -> Self {
@@ -94,7 +118,51 @@ impl<'t> View<'t> {
                 parents.entry(*c).or_insert(n.id);
             }
         }
-        View { tree, parents }
+        View {
+            tree,
+            parents,
+            order: RefCell::new(None),
+            nth: RefCell::new(HashMap::new()),
+        }
+    }
+
+    /// Every node, the root first, then each node's children in their
+    /// order, depth first. Nodes under no parent follow the root's subtree
+    /// in id order, each with its own subtree.
+    fn tree_order(&self) -> Vec<NodeId> {
+        let mut out = Vec::with_capacity(self.tree.len());
+        let mut seen = HashSet::new();
+        let tops = self.tree.root().into_iter().chain(
+            self.tree
+                .nodes()
+                .map(|n| n.id)
+                .filter(|id| !self.parents.contains_key(id)),
+        );
+        for top in tops {
+            let mut stack = vec![top];
+            while let Some(n) = stack.pop() {
+                if !seen.insert(n) {
+                    continue;
+                }
+                out.push(n);
+                stack.extend(self.children(n).iter().rev());
+            }
+        }
+        out
+    }
+
+    /// The `n`th node `of` matches, in tree order.
+    fn nth(&self, of: &Selector, n: usize) -> Option<NodeId> {
+        let key = std::ptr::from_ref(of);
+        if let Some((sel, at, found)) = self.nth.borrow().get(&key)
+            && sel == of
+            && *at == n
+        {
+            return *found;
+        }
+        let found = self.select_in_order(of).get(n).copied();
+        self.nth.borrow_mut().insert(key, (of.clone(), n, found));
+        found
     }
 
     pub(crate) fn parent(&self, node: NodeId) -> Option<NodeId> {
@@ -110,6 +178,21 @@ impl<'t> View<'t> {
         self.tree
             .nodes()
             .map(|n| n.id)
+            .filter(|id| self.matches(*id, sel))
+            .collect()
+    }
+
+    /// Every node `sel` matches, in tree order, as [`Selector::Nth`]
+    /// counts them.
+    pub(crate) fn select_in_order(&self, sel: &Selector) -> Vec<NodeId> {
+        if self.order.borrow().is_none() {
+            *self.order.borrow_mut() = Some(self.tree_order());
+        }
+        let order = self.order.borrow();
+        order
+            .iter()
+            .flatten()
+            .copied()
             .filter(|id| self.matches(*id, sel))
             .collect()
     }
@@ -157,6 +240,7 @@ impl<'t> View<'t> {
                 }
                 false
             }
+            Selector::Nth { of, n } => self.nth(of, *n) == Some(node),
         }
     }
 
