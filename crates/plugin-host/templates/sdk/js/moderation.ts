@@ -5,7 +5,7 @@
 //
 //   moderation.timeout(guild, user, Date.now() + 600_000, 'spam');
 
-import * as raw from 'rekindle:plugin/moderation@0.10.0';
+import * as raw from 'rekindle:plugin/moderation@0.11.0';
 import { call, optU64, u64, type Id } from 'rekindle';
 
 export function kick(guild: Id, user: Id, reason?: string): void {

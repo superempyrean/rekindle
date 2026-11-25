@@ -10,8 +10,8 @@
 //   theme.tint(hex('#eb459e'), 0.12);
 //   theme.hideSurface('chat.gift-button');
 
-import * as raw from 'rekindle:plugin/theming@0.10.0';
-import type { Color } from 'rekindle:plugin/types@0.10.0';
+import * as raw from 'rekindle:plugin/theming@0.11.0';
+import type { Color } from 'rekindle:plugin/types@0.11.0';
 import { call } from 'rekindle';
 
 export type TokenInfo = raw.TokenInfo;

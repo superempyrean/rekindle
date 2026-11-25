@@ -4,7 +4,7 @@
 //   overlay.registerImage('cat', pngBytes);
 //   overlay.draw({ instance: 'cat-1', image: 'cat', src: [0, 0, 32, 32], dst: [x, y, 32, 32] });
 
-import * as raw from 'rekindle:plugin/overlay@0.10.0';
+import * as raw from 'rekindle:plugin/overlay@0.11.0';
 import { call } from 'rekindle';
 
 export type Sprite = raw.Sprite;

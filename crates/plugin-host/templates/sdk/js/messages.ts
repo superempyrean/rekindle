@@ -5,12 +5,12 @@
 // The one exception is `resolveLink`, which makes the fetch the client makes
 // when the user clicks a message link that's on screen.
 
-import * as raw from 'rekindle:plugin/messages@0.10.0';
-import type { MessageRef } from 'rekindle:plugin/types@0.10.0';
-import type { Message } from 'rekindle:plugin/records@0.10.0';
+import * as raw from 'rekindle:plugin/messages@0.11.0';
+import type { MessageRef } from 'rekindle:plugin/types@0.11.0';
+import type { Message } from 'rekindle:plugin/records@0.11.0';
 import { call, optU64, u64, type Id } from 'rekindle';
 
-export type { Attachment, Embed, EmbedMedia, Forwarded, Message, Poll, Reaction } from 'rekindle:plugin/records@0.10.0';
+export type { Attachment, Embed, EmbedMedia, Forwarded, Message, Poll, Reaction } from 'rekindle:plugin/records@0.11.0';
 export type LinkError = raw.LinkError;
 
 export function get(channel: Id, id: Id): Message | undefined {

@@ -50,14 +50,14 @@ fn typecheck(dir: &Path) {
     );
 }
 
-/// Build `dir` and check what it imports: only `rekindle:plugin@0.10.0`
+/// Build `dir` and check what it imports: only `rekindle:plugin@0.11.0`
 /// interfaces (no WASI), and of those carrying a capability, exactly `caps`.
 /// Returns its hook exports. TypeScript projects are type-checked too.
 fn check_imports(dir: &Path, caps: &[Capability]) -> Vec<String> {
     let out = rekindle_plugin_host::testing::build(dir).unwrap();
     for i in &out.inspection.imports {
         assert!(
-            i.starts_with("rekindle:plugin/") && i.ends_with("@0.10.0"),
+            i.starts_with("rekindle:plugin/") && i.ends_with("@0.11.0"),
             "foreign import {i}"
         );
     }

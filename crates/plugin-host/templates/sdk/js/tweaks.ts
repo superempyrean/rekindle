@@ -2,7 +2,7 @@
 // (silent typing, always animate, no mosaic, ...; needs `tweaks`). A plugin
 // can bundle a preset; a value the user set by hand wins ('user-locked').
 
-import * as raw from 'rekindle:plugin/tweaks@0.10.0';
+import * as raw from 'rekindle:plugin/tweaks@0.11.0';
 import { call } from 'rekindle';
 
 export type TweakInfo = raw.TweakInfo;

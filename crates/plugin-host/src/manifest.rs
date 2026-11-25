@@ -364,7 +364,7 @@ fn flatten_strings(
 
 /// The WIT package version this host implements.
 pub fn rekindle_wit_version() -> &'static str {
-    "0.10.0"
+    "0.11.0"
 }
 
 /// Append the manifest to a component as a top-level custom section.

@@ -8,7 +8,7 @@
 // throws a RekindleError ('quota-exceeded', 'key-too-long',
 // 'value-too-large') when one is hit. The render isolate may read, not write.
 
-import * as raw from 'rekindle:plugin/storage@0.10.0';
+import * as raw from 'rekindle:plugin/storage@0.11.0';
 import { call } from 'rekindle';
 
 export function get(key: string): string | undefined {

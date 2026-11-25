@@ -20,7 +20,7 @@ import type {
   Rewrite,
   Upload,
   UploadResult,
-} from 'rekindle:plugin/compose-types@0.10.0';
+} from 'rekindle:plugin/compose-types@0.11.0';
 
 export type { AttachmentInfo, ComposeKind, ComposeResult, Draft, ReplyInfo, Rewrite, Upload, UploadResult };
 

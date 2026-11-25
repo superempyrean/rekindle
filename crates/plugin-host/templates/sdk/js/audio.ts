@@ -3,7 +3,7 @@
 // (`'message1'`, `'deafen'`, ...), and read text aloud with the client's
 // local text-to-speech. Nothing is ever recorded.
 
-import * as raw from 'rekindle:plugin/audio@0.10.0';
+import * as raw from 'rekindle:plugin/audio@0.11.0';
 import { call } from 'rekindle';
 
 export function register(id: string, data: Uint8Array): void {

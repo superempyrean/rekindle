@@ -9,9 +9,9 @@
 //   const ch = sel.channel !== undefined ? state.channel(sel.channel) : undefined;
 //   if (ch) log.info(`you're in #${ch.name}`);
 
-import * as raw from 'rekindle:plugin/client-state@0.10.0';
-import * as inspect from 'rekindle:plugin/inspect@0.10.0';
-import type { Member, Target } from 'rekindle:plugin/types@0.10.0';
+import * as raw from 'rekindle:plugin/client-state@0.11.0';
+import * as inspect from 'rekindle:plugin/inspect@0.11.0';
+import type { Member, Target } from 'rekindle:plugin/types@0.11.0';
 import type {
   Channel,
   CustomStatus,
@@ -26,7 +26,7 @@ import type {
   Selection,
   Sticker,
   User,
-} from 'rekindle:plugin/records@0.10.0';
+} from 'rekindle:plugin/records@0.11.0';
 import { u64, type Id } from 'rekindle';
 
 export type {
@@ -45,7 +45,7 @@ export type {
   Sticker,
   ThreadMeta,
   User,
-} from 'rekindle:plugin/records@0.10.0';
+} from 'rekindle:plugin/records@0.11.0';
 export type { Member };
 
 /** Where the user is: guild, channel, voice channel, side thread, focus, idle. */

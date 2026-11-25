@@ -16,7 +16,7 @@ use anyhow::{Context, Result, bail};
 use crate::capability::Capability;
 use crate::manifest::{self, Manifest};
 
-/// The WIT package every plugin is built against (`rekindle:plugin@0.10.0`,
+/// The WIT package every plugin is built against (`rekindle:plugin@0.11.0`,
 /// one file per interface family).
 pub const WIT_FILES: [(&str, &str); 10] = [
     (
@@ -524,7 +524,7 @@ mod tests {
     #[test]
     fn explains_an_unrequested_interface() {
         let m = manifest(&[Capability::Storage]);
-        let js = "Error resolving module 'rekindle:plugin/theming@0.10.0' from '/entry.js'";
+        let js = "Error resolving module 'rekindle:plugin/theming@0.11.0' from '/entry.js'";
         assert!(
             explain_failure(js, &m)
                 .unwrap()
@@ -535,14 +535,14 @@ mod tests {
     #[test]
     fn explains_a_top_level_call() {
         let m = manifest(&[Capability::Storage]);
-        let js = "Error: ... 0x50425 - <unknown>!<wasm function 389>: unknown import: `rekindle:plugin/host@0.10.0#log` has not been defined] {";
+        let js = "Error: ... 0x50425 - <unknown>!<wasm function 389>: unknown import: `rekindle:plugin/host@0.11.0#log` has not been defined] {";
         assert!(
             explain_failure(js, &m)
                 .unwrap()
                 .contains("calls `host.log` at the top level")
         );
         // A requested interface isn't the problem.
-        assert!(explain_failure("rekindle:plugin/storage@0.10.0 something else", &m).is_none());
+        assert!(explain_failure("rekindle:plugin/storage@0.11.0 something else", &m).is_none());
         assert!(explain_failure("SyntaxError: unexpected token", &m).is_none());
     }
 

@@ -1,8 +1,8 @@
 // Exercises the prelude: each command logs what a sandboxed global did.
 import { randomUUID } from 'node:crypto';
 
-import { get, set } from 'rekindle:plugin/storage@0.10.0';
-import { registerCommand } from 'rekindle:plugin/ui@0.10.0';
+import { get, set } from 'rekindle:plugin/storage@0.11.0';
+import { registerCommand } from 'rekindle:plugin/ui@0.11.0';
 
 console.log('hello from the top level');
 

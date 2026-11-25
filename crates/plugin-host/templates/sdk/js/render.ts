@@ -23,9 +23,9 @@
 // Highlight ranges are UTF-8 byte offsets into the content, as the contract
 // counts them; `highlightAll` and `byteOffset` do the conversion.
 
-import * as raw from 'rekindle:plugin/render-control@0.10.0';
-import type { Badge, Highlight, RenderInput, Transform } from 'rekindle:plugin/render-types@0.10.0';
-import type { Color, Icon, Span, SpanColor } from 'rekindle:plugin/types@0.10.0';
+import * as raw from 'rekindle:plugin/render-control@0.11.0';
+import type { Badge, Highlight, RenderInput, Transform } from 'rekindle:plugin/render-types@0.11.0';
+import type { Color, Icon, Span, SpanColor } from 'rekindle:plugin/types@0.11.0';
 import { optU64, rgba, token, type Id } from 'rekindle';
 import { toElements, type Element, type Elements } from 'rekindle/elements';
 

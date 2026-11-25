@@ -14,9 +14,9 @@
 // A slot can be missing on a client build; adding to it then throws a
 // RekindleError with code 'unavailable'. Check `isAvailable` to degrade.
 
-import * as raw from 'rekindle:plugin/ui@0.10.0';
-import type { ChannelRef, Icon, MessageRef, Modifiers, Target, UserRef } from 'rekindle:plugin/types@0.10.0';
-import type { SlotClick, SlotEvent } from 'rekindle:plugin/ui-handler@0.10.0';
+import * as raw from 'rekindle:plugin/ui@0.11.0';
+import type { ChannelRef, Icon, MessageRef, Modifiers, Target, UserRef } from 'rekindle:plugin/types@0.11.0';
+import type { SlotClick, SlotEvent } from 'rekindle:plugin/ui-handler@0.11.0';
 import { __registry, call, optU64, u64, type Id } from 'rekindle';
 import { toElements, type Element, type Elements } from 'rekindle/elements';
 

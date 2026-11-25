@@ -32,8 +32,8 @@
 //     },
 //   });
 
-import * as host from 'rekindle:plugin/host@0.10.0';
-import type { ClientInfo } from 'rekindle:plugin/host@0.10.0';
+import * as host from 'rekindle:plugin/host@0.11.0';
+import type { ClientInfo } from 'rekindle:plugin/host@0.11.0';
 import type {
   Capability,
   ChannelRef,
@@ -52,21 +52,21 @@ import type {
   UiEvent,
   UiValue,
   UserRef,
-} from 'rekindle:plugin/types@0.10.0';
-import type { Event, EventKind } from 'rekindle:plugin/events@0.10.0';
-import type { Message, User } from 'rekindle:plugin/records@0.10.0';
-import type { SlotClick, SlotEvent } from 'rekindle:plugin/ui-handler@0.10.0';
-import type { CommandReply, Invocation } from 'rekindle:plugin/command-types@0.10.0';
-import type { ComposeResult, Draft, Upload, UploadResult } from 'rekindle:plugin/compose-types@0.10.0';
-import type { RenderInput, Transform } from 'rekindle:plugin/render-types@0.10.0';
-import type { ClientNotification, NotificationDecision } from 'rekindle:plugin/notification-types@0.10.0';
-import type { Verdict } from 'rekindle:plugin/event-filter@0.10.0';
+} from 'rekindle:plugin/types@0.11.0';
+import type { Event, EventKind } from 'rekindle:plugin/events@0.11.0';
+import type { Message, User } from 'rekindle:plugin/records@0.11.0';
+import type { SlotClick, SlotEvent } from 'rekindle:plugin/ui-handler@0.11.0';
+import type { CommandReply, Invocation } from 'rekindle:plugin/command-types@0.11.0';
+import type { ComposeResult, Draft, Upload, UploadResult } from 'rekindle:plugin/compose-types@0.11.0';
+import type { RenderInput, Transform } from 'rekindle:plugin/render-types@0.11.0';
+import type { ClientNotification, NotificationDecision } from 'rekindle:plugin/notification-types@0.11.0';
+import type { Verdict } from 'rekindle:plugin/event-filter@0.11.0';
 import type {
   HttpRequest,
   HttpResponse,
   RequestVerdict,
   ResponseVerdict,
-} from 'rekindle:plugin/http-filter@0.10.0';
+} from 'rekindle:plugin/http-filter@0.11.0';
 
 export type {
   Capability,
