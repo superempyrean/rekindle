@@ -26,9 +26,10 @@ use crate::api::{
 use crate::model::{
     ALL_SLOTS, Action, ActionError, ClickBinding, Color, Command, DECORATION_KINDS, Decoration,
     DesktopNotification, DmSection, Element, FileError, GhostMessage, Keybind, Notice,
-    OverlayImage, OverlaySprite, Panel, PickedFile, SLOT_PROFILE_SECTION, SLOT_VOICE_PANEL_STATUS,
-    STRINGS, SURFACES, SlotError, SlotItem, SurfaceStyle, ThemeValue, Tint, Toast, ToastKind,
-    Tweak, TweakError, TweakKind, UiError, UiOp, slot_kind,
+    OverlayImage, OverlaySprite, Panel, PickedFile, SLOT_EXPRESSION_PICKER_TAB,
+    SLOT_PROFILE_SECTION, SLOT_VOICE_PANEL_STATUS, STRINGS, SURFACES, SlotError, SlotItem,
+    SurfaceStyle, ThemeValue, Tint, Toast, ToastKind, Tweak, TweakError, TweakKind, UiError, UiOp,
+    slot_kind,
 };
 use crate::tokens::{self, ThemeError, TintRole, TokenInfo};
 
@@ -153,7 +154,14 @@ impl MockBackend {
             fonts: Vec::new(),
             panels: Vec::new(),
             commands: Vec::new(),
-            available: ALL_SLOTS.iter().map(|(s, _)| s.to_string()).collect(),
+            // The mock client has no emoji picker: a plugin that adds a tab
+            // there falls back as on a client without one. A test turns it
+            // on with `set_slot_available`.
+            available: ALL_SLOTS
+                .iter()
+                .map(|(s, _)| s.to_string())
+                .filter(|s| s != SLOT_EXPRESSION_PICKER_TAB)
+                .collect(),
             slot_items: Vec::new(),
             profile_sections: BTreeMap::new(),
             toasts: Vec::new(),

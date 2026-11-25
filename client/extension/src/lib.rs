@@ -38,6 +38,7 @@ use rekindle_ui_hook::{
     Button, Click, Command, ComposeLayout, FrameworkLayout, Hook as UiHook, MenuTargetRef, UiInput,
 };
 
+pub use backend::PickerTab;
 use backend::{DetourBackend, Shared};
 use overlay::OverlayState;
 pub use rekindle::Rekindle;
@@ -74,6 +75,10 @@ pub struct RecoveredProfile {
     /// [`Driver::theme_values`]. Without it, setting one fails with
     /// `wrong-kind`.
     pub wire_values: bool,
+    /// The host draws the plugins' tabs in the client's emoji picker on its
+    /// wire, and reads them back with [`Driver::picker_tabs`]. Without it,
+    /// adding to `expression-picker.tab` fails with `unavailable`.
+    pub wire_picker_tabs: bool,
 }
 
 /// How long a send waits for `compose` plugins before going out unchanged.
@@ -155,6 +160,7 @@ impl Driver {
             })),
             commands: Arc::new(Mutex::new(Vec::new())),
             buttons: Arc::new(Mutex::new(Vec::new())),
+            picker_tabs: Arc::new(Mutex::new(profile.wire_picker_tabs.then(Vec::new))),
             overlay: Arc::new(Mutex::new(OverlayState::default())),
             surfaces: Arc::new(Mutex::new(backend::SurfaceStyles {
                 available: profile.surfaces.clone(),
@@ -240,6 +246,10 @@ impl Driver {
                 Click::Button { plugin, item } => {
                     self.rekindle
                         .slot_click(&plugin, SLOT_CHAT_BAR_BUTTON, &item, Target::None);
+                }
+                Click::Slot { plugin, slot, item } => {
+                    self.rekindle
+                        .slot_click(&plugin, &slot, &item, Target::None);
                 }
                 Click::Modal { plugin } => self.rekindle.close_modal(&plugin),
                 Click::Profile { user } => self.rekindle.open_profile(&UserRef {
@@ -408,6 +418,17 @@ impl Driver {
         } else if self.ui_registry.is_some() {
             rekindle_ui_hook::registry::set_buttons(Vec::new());
         }
+    }
+
+    /// The plugins' tabs in the client's emoji picker, in the order the
+    /// plugins added them.
+    pub fn picker_tabs(&self) -> Vec<PickerTab> {
+        self.shared
+            .picker_tabs
+            .lock()
+            .unwrap()
+            .clone()
+            .unwrap_or_default()
     }
 
     /// The plugins' chat-bar buttons, as (plugin, button), in the order the

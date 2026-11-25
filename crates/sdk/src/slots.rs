@@ -87,6 +87,9 @@ pub const DM_LIST: &str = "dm-list.button";
 pub const VOICE_PANEL_STATUS: &str = "voice-panel.status";
 /// A section in user profiles, added with [`profile_section`].
 pub const PROFILE_SECTION: &str = "profile.section";
+/// A tab in the client's emoji picker, beside Emoji, GIFs and Stickers,
+/// added with [`picker_tab`].
+pub const EXPRESSION_PICKER_TAB: &str = "expression-picker.tab";
 
 /// No modifier keys.
 pub const NO_MODS: Modifiers = Modifiers {
@@ -197,6 +200,21 @@ pub fn set_active(slot: &str, id: &str, active: bool) -> Result<(), UiError> {
 pub fn profile_section(id: &str, title: &str) -> Result<(), UiError> {
     raw::add_item(
         PROFILE_SECTION,
+        &raw::SlotItem::ListItem(raw::ListItem {
+            id: id.into(),
+            title: title.into(),
+        }),
+    )
+}
+
+/// Adds a tab to the client's emoji picker. The tab's body is the plugin's
+/// panel with the same id: keep it current with `ui::show_panel`. A press
+/// on the tab arrives as `SlotEvent::Clicked` on [`EXPRESSION_PICKER_TAB`],
+/// and presses in the body arrive through `on_ui` with that panel's id as
+/// the surface.
+pub fn picker_tab(id: &str, title: &str) -> Result<(), UiError> {
+    raw::add_item(
+        EXPRESSION_PICKER_TAB,
         &raw::SlotItem::ListItem(raw::ListItem {
             id: id.into(),
             title: title.into(),

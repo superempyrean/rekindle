@@ -97,6 +97,8 @@ interface ui {
     //   lists (item: list-item)
     //     "voice-panel.status"        [channel]   one line of text in the voice panel
     //     "profile.section"           [user]      a section in profiles (content via set-profile-section)
+    //     "expression-picker.tab"     [none]      a tab beside Emoji, GIFs and Stickers; its body is
+    //                                             the plugin's panel with the item's id (show-panel)
 
     record menu-item {
         id: string,

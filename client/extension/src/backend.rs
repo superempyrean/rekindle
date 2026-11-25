@@ -15,8 +15,8 @@ use std::sync::{Arc, Mutex};
 use rekindle_plugin_host::backend::ClientBackend;
 use rekindle_plugin_host::model::{
     Action, ActionError, Element, OverlaySprite, Panel, SLOT_CHANNEL_MENU, SLOT_CHAT_BAR_BUTTON,
-    SLOT_MESSAGE_MENU, SLOT_PROFILE_SECTION, SLOT_USER_MENU, SlotError, SlotItem, SurfaceStyle,
-    ThemeValue, Tint, ToastKind, UiError, UiOp,
+    SLOT_EXPRESSION_PICKER_TAB, SLOT_MESSAGE_MENU, SLOT_PROFILE_SECTION, SLOT_USER_MENU, SlotError,
+    SlotItem, SurfaceStyle, ThemeValue, Tint, ToastKind, UiError, UiOp,
 };
 use rekindle_plugin_host::tokens::{self, ThemeError, TokenInfo};
 use rekindle_ui_hook::registry::Surfaces;
@@ -42,11 +42,23 @@ pub(crate) struct Shared {
     pub(crate) commands: Arc<Mutex<Vec<CommandReg>>>,
     /// Chat-bar buttons, as (plugin, button).
     pub(crate) buttons: Arc<Mutex<Vec<(String, Button)>>>,
+    /// The plugins' tabs in the client's emoji picker, in the order they
+    /// were added. `None` when the host draws none.
+    pub(crate) picker_tabs: Arc<Mutex<Option<Vec<PickerTab>>>>,
     pub(crate) overlay: Arc<Mutex<OverlayState>>,
     pub(crate) surfaces: Arc<Mutex<SurfaceStyles>>,
     /// Slash commands, as (plugin, command). `None` when the host runs
     /// none.
     pub(crate) slash: Arc<Mutex<Option<SlashCommands>>>,
+}
+
+/// A plugin's tab in the client's emoji picker. Its body is the plugin's
+/// panel with the tab's id.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PickerTab {
+    pub plugin: String,
+    pub id: String,
+    pub title: String,
 }
 
 /// The plugins' slash commands, as (plugin, command).
@@ -383,6 +395,9 @@ impl ClientBackend for DetourBackend {
         if self.menus.is_some() {
             slots.extend([SLOT_MESSAGE_MENU, SLOT_USER_MENU, SLOT_CHANNEL_MENU].map(String::from));
         }
+        if self.shared.picker_tabs.lock().unwrap().is_some() {
+            slots.push(SLOT_EXPRESSION_PICKER_TAB.to_string());
+        }
         slots
     }
 
@@ -410,16 +425,43 @@ impl ClientBackend for DetourBackend {
                     id, label, danger, ..
                 },
             ) => self.add_menu_row(plugin, slot, &id, &label, danger),
+            (SLOT_EXPRESSION_PICKER_TAB, SlotItem::ListItem { id, title }) => {
+                let mut tabs = self.shared.picker_tabs.lock().unwrap();
+                let tabs = tabs.as_mut().ok_or(SlotError::Unavailable)?;
+                let tab = PickerTab {
+                    plugin: plugin.to_string(),
+                    id,
+                    title,
+                };
+                match tabs
+                    .iter_mut()
+                    .find(|t| t.plugin == tab.plugin && t.id == tab.id)
+                {
+                    Some(t) => *t = tab,
+                    None => tabs.push(tab),
+                }
+                Ok(())
+            }
             (
-                SLOT_CHAT_BAR_BUTTON | SLOT_PROFILE_SECTION | SLOT_MESSAGE_MENU | SLOT_USER_MENU
-                | SLOT_CHANNEL_MENU,
+                SLOT_CHAT_BAR_BUTTON
+                | SLOT_PROFILE_SECTION
+                | SLOT_MESSAGE_MENU
+                | SLOT_USER_MENU
+                | SLOT_CHANNEL_MENU
+                | SLOT_EXPRESSION_PICKER_TAB,
                 _,
             ) => Err(SlotError::Invalid),
             _ => Err(SlotError::Unavailable),
         }
     }
 
-    fn remove_slot_item(&mut self, plugin: &str, _slot: &str, id: &str) {
+    fn remove_slot_item(&mut self, plugin: &str, slot: &str, id: &str) {
+        if slot == SLOT_EXPRESSION_PICKER_TAB {
+            if let Some(tabs) = self.shared.picker_tabs.lock().unwrap().as_mut() {
+                tabs.retain(|t| !(t.plugin == plugin && t.id == id));
+            }
+            return;
+        }
         let key = key(plugin, id);
         self.shared
             .buttons
@@ -565,6 +607,9 @@ impl ClientBackend for DetourBackend {
             .lock()
             .unwrap()
             .retain(|(p, _)| p != plugin);
+        if let Some(tabs) = self.shared.picker_tabs.lock().unwrap().as_mut() {
+            tabs.retain(|t| t.plugin != plugin);
+        }
         self.profile_titles.retain(|(p, _), _| p != plugin);
         self.profiles.retain(|i| i.plugin != plugin);
         rekindle_ui_hook::set_profiles(self.profiles.clone());

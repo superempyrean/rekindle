@@ -849,9 +849,11 @@ mod tests {
     fn slot_actions_are_validated() {
         let mut s = session();
         let st = s.state(1);
+        // Every slot but the emoji-picker tab, which the mock client has no
+        // picker for.
         assert_eq!(
             st["slots"]["available"].as_array().unwrap().len(),
-            ALL_SLOTS.len()
+            ALL_SLOTS.len() - 1
         );
         assert!(st["slots"]["profile"].is_null());
         assert_eq!(

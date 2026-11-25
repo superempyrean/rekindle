@@ -85,6 +85,13 @@ pub enum Click {
     Command { plugin: String, id: String },
     /// A chat-bar button was clicked.
     Button { plugin: String, item: String },
+    /// An item of another slot whose items have no target was clicked: a
+    /// tab in the emoji picker.
+    Slot {
+        plugin: String,
+        slot: String,
+        item: String,
+    },
     /// A modal was dismissed.
     Modal { plugin: String },
     /// A profile popout opened.

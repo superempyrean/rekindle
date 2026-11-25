@@ -25,6 +25,7 @@ pub const SLOT_DM_LIST_BUTTON: &str = "dm-list.button";
 pub const SLOT_VOICE_PANEL_STATUS: &str = "voice-panel.status";
 pub const SLOT_PROFILE_SECTION: &str = "profile.section";
 pub const SLOT_MEDIA_VIEWER_MENU: &str = "media-viewer.menu";
+pub const SLOT_EXPRESSION_PICKER_TAB: &str = "expression-picker.tab";
 
 /// What kind of item each slot takes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -36,7 +37,7 @@ pub enum SlotKind {
 }
 
 /// Every slot, with its item kind.
-pub const ALL_SLOTS: [(&str, SlotKind); 21] = [
+pub const ALL_SLOTS: [(&str, SlotKind); 22] = [
     (SLOT_MESSAGE_MENU, SlotKind::Menu),
     (SLOT_MESSAGE_HOVER_BAR, SlotKind::Button),
     (SLOT_USER_MENU, SlotKind::Menu),
@@ -58,6 +59,7 @@ pub const ALL_SLOTS: [(&str, SlotKind); 21] = [
     (SLOT_VOICE_PANEL_STATUS, SlotKind::List),
     (SLOT_PROFILE_SECTION, SlotKind::List),
     (SLOT_MEDIA_VIEWER_MENU, SlotKind::Menu),
+    (SLOT_EXPRESSION_PICKER_TAB, SlotKind::List),
 ];
 
 /// The item kind a slot takes, if it's a known slot.

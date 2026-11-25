@@ -65,6 +65,8 @@ export const DM_LIST = 'dm-list.button';
 // Lists (item: list item).
 export const VOICE_PANEL_STATUS = 'voice-panel.status';
 export const PROFILE_SECTION = 'profile.section';
+/** [none] A tab in the emoji picker, beside Emoji, GIFs and Stickers. */
+export const EXPRESSION_PICKER_TAB = 'expression-picker.tab';
 
 /** Slot names that work on this client build. */
 export function available(): string[] {
@@ -170,6 +172,16 @@ export function setActive(slot: string, id: string, active: boolean): void {
 export function profileSection(id: string, title: string, onOpen?: (user: UserRef) => void): void {
   call('slots.profileSection', () => raw.addItem(PROFILE_SECTION, { tag: 'list-item', val: { id, title } }));
   if (onOpen) __registry.profile.set(id, (user) => onOpen(user));
+}
+
+/**
+ * A tab in the client's emoji picker. Its body is your panel with the same
+ * id: keep it current with `ui.showPanel`. `onClick` runs when the user
+ * picks the tab, before `onSlot`.
+ */
+export function pickerTab(id: string, title: string, onClick?: (target: Target, click: SlotClick) => void): void {
+  call('slots.pickerTab', () => raw.addItem(EXPRESSION_PICKER_TAB, { tag: 'list-item', val: { id, title } }));
+  if (onClick) __registry.slot.set(slotKey(EXPRESSION_PICKER_TAB, id), onClick);
 }
 
 /** Your profile section's content for one user. */

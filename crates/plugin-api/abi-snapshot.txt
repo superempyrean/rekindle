@@ -258,6 +258,7 @@ slot dm-list.button Button
 slot voice-panel.status List
 slot profile.section List
 slot media-viewer.menu Menu
+slot expression-picker.tab List
 decoration user.name-badge User
 decoration user.profile-badge User
 decoration user.avatar-overlay User

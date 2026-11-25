@@ -25,7 +25,8 @@ pub fn slot_target_kind(slot: &str) -> Option<&'static str> {
         model::SLOT_SETTINGS_COG_MENU
         | model::SLOT_USER_AREA_BUTTON
         | model::SLOT_GUILD_LIST_BUTTON
-        | model::SLOT_DM_LIST_BUTTON => "none",
+        | model::SLOT_DM_LIST_BUTTON
+        | model::SLOT_EXPRESSION_PICKER_TAB => "none",
         _ => return None,
     })
 }
