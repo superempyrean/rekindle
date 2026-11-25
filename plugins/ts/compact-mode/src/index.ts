@@ -2,7 +2,7 @@
 // (Rust), held to the same tests. One palette command toggles the client's
 // compact density, remembered across restarts.
 
-import { definePlugin } from 'rekindle';
+import { definePlugin, log, RekindleError } from 'rekindle';
 import * as storage from 'rekindle/storage';
 import * as theme from 'rekindle/theme';
 import { registerCommand, toast } from 'rekindle/ui';
@@ -14,11 +14,15 @@ function apply(compact: boolean): void {
 export default definePlugin({
   activate() {
     apply(storage.getOr('compact', false));
-    registerCommand('toggle', 'Toggle compact mode', () => {
-      const compact = !storage.getOr('compact', false);
-      storage.set('compact', compact);
-      apply(compact);
-      toast(compact ? 'Compact mode on' : 'Compact mode off');
-    });
+    try {
+      registerCommand('toggle', 'Toggle compact mode', () => {
+        const compact = !storage.getOr('compact', false);
+        storage.set('compact', compact);
+        apply(compact);
+        toast(compact ? 'Compact mode on' : 'Compact mode off');
+      });
+    } catch (e) {
+      log.warn(`no command palette on this client build: ${e instanceof RekindleError ? e.code : e}`);
+    }
   },
 });

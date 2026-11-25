@@ -40,10 +40,12 @@ function add(what: string, f: () => void): void {
 export default definePlugin({
   activate() {
     // Drop pins of DMs that are gone.
-    const open = new Set(state.privateChannels().map((c) => c.id.toString()));
-    const ids = pinned().filter((i) => open.has(i));
-    storage.setJson('pinned', ids);
-    show(ids);
+    add('DM list', () => {
+      const open = new Set(state.privateChannels().map((c) => c.id.toString()));
+      const ids = pinned().filter((i) => open.has(i));
+      storage.setJson('pinned', ids);
+      show(ids);
+    });
     const item = (when: slots.MenuPredicate) => new slots.MenuItem(ITEM, 'Pin DM').icon('pin').when(when);
     add('channel menu', () => slots.channelMenuItem(item('in-dm'), (c) => toggle(c.id)));
     add('user menu', () =>

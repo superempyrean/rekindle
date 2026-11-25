@@ -1,4 +1,6 @@
+use rekindle_plugin_host::MockBackend;
 use rekindle_plugin_host::backend::fixtures::{ALICE, DM_ALICE};
+use rekindle_plugin_host::model::{SLOT_CHANNEL_MENU, SLOT_USER_MENU};
 use rekindle_plugin_host::testing::Harness;
 
 use crate::toolchain::needs;
@@ -31,4 +33,15 @@ fn the_user_menu_pins_their_dm_and_pins_survive_a_restart() {
     assert_eq!(pinned(&h), [DM_ALICE]);
     h.restart().unwrap();
     assert_eq!(pinned(&h), [DM_ALICE]);
+}
+
+#[test]
+fn starts_without_dm_sections_or_menus() {
+    let mut b = MockBackend::new();
+    b.set_dm_sections_available(false);
+    b.set_slot_available(SLOT_CHANNEL_MENU, false);
+    b.set_slot_available(SLOT_USER_MENU, false);
+    let h = Harness::builder(needs!(PLUGIN)).backend(b).start().unwrap();
+    h.assert_active();
+    assert!(pinned(&h).is_empty());
 }

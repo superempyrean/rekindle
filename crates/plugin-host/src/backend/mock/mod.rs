@@ -96,6 +96,8 @@ pub struct MockBackend {
     /// (plugin, channel, id) -> ghost row.
     ghosts: BTreeMap<(String, u64, u64), GhostMessage>,
     dm_sections: BTreeMap<String, Vec<DmSection>>,
+    /// Whether the DM list takes sections (`set_dm_sections_available`).
+    dm_sections_available: bool,
     notices: BTreeMap<String, Notice>,
     keybinds: Vec<Keybind>,
     slash_commands: Vec<(String, api::SlashCommand)>,
@@ -181,6 +183,7 @@ impl MockBackend {
             accessories: BTreeMap::new(),
             ghosts: BTreeMap::new(),
             dm_sections: BTreeMap::new(),
+            dm_sections_available: true,
             notices: BTreeMap::new(),
             views: Vec::new(),
             keybinds: Vec::new(),
@@ -243,6 +246,16 @@ impl MockBackend {
     /// What each plugin did to the client's elements.
     pub fn named_elements(&self) -> &crate::model::NamedElements {
         &self.elements
+    }
+
+    /// Makes `set-dm-sections` fail with `unavailable`, as on a client
+    /// whose DM list rekindle can't add sections to.
+    pub fn set_dm_sections_available(&mut self, available: bool) {
+        self.dm_sections_available = available;
+        if !available {
+            self.dm_sections.clear();
+        }
+        self.bump();
     }
 
     pub fn set_slot_available(&mut self, slot: &str, available: bool) {
@@ -1167,6 +1180,9 @@ impl ClientBackend for MockBackend {
                 self.settings_extra.insert(p, elements);
             }
             UiOp::SetDmSections { sections } => {
+                if !self.dm_sections_available {
+                    return Err(UiError::Unavailable);
+                }
                 self.dm_sections.insert(p, sections);
             }
             UiOp::ShowNotice { notice } => {
