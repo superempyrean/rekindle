@@ -742,6 +742,64 @@ fn presses_on_the_guests_nodes_are_dropped_retargeted_or_passed() {
     }
 }
 
+#[test]
+fn a_notify_rule_passes_the_press_and_keeps_it_for_the_host() {
+    let mut w = mounts();
+    w.presses = vec![PressRule {
+        select: Selector::Label("Other".into()),
+        action: PressAction::Notify(Handler::Plugin {
+            plugin: "p".into(),
+            surface: "s".into(),
+            element: "e".into(),
+        }),
+    }];
+    let (mut e, mut host) = engine(w);
+    send(&mut e, &mut host, &with_buttons());
+    assert_eq!(e.event(&Event::press(82).to_bytes()), Ok(Verdict::Pass));
+    assert_eq!(e.event(&Event::press(80).to_bytes()), Ok(Verdict::Pass));
+    assert_eq!(
+        e.take_presses(),
+        vec![PluginPress {
+            plugin: "p".into(),
+            surface: "s".into(),
+            element: "e".into(),
+        }]
+    );
+
+    let mut w = mounts();
+    w.presses = vec![PressRule {
+        select: Selector::Label("Other".into()),
+        action: PressAction::Notify(Handler::Count {
+            node: BUTTON_TEXT,
+            prop: TEXT,
+            one: String::new(),
+            many: String::new(),
+        }),
+    }];
+    assert!(
+        Engine::new(w).is_err(),
+        "a notify rule needs a plugin handler"
+    );
+}
+
+#[test]
+fn not_drops_every_child_but_one() {
+    let w = Work {
+        rows: vec![RowRule {
+            select: Selector::All(vec![
+                feed().child_of(),
+                Selector::Not(Box::new(tag("head"))),
+            ]),
+            action: RowAction::Drop,
+        }],
+        ..Work::default()
+    };
+    let (mut e, mut host) = engine(w);
+    send(&mut e, &mut host, &first());
+    assert_eq!(host.node(FEED).unwrap().children, vec![HEAD]);
+    assert!(host.node(30).is_none());
+}
+
 /// A BATCH of `entries`, with a record the engine has to keep.
 fn batch(entries: &[&[u8]]) -> Vec<u8> {
     frame::Frame {

@@ -45,6 +45,9 @@ pub enum Selector {
     All(Vec<Selector>),
     /// A node any selector matches.
     Any(Vec<Selector>),
+    /// A node the selector doesn't match: the children of a node but one
+    /// (`all: [child_of X, not Y]`).
+    Not(Box<Selector>),
     /// A node whose parent the selector matches.
     ChildOf(Box<Selector>),
     /// A node one of whose children the selector matches.
@@ -137,6 +140,7 @@ impl<'t> View<'t> {
             }
             Selector::All(all) => all.iter().all(|s| self.matches(node, s)),
             Selector::Any(any) => any.iter().any(|s| self.matches(node, s)),
+            Selector::Not(s) => !self.matches(node, s),
             Selector::ChildOf(s) => self.parent(node).is_some_and(|p| self.matches(p, s)),
             Selector::ParentOf(s) => self.children(node).iter().any(|c| self.matches(*c, s)),
             Selector::Within(s) => {

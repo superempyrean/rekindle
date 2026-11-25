@@ -19,10 +19,11 @@
 //! - **Rows.** The guest's nodes a selector finds are dropped (every op on
 //!   the node or a node under it is left out of the turn), have a string
 //!   cell rewritten inside the guest's own op, or get cells written.
-//! - **Presses.** A press on a guest node a selector finds is consumed or
-//!   retargeted at another node. A press on rekindle's own nodes is always
-//!   consumed, after its [`Handler`] runs. A [`Handler::Plugin`] keeps the
-//!   press for the host to deliver ([`Engine::take_presses`]).
+//! - **Presses.** A press on a guest node a selector finds is consumed,
+//!   retargeted at another node, or passed on with the host told of it. A
+//!   press on rekindle's own nodes is always consumed, after its
+//!   [`Handler`] runs. A [`Handler::Plugin`] keeps the press for the host to
+//!   deliver ([`Engine::take_presses`]).
 //! - **Back.** While the work has a back handler, the system back reaches
 //!   it as a press instead of reaching the guest, so a page of rekindle's
 //!   closes before the client's own screen does.
@@ -583,6 +584,20 @@ impl Engine {
                         return Ok(Verdict::Replace(Event { node: target, ..ev }));
                     }
                 }
+                PressAction::Notify(Handler::Plugin {
+                    plugin,
+                    surface,
+                    element,
+                }) => {
+                    self.presses.push(PluginPress {
+                        plugin: plugin.clone(),
+                        surface: surface.clone(),
+                        element: element.clone(),
+                    });
+                    return Ok(Verdict::Pass);
+                }
+                // `Work::check` refuses it.
+                PressAction::Notify(Handler::Count { .. }) => {}
             }
         }
         Ok(Verdict::Pass)
