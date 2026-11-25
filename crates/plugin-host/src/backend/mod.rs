@@ -18,6 +18,7 @@
 //! surface at a time and plugins see exactly which parts work through
 //! `host.features()`.
 
+pub mod cache;
 pub mod fixtures;
 pub mod gateway;
 mod mock;
@@ -408,7 +409,11 @@ pub trait ClientBackend: Send {
     }
     /// Apply one of a plugin's `elements` calls. The runtime has checked
     /// the ids and the values; the backend checks the names.
-    fn element_update(&mut self, _plugin: &str, _op: crate::model::ElementOp) -> Result<(), UiError> {
+    fn element_update(
+        &mut self,
+        _plugin: &str,
+        _op: crate::model::ElementOp,
+    ) -> Result<(), UiError> {
         Err(UiError::Unavailable)
     }
     /// The selector the element `name` has on this build, as JSON
