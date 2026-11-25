@@ -367,3 +367,20 @@ interface elements {
     /// Undo `hide`, `style` and `on-press` for `name`.
     reset: func(name: string);
 }
+
+/// Requires `wire-raw`. Engine work the plugin writes itself, for what
+/// `elements` can't express: mounts, cells, row and press rules, labels and
+/// recolours, with any selector. The work is JSON in the shape of
+/// `rekindle-wire-inject`'s `Work`. Its mounts take node ids from
+/// `0xF0000000` to `0xF000FFFF`, which the host moves to a block of the
+/// plugin's own. Every handler and press rule is the plugin's: a press
+/// reaches `on-ui` as `clicked` with surface `wire-raw` and the handler's
+/// element. The work can't take the system back. It is dropped when the
+/// plugin unloads.
+interface wire-raw {
+    /// Replace the plugin's work. An empty string drops it. The error says
+    /// what the host refused.
+    set-work: func(work: string) -> result<_, string>;
+    /// The selector the element `name` has on this build, as JSON.
+    selector: func(name: string) -> option<string>;
+}

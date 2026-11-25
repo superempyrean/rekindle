@@ -2939,6 +2939,7 @@ dependencies = [
  "base64 0.22.1",
  "prost",
  "rekindle-release",
+ "rekindle-wire-inject",
  "semver",
  "serde",
  "serde_json",

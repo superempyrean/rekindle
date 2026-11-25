@@ -27,6 +27,28 @@ impl PluginState {
     }
 }
 
+impl wit::wire_raw::Host for PluginState {
+    fn set_work(&mut self, work: String) -> wasmtime::Result<Result<(), String>> {
+        self.require(Capability::WireRaw)?;
+        self.main_only("wire-raw.set-work")?;
+        let work = if work.trim().is_empty() {
+            None
+        } else {
+            match model::raw_work(&self.id, &work) {
+                Ok(w) => Some(w),
+                Err(e) => return Ok(Err(e)),
+            }
+        };
+        let r = self.backend.lock().unwrap().set_raw_work(&self.id, work);
+        Ok(r.map_err(|e| e.to_string()))
+    }
+
+    fn selector(&mut self, name: String) -> wasmtime::Result<Option<String>> {
+        self.require(Capability::WireRaw)?;
+        Ok(self.backend.lock().unwrap().element_selector(&name))
+    }
+}
+
 impl wit::elements::Host for PluginState {
     fn names(&mut self) -> wasmtime::Result<Vec<String>> {
         self.require(Capability::Ui)?;

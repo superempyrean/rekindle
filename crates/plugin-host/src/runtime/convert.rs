@@ -74,6 +74,7 @@ pub(super) fn cap_to_wit(c: Capability) -> wit::types::Capability {
         Capability::View => W::View,
         Capability::ReadAccount => W::ReadAccount,
         Capability::InterceptHttp => W::InterceptHttp,
+        Capability::WireRaw => W::WireRaw,
     }
 }
 

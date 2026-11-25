@@ -198,6 +198,70 @@ pub(crate) fn draw(
     out
 }
 
+/// The first node id of the `wire-raw` plugins' own work: a block of
+/// `RAW_IDS` each, by the plugin's slot.
+const RAW_BLOCKS: NodeId = RESERVED + 0x0900_0000;
+/// How many plugins' blocks there are before they are handed out again.
+const RAW_SLOTS: u32 = 0x60;
+
+/// Which block of ids each `wire-raw` plugin's work has, kept across
+/// renders, so a plugin that loads or unloads doesn't move another's.
+#[derive(Debug, Default)]
+pub(crate) struct RawSlots {
+    by_plugin: HashMap<String, u32>,
+    next: u32,
+}
+
+/// The `wire-raw` plugins' own work, as one, each plugin's mounts moved
+/// from `RESERVED` to its own block.
+pub(crate) fn raw(state: &NamedElements, slots: &mut RawSlots) -> rekindle_wire_inject::Work {
+    use rekindle_plugin_host::model::RAW_IDS;
+    use rekindle_wire_inject::Handler;
+    slots.by_plugin.retain(|p, _| state.raw.contains_key(p));
+    let mut out = rekindle_wire_inject::Work::default();
+    for (plugin, work) in &state.raw {
+        let next = &mut slots.next;
+        let slot = *slots.by_plugin.entry(plugin.clone()).or_insert_with(|| {
+            let s = *next;
+            *next = (*next + 1) % RAW_SLOTS;
+            s
+        });
+        let shift = RAW_BLOCKS + slot * RAW_IDS - RESERVED;
+        let mut work = work.clone();
+        for m in &mut work.mounts {
+            m.root += shift;
+            for n in &mut m.nodes {
+                n.id += shift;
+                for c in &mut n.children {
+                    *c += shift;
+                }
+                if let Some(Handler::Count { node, .. }) = &mut n.on_press {
+                    *node += shift;
+                }
+            }
+        }
+        out.mounts.extend(work.mounts);
+        out.cells.extend(work.cells);
+        out.rows.extend(work.rows);
+        out.presses.extend(work.presses);
+        out.labels.extend(work.labels);
+        out.recolors.extend(work.recolors);
+        out.prop_recolors.extend(work.prop_recolors);
+    }
+    out
+}
+
+/// The click a press the `wire-raw` plugins' work kept reports: `clicked`
+/// on `wire-raw`, the handler's element as the element.
+pub(crate) fn raw_click(plugin: &str, element: &str) -> rekindle_ui_hook::Click {
+    rekindle_ui_hook::Click::Ui {
+        plugin: plugin.into(),
+        panel: rekindle_plugin_host::model::RAW_SURFACE.into(),
+        element: element.into(),
+        value: rekindle_ui_hook::UiInput::Clicked,
+    }
+}
+
 /// The click a press on one of the client's elements reports: `clicked`
 /// on `element:<name>`, the name as the element.
 pub(crate) fn click(plugin: &str, name: &str) -> rekindle_ui_hook::Click {
@@ -288,12 +352,43 @@ mod tests {
     }
 
     #[test]
+    fn raw_work_moves_to_its_plugins_block() {
+        let mut s = NamedElements::with_selectors(BTreeMap::new());
+        let json = format!(
+            r#"{{"mounts": [{{"under": {{"kind": "view"}}, "root": {r}, "nodes": [
+                {{"id": {r}, "kind": "view", "children": [{c}]}},
+                {{"id": {c}, "kind": "text"}}]}}]}}"#,
+            r = RESERVED,
+            c = RESERVED + 1
+        );
+        for p in ["a", "b"] {
+            let w = rekindle_plugin_host::model::raw_work(p, &json).unwrap();
+            s.set_raw(p, Some(w)).unwrap();
+        }
+        let mut slots = RawSlots::default();
+        let w = raw(&s, &mut slots);
+        assert_eq!(w.mounts.len(), 2);
+        assert_eq!(w.mounts[0].root, RAW_BLOCKS);
+        assert_eq!(w.mounts[0].nodes[0].children, [RAW_BLOCKS + 1]);
+        assert_eq!(w.mounts[1].root, RAW_BLOCKS + rekindle_plugin_host::model::RAW_IDS);
+        assert!(w.check().is_ok());
+        // `a` unloading leaves `b` where it was.
+        s.plugin_unloaded("a");
+        let w = raw(&s, &mut slots);
+        assert_eq!(w.mounts[0].root, RAW_BLOCKS + rekindle_plugin_host::model::RAW_IDS);
+    }
+
+    #[test]
     fn click_is_on_the_elements_surface() {
         let rekindle_ui_hook::Click::Ui { panel, element, .. } = click("p", "composer.gift")
         else {
             panic!()
         };
         assert_eq!((panel.as_str(), element.as_str()), ("element:composer.gift", "composer.gift"));
+        let rekindle_ui_hook::Click::Ui { panel, element, .. } = raw_click("p", "go") else {
+            panic!()
+        };
+        assert_eq!((panel.as_str(), element.as_str()), ("wire-raw", "go"));
     }
 
     #[test]

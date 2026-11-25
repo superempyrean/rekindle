@@ -227,12 +227,16 @@ impl MockBackend {
     }
 
     /// Pretend this build does (or doesn't) have a slot's hook point.
-    /// Name the client's elements plugins can change (`elements`). The mock
-    /// draws none of them, so a test reads what plugins did from
-    /// [`MockBackend::named_elements`].
+    /// Name the client's elements plugins can change (`elements`), and
+    /// keep plugins' own work (`wire-raw`). Each name's selector is
+    /// `{"label": <name>}`. The mock draws none of it, so a test reads what
+    /// plugins did from [`MockBackend::named_elements`].
     pub fn set_elements(&mut self, names: &[&str]) {
-        self.elements = crate::model::NamedElements::new(
-            names.iter().map(|n| (*n).to_string()).collect(),
+        self.elements = crate::model::NamedElements::with_selectors(
+            names
+                .iter()
+                .map(|n| ((*n).to_string(), serde_json::json!({ "label": n }).to_string()))
+                .collect(),
         );
     }
 
@@ -1115,6 +1119,18 @@ impl ClientBackend for MockBackend {
 
     fn element_update(&mut self, plugin: &str, op: crate::model::ElementOp) -> Result<(), UiError> {
         self.elements.apply(plugin, op)
+    }
+
+    fn element_selector(&self, name: &str) -> Option<String> {
+        self.elements.selectors.get(name).cloned()
+    }
+
+    fn set_raw_work(
+        &mut self,
+        plugin: &str,
+        work: Option<rekindle_wire_inject::Work>,
+    ) -> Result<(), UiError> {
+        self.elements.set_raw(plugin, work)
     }
 
     fn ui_update(&mut self, plugin: &str, op: UiOp) -> Result<(), UiError> {

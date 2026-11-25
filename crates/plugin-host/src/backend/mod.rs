@@ -411,6 +411,20 @@ pub trait ClientBackend: Send {
     fn element_update(&mut self, _plugin: &str, _op: crate::model::ElementOp) -> Result<(), UiError> {
         Err(UiError::Unavailable)
     }
+    /// The selector the element `name` has on this build, as JSON
+    /// (`wire-raw.selector`).
+    fn element_selector(&self, _name: &str) -> Option<String> {
+        None
+    }
+    /// Replace a `wire-raw` plugin's own work, already checked by
+    /// [`crate::model::raw_work`], or drop it with `None`.
+    fn set_raw_work(
+        &mut self,
+        _plugin: &str,
+        _work: Option<rekindle_wire_inject::Work>,
+    ) -> Result<(), UiError> {
+        Err(UiError::Unavailable)
+    }
 
     // ===================== services =====================
 

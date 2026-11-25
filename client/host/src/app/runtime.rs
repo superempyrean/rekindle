@@ -102,6 +102,8 @@ pub(crate) struct State {
     /// What happens to presses on the guest's nodes: its own tabs in the
     /// emoji picker while a plugin's tab is shown.
     pub(crate) presses: Vec<rekindle_wire_inject::PressRule>,
+    /// The `wire-raw` plugins' own work.
+    pub(crate) raw: rekindle_wire_inject::Work,
 }
 
 /// What the guest's thread hands the runtime.
@@ -183,6 +185,7 @@ pub(crate) fn handles(p: &PluginPress) -> bool {
         SLOT_CHANNEL_MENU,
         crate::elements::PRESS,
         rows::INSERT,
+        rekindle_plugin_host::model::RAW_SURFACE,
     ]
     .contains(&p.surface.as_str())
 }
@@ -304,6 +307,7 @@ struct Surfaces {
     /// plugins' inserts next to them.
     elements: BTreeMap<String, rekindle_wire_inject::Selector>,
     insert_slots: crate::elements::Slots,
+    raw_slots: crate::elements::RawSlots,
     /// The plugin's tab shown in the picker, as (plugin, tab id).
     picker_shown: Option<(String, String)>,
     /// The picker as the guest's tree had it when last read, and the turns
@@ -381,6 +385,7 @@ impl Surfaces {
             picker,
             elements,
             insert_slots: crate::elements::Slots::default(),
+            raw_slots: crate::elements::RawSlots::default(),
             picker_shown: None,
             picker_colors: None,
             picker_read_at: None,
@@ -421,6 +426,9 @@ impl Surfaces {
         }
         if p.surface == crate::elements::PRESS {
             return Some(crate::elements::click(&p.plugin, &p.element));
+        }
+        if p.surface == rekindle_plugin_host::model::RAW_SURFACE {
+            return Some(crate::elements::raw_click(&p.plugin, &p.element));
         }
         if self.menus.contains_key(&p.surface) {
             let target = MENU_TARGET
@@ -789,7 +797,14 @@ fn up() -> anyhow::Result<(Driver, Home)> {
         slash_commands: true,
         wire_menus: true,
         wire_picker_tabs: map.as_ref().and_then(crate::wire::WireMap::picker).is_some(),
-        elements: map.map(|m| m.elements.into_keys().collect()).unwrap_or_default(),
+        elements: map
+            .map(|m| {
+                m.elements
+                    .into_iter()
+                    .map(|(name, sel)| (name, serde_json::to_string(&sel).unwrap_or_default()))
+                    .collect()
+            })
+            .unwrap_or_default(),
         wire_values: true,
     };
     let args = ExtArgs {
@@ -1018,8 +1033,10 @@ fn publish(driver: &mut Driver, surfaces: &mut Surfaces) -> State {
         surfaces.presses.clear();
     }
     surfaces.presses.extend(drawn.clicks);
+    let elements = driver.named_elements();
+    let raw = crate::elements::raw(&elements, &mut surfaces.raw_slots);
     let named = crate::elements::draw(
-        &driver.named_elements(),
+        &elements,
         &surfaces.elements,
         surfaces.look.as_ref(),
         rekindle_extension::widgets_of,
@@ -1072,6 +1089,7 @@ fn publish(driver: &mut Driver, surfaces: &mut Surfaces) -> State {
         commands,
         rows,
         presses,
+        raw,
     };
     super::set_plugins(state.clone());
     state

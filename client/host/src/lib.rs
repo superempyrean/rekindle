@@ -395,7 +395,7 @@ fn framework_only(
         slash_commands: false,
         wire_menus: false,
         wire_picker_tabs: false,
-        elements: Vec::new(),
+        elements: std::collections::BTreeMap::new(),
         wire_values: false,
     };
     let (ext, n_plugins) = profile::ext_args();

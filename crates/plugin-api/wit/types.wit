@@ -130,6 +130,11 @@ interface types {
         /// the kinds the plugin can read, and drop or rewrite them
         /// (`http-filter`). Never their headers.
         intercept-http,
+
+        // ---- added in 0.11.0 ----
+        /// Change the client's screen with engine work the plugin writes
+        /// itself (`wire-raw`): any node, any cell, any press.
+        wire-raw,
     }
 
     /// 8-bit sRGB, straight alpha.

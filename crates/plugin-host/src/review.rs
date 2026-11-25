@@ -177,6 +177,9 @@ pub fn screen(
         headline
             .push("It can pin, delete, edit and vote as you when you click its buttons.".into());
     }
+    if has(Capability::WireRaw) {
+        headline.push("It can change anything the client shows, and add things that look like the client's own.".into());
+    }
     if has(Capability::Overlay) {
         headline.push(
             "It can draw anything over the client, including things that look like the client."

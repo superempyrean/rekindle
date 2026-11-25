@@ -45,6 +45,7 @@
 //! | [`messages`] | `read-messages` | loaded and visible messages, pins, message links |
 //! | [`events`] | per kind | subscribe to client events |
 //! | [`ui`], [`slots`], [`decorations`], [`commands`] | `ui` | panels, menus, buttons, badges, keybinds, slash commands |
+//! | [`wire_raw`] | `wire-raw` | engine work written as JSON: any node, any cell, any press |
 //! | [`elements`] | `ui` | hide, restyle, add to and take presses on the client's own elements, by name |
 //! | [`render`] | `render-messages` | change how messages look ([`Plugin::render`]) |
 //! | [`compose`] | `compose` | rewrite the user's outgoing messages ([`Plugin::on_compose`]) |
@@ -95,6 +96,7 @@ pub mod tweaks;
 pub mod ui;
 pub mod users;
 pub mod view;
+pub mod wire_raw;
 
 #[doc(hidden)]
 pub mod __private;

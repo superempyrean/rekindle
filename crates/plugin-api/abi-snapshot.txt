@@ -1,5 +1,5 @@
 version 0.11.0
-wit-sha256 2f012be8227dcb54f4fcfab87b5bc6ea18f9caf7e29fbedbdab86a9d6859e449
+wit-sha256 6d9ada827a7cbfacbbf47d2064e61fc17c6b8c666e1736498526471f284f3ebb
 func actions.create-invite
 func actions.delete-message
 func actions.edit-message
@@ -218,6 +218,8 @@ func view.reset
 func view.set-members
 func view.set-my-setting
 func view.set-users
+func wire-raw.selector
+func wire-raw.set-work
 capability read-client
 capability read-users
 capability read-messages
@@ -244,6 +246,7 @@ capability history
 capability view
 capability read-account
 capability intercept-http
+capability wire-raw
 slot message.context-menu Menu
 slot message.hover-bar Button
 slot user.context-menu Menu

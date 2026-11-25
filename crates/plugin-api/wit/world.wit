@@ -187,6 +187,7 @@ interface notification-filter {
 ///   render-control    render-messages
 ///   ui                ui
 ///   elements          ui
+///   wire-raw          wire-raw
 ///   theming           theming
 ///   overlay           overlay
 ///   audio             audio
@@ -217,6 +218,7 @@ world plugin {
     import render-control;
     import ui;
     import elements;
+    import wire-raw;
     import theming;
     import overlay;
     import audio;

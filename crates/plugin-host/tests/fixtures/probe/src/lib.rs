@@ -1,5 +1,5 @@
-//! Calls the 0.9.0 and 0.10.0 additions on command and logs what they returned. Used by
-//! `plugin-host/tests/moderation_history_view.rs` and `http_filter.rs`.
+//! Calls the 0.9.0, 0.10.0 and 0.11.0 additions on command and logs what they returned. Used by
+//! `plugin-host/tests/moderation_history_view.rs` and `http_filter.rs` and `wire_raw.rs`.
 
 use rekindle_sdk::prelude::*;
 use rekindle_sdk::view::{MemberField, UserField, Users};
@@ -36,6 +36,10 @@ impl Plugin for Probe {
             "me-email",
             "self-setting",
             "self-setting-bad",
+            "raw",
+            "raw-bad",
+            "raw-clear",
+            "elements",
         ] {
             ui::register_command(id, id);
         }
@@ -45,6 +49,28 @@ impl Plugin for Probe {
     fn on_command(&mut self, id: &str) {
         match id {
             "open-dm" => info!("open-dm: {:?}", actions::open_dm(ALICE)),
+            "raw" => {
+                let gift = rekindle_sdk::wire_raw::selector("composer.gift");
+                info!("raw selector: {gift:?}");
+                let json = format!(
+                    r#"{{"rows": [{{"select": {}, "action": "drop"}}]}}"#,
+                    gift.unwrap_or_default()
+                );
+                info!("raw: {:?}", rekindle_sdk::wire_raw::set_work(&json));
+            }
+            "raw-bad" => info!(
+                "raw-bad: {:?}",
+                rekindle_sdk::wire_raw::set_work(r#"{"back": {"plugin": {"plugin": "p", "surface": "s", "element": "e"}}}"#)
+            ),
+            "raw-clear" => rekindle_sdk::wire_raw::clear(),
+            "elements" => {
+                use rekindle_sdk::elements::{self, Place, PressMode};
+                info!("names: {:?}", elements::names());
+                info!("press: {:?}", elements::on_press("composer.gift", &PressMode::Consume));
+                info!("retarget self: {:?}", elements::on_press("composer.gift", &PressMode::Retarget("composer.gift".into())));
+                info!("insert: {:?}", elements::insert("hint", "composer.gift", Place::After, &Vec::new().button("go", "Go")));
+                info!("missing: {:?}", elements::hide("nope"));
+            }
             "invite" => info!("invite: {:?}", actions::create_invite(GENERAL, 0, 0)),
             "timeout" => info!(
                 "timeout: {:?}",

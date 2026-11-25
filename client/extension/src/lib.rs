@@ -79,11 +79,12 @@ pub struct RecoveredProfile {
     /// wire, and reads them back with [`Driver::picker_tabs`]. Without it,
     /// adding to `expression-picker.tab` fails with `unavailable`.
     pub wire_picker_tabs: bool,
-    /// The names of the client's elements the host reaches on its wire, for
-    /// the `elements` interface. The host reads what the plugins did to
-    /// them back with [`Driver::named_elements`]. With none, every call
-    /// fails with `unavailable`.
-    pub elements: Vec<String>,
+    /// The client's elements the host reaches on its wire, for the
+    /// `elements` interface: each name with its selector as JSON. The host
+    /// reads what the plugins did to them, and the `wire-raw` plugins' own
+    /// work, back with [`Driver::named_elements`]. With none, every call
+    /// to either fails with `unavailable`.
+    pub elements: std::collections::BTreeMap<String, String>,
 }
 
 /// How long a send waits for `compose` plugins before going out unchanged.
@@ -179,7 +180,13 @@ impl Driver {
             })),
             slash: Arc::new(Mutex::new(profile.slash_commands.then(Vec::new))),
             elements: Arc::new(Mutex::new(
-                rekindle_plugin_host::model::NamedElements::new(profile.elements.clone()),
+                if profile.elements.is_empty() {
+                    rekindle_plugin_host::model::NamedElements::default()
+                } else {
+                    rekindle_plugin_host::model::NamedElements::with_selectors(
+                        profile.elements.clone(),
+                    )
+                },
             )),
         };
         let surfaces = profile
@@ -445,7 +452,8 @@ impl Driver {
             .unwrap_or_default()
     }
 
-    /// What each plugin did to the client's elements by name.
+    /// What each plugin did to the client's elements by name, and the
+    /// `wire-raw` plugins' own work.
     pub fn named_elements(&self) -> rekindle_plugin_host::model::NamedElements {
         self.shared.elements.lock().unwrap().clone()
     }

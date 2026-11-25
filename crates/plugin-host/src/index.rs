@@ -113,6 +113,9 @@ pub fn prereview(bytes: &[u8]) -> Result<Vec<Finding>> {
     for h in m.network.iter().filter(|h| is_discord_host(h)) {
         out.push(note(format!("contacts Discord's API at {h}")));
     }
+    if m.requests(crate::capability::Capability::WireRaw) {
+        out.push(note("requests `wire-raw`: check the work it sets (`wire-raw.set-work`) does what its description says"));
+    }
     if m.updates.is_some() {
         out.push(note("has an `updates` source, which a community plugin doesn't use: the index publishes its updates"));
     }

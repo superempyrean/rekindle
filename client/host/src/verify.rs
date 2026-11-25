@@ -71,7 +71,7 @@ pub(crate) fn drive_and_verify(layout: &Layout, hooks: &Hooks) -> Result<(String
         slash_commands: false,
         wire_menus: false,
         wire_picker_tabs: false,
-        elements: Vec::new(),
+        elements: std::collections::BTreeMap::new(),
         wire_values: false,
     };
     let (mut ext, n_plugins) = ext_args();

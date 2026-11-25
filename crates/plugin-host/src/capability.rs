@@ -53,10 +53,12 @@ pub enum Capability {
     ReadAccount,
     // added in 0.10.0
     InterceptHttp,
+    // added in 0.11.0
+    WireRaw,
 }
 
 impl Capability {
-    pub const ALL: [Capability; 26] = [
+    pub const ALL: [Capability; 27] = [
         Capability::ReadClient,
         Capability::ReadUsers,
         Capability::ReadMessages,
@@ -83,6 +85,7 @@ impl Capability {
         Capability::View,
         Capability::ReadAccount,
         Capability::InterceptHttp,
+        Capability::WireRaw,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -113,6 +116,7 @@ impl Capability {
             Capability::View => "view",
             Capability::ReadAccount => "read-account",
             Capability::InterceptHttp => "intercept-http",
+            Capability::WireRaw => "wire-raw",
         }
     }
 
@@ -178,6 +182,9 @@ impl Capability {
             Capability::InterceptHttp => {
                 "see and change what the client asks Discord for and what comes back, for what it can read (never your login)"
             }
+            Capability::WireRaw => {
+                "change any part of the client's screen directly, including what the client draws itself"
+            }
         }
     }
 
@@ -207,6 +214,7 @@ impl Capability {
             Capability::Moderate => Some("moderation"),
             Capability::History => Some("history"),
             Capability::View => Some("view"),
+            Capability::WireRaw => Some("wire-raw"),
             // `intercept` gates an export (`event-filter`) and `intercept-http`
             // another (`http-filter`); `host-events.intercept` and
             // `intercept-http` need no import of their own.

@@ -102,8 +102,14 @@ pub const MAX_INSERT_ELEMENTS: usize = 32;
 pub struct NamedElements {
     /// The names, sorted. Empty when the build names none.
     pub available: Vec<String>,
+    /// The selector of each name, as JSON, where the backend knows it.
+    pub selectors: BTreeMap<String, String>,
     /// By plugin.
     pub plugins: BTreeMap<String, PluginElements>,
+    /// The backend runs plugins' own work (`wire-raw`).
+    pub raw_available: bool,
+    /// Each `wire-raw` plugin's work, checked by [`raw_work`](super::raw_work).
+    pub raw: BTreeMap<String, rekindle_wire_inject::Work>,
 }
 
 impl NamedElements {
@@ -112,8 +118,39 @@ impl NamedElements {
         available.dedup();
         NamedElements {
             available,
-            plugins: BTreeMap::new(),
+            ..NamedElements::default()
         }
+    }
+
+    /// The names a wire map gives, with their selectors as JSON. The
+    /// backend runs plugins' own work too.
+    pub fn with_selectors(selectors: BTreeMap<String, String>) -> Self {
+        NamedElements {
+            available: selectors.keys().cloned().collect(),
+            selectors,
+            raw_available: true,
+            ..NamedElements::default()
+        }
+    }
+
+    /// Replace `plugin`'s own work, or drop it with `None`.
+    pub fn set_raw(
+        &mut self,
+        plugin: &str,
+        work: Option<rekindle_wire_inject::Work>,
+    ) -> Result<(), UiError> {
+        if !self.raw_available {
+            return Err(UiError::Unavailable);
+        }
+        match work {
+            Some(w) if !w.is_empty() => {
+                self.raw.insert(plugin.to_string(), w);
+            }
+            _ => {
+                self.raw.remove(plugin);
+            }
+        }
+        Ok(())
     }
 
     fn has(&self, name: &str) -> bool {
@@ -187,6 +224,7 @@ impl NamedElements {
 
     pub fn plugin_unloaded(&mut self, plugin: &str) {
         self.plugins.remove(plugin);
+        self.raw.remove(plugin);
     }
 }
 

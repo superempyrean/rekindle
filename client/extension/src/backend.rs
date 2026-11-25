@@ -585,6 +585,18 @@ impl ClientBackend for DetourBackend {
         self.shared.elements.lock().unwrap().apply(plugin, op)
     }
 
+    fn element_selector(&self, name: &str) -> Option<String> {
+        self.shared.elements.lock().unwrap().selectors.get(name).cloned()
+    }
+
+    fn set_raw_work(
+        &mut self,
+        plugin: &str,
+        work: Option<rekindle_plugin_host::model::RawWork>,
+    ) -> Result<(), UiError> {
+        self.shared.elements.lock().unwrap().set_raw(plugin, work)
+    }
+
     fn ui_update(&mut self, plugin: &str, op: UiOp) -> Result<(), UiError> {
         match op {
             UiOp::RegisterSlashCommand { command } => {

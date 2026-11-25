@@ -450,6 +450,14 @@ impl Panel {
             work.presses.extend(p.presses.iter().cloned());
             work.mounts.extend(p.mounts.iter().cloned());
             work.back.clone_from(&p.back);
+            let raw = p.raw.clone();
+            work.mounts.extend(raw.mounts);
+            work.cells.extend(raw.cells);
+            work.rows.extend(raw.rows);
+            work.presses.extend(raw.presses);
+            work.labels.extend(raw.labels);
+            work.recolors.extend(raw.recolors);
+            work.prop_recolors.extend(raw.prop_recolors);
         }
         work
     }
