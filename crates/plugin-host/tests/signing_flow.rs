@@ -263,6 +263,7 @@ fn the_review_screen_leads_with_what_matters() {
         settings: vec![],
         strings: BTreeMap::default(),
         compose_uploads: false,
+        elements: rekindle_plugin_host::manifest::DeclaredElements::default(),
         updates: None,
         theme: false,
     };

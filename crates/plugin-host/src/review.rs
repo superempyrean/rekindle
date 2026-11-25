@@ -14,7 +14,9 @@ use std::collections::BTreeSet;
 
 use crate::capability::{Capability, Trust};
 use crate::home::{InstallRecord, TrustResolution, TrustSource};
-use crate::manifest::{Manifest, UpdateSource, is_discord_host};
+use crate::manifest::{
+    ANY_ELEMENT, DeclaredElements, ElementVerb, Manifest, UpdateSource, is_discord_host,
+};
 
 /// The `network` line for a plugin that may reach any website.
 pub const ANY_HOST_ABILITY: &str = "make HTTPS requests to any website";
@@ -84,6 +86,9 @@ pub struct Screen {
     /// Everything it can do, one line per capability.
     pub abilities: Vec<Ability>,
     pub hosts: Vec<Host>,
+    /// What it does to the client's own elements, a sentence per verb the
+    /// manifest's `elements` declares ([`element_lines`]).
+    pub elements: Vec<String>,
     /// Set when a version of the plugin is installed.
     pub update: Option<Update>,
     /// The host it checks for updates (`manifest.updates`), if any.
@@ -127,6 +132,65 @@ pub(crate) fn and_list(items: &[String]) -> String {
         [one] => one.clone(),
         [init @ .., last] => format!("{} and {last}", init.join(", ")),
     }
+}
+
+/// One of the client's elements as the user would say it: "the gift
+/// button" for `composer.gift`. A name rekindle has no words for is shown
+/// as it is.
+pub fn element_label(name: &str) -> String {
+    const KNOWN: [(&str, &str); 11] = [
+        ("composer", "the message box"),
+        ("composer.send", "the send button"),
+        ("composer.gift", "the gift button"),
+        ("composer.expressions", "the emoji button"),
+        ("search.entry", "the search field"),
+        ("expression-picker.sheet", "the emoji picker"),
+        ("expression-picker.content", "the emoji picker's contents"),
+        ("expression-picker.strip", "the emoji picker's tabs"),
+        ("expression-picker.tab", "a tab of the emoji picker"),
+        (
+            "expression-picker.indicator",
+            "the emoji picker's tab marker",
+        ),
+        (
+            "expression-picker.search",
+            "the emoji picker's search field",
+        ),
+    ];
+    KNOWN
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map_or_else(|| format!("`{name}`"), |(_, l)| (*l).to_string())
+}
+
+/// What the install screen says about the elements a plugin declares: "It
+/// hides the gift button.", "It can intercept presses on any of the
+/// client's elements."
+pub fn element_lines(declared: &DeclaredElements) -> Vec<String> {
+    ElementVerb::ALL
+        .into_iter()
+        .filter_map(|verb| {
+            let names = declared.get(verb);
+            if names.is_empty() {
+                return None;
+            }
+            let (does, can) = match verb {
+                ElementVerb::Hide => ("hides", "hide"),
+                ElementVerb::Style => ("restyles", "restyle"),
+                ElementVerb::Press => ("intercepts presses on", "intercept presses on"),
+                ElementVerb::Insert => (
+                    "adds its own elements next to",
+                    "add its own elements next to",
+                ),
+            };
+            Some(if names.iter().any(|n| n == ANY_ELEMENT) {
+                format!("It can {can} any of the client's elements.")
+            } else {
+                let labels: Vec<String> = names.iter().map(|n| element_label(n)).collect();
+                format!("It {does} {}.", and_list(&labels))
+            })
+        })
+        .collect()
 }
 
 /// Build the screen for a plugin, given the record of the installed version
@@ -229,6 +293,7 @@ pub fn screen(
         theme: manifest.theme,
         abilities,
         hosts,
+        elements: element_lines(&manifest.elements),
         update,
         updates_from: manifest.updates.as_ref().map(UpdateSource::host),
     }
@@ -295,7 +360,10 @@ pub fn render(s: &Screen) -> String {
     }
     if s.manifest.any_host() {
         let new = s.hosts.iter().any(|h| h.new);
-        line(format!("It can contact any website.{}", if new { "  [NEW]" } else { "" }));
+        line(format!(
+            "It can contact any website.{}",
+            if new { "  [NEW]" } else { "" }
+        ));
     } else if !s.hosts.is_empty() {
         line("It can contact:".into());
         for h in &s.hosts {
@@ -306,6 +374,9 @@ pub fn render(s: &Screen) -> String {
             };
             line(format!("  - {}{warn}{}", h.host, new(h.new)));
         }
+    }
+    for e in &s.elements {
+        line(e.clone());
     }
     if let Some(from) = &s.updates_from {
         line(updates_line(from));
@@ -333,6 +404,7 @@ mod tests {
             settings: vec![],
             strings: BTreeMap::default(),
             compose_uploads: false,
+            elements: crate::manifest::DeclaredElements::default(),
             updates: None,
             theme: false,
         }
@@ -387,7 +459,10 @@ mod tests {
         use Capability::*;
         let m = manifest(&[ReadMessages, Network], &["*"]);
         let s = screen(&m, &third(), None);
-        assert_eq!(s.headline[0], "It can read your messages and send them to any website.");
+        assert_eq!(
+            s.headline[0],
+            "It can read your messages and send them to any website."
+        );
         let net = s.abilities.iter().find(|a| a.cap == Network).unwrap();
         assert_eq!(net.description, ANY_HOST_ABILITY);
         let text = render(&s);
@@ -395,6 +470,31 @@ mod tests {
         assert!(!text.contains("- *"), "{text}");
         let rec = InstallRecord::new(&manifest(&[Network], &["a.example"]), &third(), true);
         assert!(asks_for_more(&rec, &m), "`*` is a new host");
+    }
+
+    #[test]
+    fn declared_elements_get_a_line_each() {
+        use Capability::*;
+        let mut m = manifest(&[Ui], &[]);
+        m.elements.hide = vec!["composer.gift".into(), "nameless.thing".into()];
+        m.elements.press = vec!["composer.send".into()];
+        m.elements.style = vec!["*".into()];
+        let s = screen(&m, &third(), None);
+        assert_eq!(
+            s.elements,
+            [
+                "It hides the gift button and `nameless.thing`.",
+                "It can restyle any of the client's elements.",
+                "It intercepts presses on the send button.",
+            ]
+        );
+        let text = render(&s);
+        assert!(text.contains("It hides the gift button"), "{text}");
+        assert!(
+            screen(&manifest(&[Ui], &[]), &third(), None)
+                .elements
+                .is_empty()
+        );
     }
 
     #[test]

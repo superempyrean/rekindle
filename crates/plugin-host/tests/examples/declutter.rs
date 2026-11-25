@@ -24,7 +24,11 @@ fn hidden(h: &Harness) -> Vec<String> {
 fn hides_the_gift_button_by_default() {
     let mut h = Harness::builder(PLUGIN).backend(backend()).start().unwrap();
     assert_eq!(hidden(&h), ["composer.gift"]);
-    assert!(h.runtime().features().contains(&"element:search.entry".to_string()));
+    assert!(
+        h.runtime()
+            .features()
+            .contains(&"element:search.entry".to_string())
+    );
 }
 
 #[test]
@@ -35,7 +39,11 @@ fn a_changed_list_brings_back_what_left_it_and_skips_unknown_names() {
         SettingValue::Items(vec!["search.entry".into(), "nope".into()]),
     );
     assert_eq!(hidden(&h), ["search.entry"]);
-    assert!(h.log_text().contains("couldn't hide `nope`"), "{}", h.log_text());
+    assert!(
+        h.log_text().contains("couldn't hide `nope`"),
+        "{}",
+        h.log_text()
+    );
 }
 
 #[test]
@@ -50,4 +58,14 @@ fn unloading_brings_everything_back() {
     let mut h = Harness::builder(PLUGIN).backend(backend()).start().unwrap();
     h.stop().unwrap();
     assert!(h.backend().named_elements().plugins.is_empty());
+}
+
+#[test]
+fn its_manifest_declares_hiding_any_element() {
+    let mut h = Harness::for_crate(PLUGIN).unwrap();
+    let m = h.runtime().manifest(ID).unwrap().clone();
+    assert_eq!(
+        rekindle_plugin_host::review::element_lines(&m.elements),
+        ["It can hide any of the client's elements."]
+    );
 }

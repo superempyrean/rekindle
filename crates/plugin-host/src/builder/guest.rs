@@ -424,6 +424,7 @@ pub(super) fn manifest_from(
         network: meta.network.clone(),
         settings: meta.settings.clone(),
         compose_uploads: meta.compose_uploads,
+        elements: meta.elements.clone(),
         updates: meta.updates.clone(),
     }
     .into_manifest(pkg_name, version, description, authors)?;
@@ -448,6 +449,10 @@ pub(super) struct ScriptMeta {
     settings: Option<serde_json::Value>,
     #[serde(default)]
     compose_uploads: bool,
+    /// The client's elements it changes, by what it does to them
+    /// (see `manifest::DeclaredElements`).
+    #[serde(default)]
+    elements: std::collections::BTreeMap<String, Vec<String>>,
     /// Where the author publishes updates (see `manifest::UpdateSource`).
     #[serde(default)]
     updates: Option<manifest::UpdateSource>,
@@ -481,6 +486,7 @@ mod tests {
             settings: vec![],
             strings: BTreeMap::default(),
             compose_uploads: false,
+            elements: manifest::DeclaredElements::default(),
             updates: None,
             theme: false,
         }

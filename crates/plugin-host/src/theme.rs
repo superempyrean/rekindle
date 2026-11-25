@@ -452,6 +452,7 @@ impl Theme {
             settings,
             strings: BTreeMap::new(),
             compose_uploads: false,
+            elements: manifest::DeclaredElements::default(),
             updates: self.updates.clone(),
             theme: true,
         }

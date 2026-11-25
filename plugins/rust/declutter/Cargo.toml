@@ -14,6 +14,9 @@ id = "dev.rekindle.declutter"
 name = "Declutter"
 capabilities = ["ui"]
 
+[package.metadata.rekindle.elements]
+hide = ["*"]
+
 [[package.metadata.rekindle.settings]]
 key = "hide"
 type = "string-list"

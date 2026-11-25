@@ -870,6 +870,7 @@ impl Manager {
             if !abilities.is_empty() {
                 el.push(text(format!("It can: {}", abilities.join(" · "))));
             }
+            el.extend(review::element_lines(&m.elements).into_iter().map(text));
         }
     }
 
@@ -1288,6 +1289,7 @@ fn review_elements(s: &Screen, el: &mut Vec<Element>) {
             el.push(text(format!("• {}{warn}{}", h.host, new(h.new))));
         }
     }
+    el.extend(s.elements.iter().cloned().map(text));
     if let Some(from) = &s.updates_from {
         el.push(text(review::updates_line(from)));
     }

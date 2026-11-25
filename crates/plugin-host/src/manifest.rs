@@ -47,6 +47,11 @@ pub struct Manifest {
     /// Opt in to `compose-handler.on-upload` (needs `compose`).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub compose_uploads: bool,
+    /// The client's elements the plugin changes through `elements`, by what
+    /// it does to them (needs `ui`). The install screen lists them, and the
+    /// plugin's page flags an element it changes outside them.
+    #[serde(default, skip_serializing_if = "DeclaredElements::is_empty")]
+    pub elements: DeclaredElements,
     /// Where the author publishes updates (third-party plugins).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub updates: Option<UpdateSource>,
@@ -55,6 +60,130 @@ pub struct Manifest {
     /// manifest saying so is refused.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub theme: bool,
+}
+
+/// What a plugin does to one of the client's elements (`elements` in the
+/// WIT).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ElementVerb {
+    /// `elements.hide`.
+    Hide,
+    /// `elements.style`.
+    Style,
+    /// `elements.on-press`.
+    Press,
+    /// `elements.insert`.
+    Insert,
+}
+
+impl ElementVerb {
+    pub const ALL: [ElementVerb; 4] = [Self::Hide, Self::Style, Self::Press, Self::Insert];
+
+    /// Its key in the manifest's `elements` table.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Hide => "hide",
+            Self::Style => "style",
+            Self::Press => "press",
+            Self::Insert => "insert",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<ElementVerb> {
+        Self::ALL.into_iter().find(|v| v.as_str() == s)
+    }
+}
+
+/// Names in each list of [`DeclaredElements`], at most.
+pub const MAX_DECLARED_ELEMENTS: usize = 64;
+
+/// The manifest's `elements` table: element names by [`ElementVerb`].
+/// [`ANY_ELEMENT`] in a list stands for every name, for a plugin whose
+/// user picks the elements (Declutter).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DeclaredElements {
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub hide: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub style: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub press: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub insert: Vec<String>,
+}
+
+/// The [`DeclaredElements`] entry for any element.
+pub const ANY_ELEMENT: &str = "*";
+
+impl DeclaredElements {
+    pub fn is_empty(&self) -> bool {
+        ElementVerb::ALL.iter().all(|v| self.get(*v).is_empty())
+    }
+
+    pub fn get(&self, verb: ElementVerb) -> &[String] {
+        match verb {
+            ElementVerb::Hide => &self.hide,
+            ElementVerb::Style => &self.style,
+            ElementVerb::Press => &self.press,
+            ElementVerb::Insert => &self.insert,
+        }
+    }
+
+    fn get_mut(&mut self, verb: ElementVerb) -> &mut Vec<String> {
+        match verb {
+            ElementVerb::Hide => &mut self.hide,
+            ElementVerb::Style => &mut self.style,
+            ElementVerb::Press => &mut self.press,
+            ElementVerb::Insert => &mut self.insert,
+        }
+    }
+
+    /// Whether the plugin declares doing `verb` to element `name`.
+    pub fn declares(&self, verb: ElementVerb, name: &str) -> bool {
+        self.get(verb).iter().any(|n| n == name || n == ANY_ELEMENT)
+    }
+
+    /// From the table as authors write it: `hide = ["composer.gift"]`.
+    pub fn from_table(table: BTreeMap<String, Vec<String>>) -> Result<Self> {
+        let mut out = DeclaredElements::default();
+        for (key, names) in table {
+            let verb = ElementVerb::parse(&key).with_context(|| {
+                format!("unknown key `{key}` in `elements` (expected hide, style, press or insert)")
+            })?;
+            *out.get_mut(verb) = names;
+        }
+        Ok(out)
+    }
+
+    fn validate(&self) -> Result<()> {
+        for verb in ElementVerb::ALL {
+            let names = self.get(verb);
+            if names.len() > MAX_DECLARED_ELEMENTS {
+                bail!(
+                    "`elements.{}` lists {} names; the limit is {MAX_DECLARED_ELEMENTS}",
+                    verb.as_str(),
+                    names.len()
+                );
+            }
+            for n in names {
+                let ok = n == ANY_ELEMENT
+                    || (!n.is_empty()
+                        && n.len() <= 64
+                        && n.chars().all(|c| {
+                            c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | ':')
+                        }));
+                if !ok {
+                    bail!(
+                        "invalid element name `{n}` in `elements.{}`: use a name like `composer.gift`, or `*`",
+                        verb.as_str()
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 /// A third-party plugin's update source: a release channel (`channel.json`,
@@ -150,6 +279,10 @@ impl Manifest {
         }
         if self.compose_uploads && !self.requests(Capability::Compose) {
             bail!("`compose-uploads` needs the `compose` capability");
+        }
+        self.elements.validate()?;
+        if !self.elements.is_empty() && !self.requests(Capability::Ui) {
+            bail!("`elements` needs the `ui` capability");
         }
         if self.theme && self.capabilities != [Capability::Theming] {
             bail!("a theme holds only the `theming` capability");
@@ -264,6 +397,10 @@ pub struct CargoMetadata {
     pub settings: Option<serde_json::Value>,
     #[serde(default)]
     pub compose_uploads: bool,
+    /// `[package.metadata.rekindle.elements]`: `hide = ["composer.gift"]`,
+    /// and `style`, `press` and `insert` the same way.
+    #[serde(default)]
+    pub elements: BTreeMap<String, Vec<String>>,
     /// `updates = { url = "https://…/channel.json", key = "<public key>" }`.
     #[serde(default)]
     pub updates: Option<UpdateSource>,
@@ -311,6 +448,7 @@ impl CargoMetadata {
             },
             strings: BTreeMap::new(),
             compose_uploads: self.compose_uploads,
+            elements: DeclaredElements::from_table(self.elements)?,
             updates: self.updates,
             theme: false,
         };
@@ -470,10 +608,10 @@ fn leb128(out: &mut Vec<u8>, mut v: u64) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
-    fn sample() -> Manifest {
+    pub(crate) fn sample() -> Manifest {
         Manifest {
             schema: SCHEMA,
             id: "dev.example.test".into(),
@@ -487,6 +625,7 @@ mod tests {
             settings: vec![],
             strings: BTreeMap::new(),
             compose_uploads: false,
+            elements: DeclaredElements::default(),
             updates: None,
             theme: false,
         }
@@ -591,5 +730,52 @@ mod tests {
             .validate()
             .is_err()
         );
+    }
+
+    #[test]
+    fn elements_come_from_the_cargo_table() {
+        let meta: CargoMetadata = toml::from_str(
+            r#"
+            id = "dev.test.elements"
+            capabilities = ["ui"]
+            [elements]
+            hide = ["composer.gift"]
+            press = ["*"]
+            "#,
+        )
+        .unwrap();
+        let m = meta.into_manifest("x", "0.1.0", "", &[]).unwrap();
+        assert!(m.elements.declares(ElementVerb::Hide, "composer.gift"));
+        assert!(!m.elements.declares(ElementVerb::Hide, "search.entry"));
+        assert!(m.elements.declares(ElementVerb::Press, "search.entry"));
+        assert!(!m.elements.declares(ElementVerb::Style, "composer.gift"));
+        let json = serde_json::to_string(&m).unwrap();
+        assert!(
+            json.contains(r#""elements":{"hide":["composer.gift"],"press":["*"]}"#),
+            "{json}"
+        );
+        let none = serde_json::to_string(&sample()).unwrap();
+        assert!(!none.contains("elements"), "{none}");
+    }
+
+    #[test]
+    fn elements_are_checked() {
+        let parse = |caps: &str, table: &str| {
+            let meta: CargoMetadata = toml::from_str(&format!(
+                "id = \"dev.test.elements\"
+capabilities = [{caps}]
+[elements]
+{table}"
+            ))
+            .unwrap();
+            meta.into_manifest("x", "0.1.0", "", &[])
+                .map_err(|e| e.to_string())
+        };
+        let e = parse(r#""ui""#, r#"hides = ["a"]"#).unwrap_err();
+        assert!(e.contains("unknown key `hides`"), "{e}");
+        let e = parse(r#""ui""#, r#"hide = ["no spaces"]"#).unwrap_err();
+        assert!(e.contains("invalid element name"), "{e}");
+        let e = parse(r#""storage""#, r#"hide = ["a"]"#).unwrap_err();
+        assert!(e.contains("needs the `ui` capability"), "{e}");
     }
 }
