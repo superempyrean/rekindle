@@ -19,6 +19,10 @@
 //! Only the user reaches this: plugins have no import that calls it, and
 //! the client routes only its own panel's interactions here.
 //!
+//! A plugin's page links to what it did over the last week ([`activity`]):
+//! its calls, the websites it contacted, its actions and the client's
+//! elements it changed, with anything its manifest doesn't declare first.
+//!
 //! With developer mode on, a Developer tab adds a Reload button for each
 //! plugin, the plugins' log, and a [`console`].
 //!
@@ -28,6 +32,7 @@
 //! [`List`] of installed plugins, whose cards open the plugin's page, and
 //! `back` goes from the page to its list and from the list to the menu.
 
+mod activity;
 pub mod console;
 
 use std::path::Path;
@@ -41,7 +46,7 @@ use crate::model::{
     Card, CardAction, Element, LogLevel, LogRecord, Panel, Switch, UiEvent, UiValue,
 };
 use crate::review::{self, Screen};
-use crate::runtime::Runtime;
+use crate::runtime::{Runtime, ledger};
 use crate::signing::{self, Signature};
 use crate::store;
 
@@ -177,6 +182,8 @@ enum View {
     /// One plugin's page, by id: installed, loaded from a file, or listed
     /// in the channel.
     Detail(String),
+    /// What an installed plugin did, by id.
+    Activity(String),
     DeveloperMode,
     Review(Box<Pending>),
     Remove {
@@ -360,6 +367,7 @@ impl Manager {
             }
             View::List(list) => self.list_view(*list, &mut el),
             View::Detail(id) => self.detail(id, dev, &mut el),
+            View::Activity(id) => self.activity(id, &mut el),
             View::DeveloperMode => {
                 el.push(Element::Heading {
                     text: "Turn on developer mode?".into(),
@@ -443,6 +451,16 @@ impl Manager {
     pub fn detail_of(&self) -> Option<&str> {
         match &self.view {
             View::Detail(id) => Some(id),
+            _ => None,
+        }
+    }
+
+    /// The plugin whose "What it did" page is open, if one is. While it is,
+    /// the client calls [`Runtime::flush_activity`] before it draws the
+    /// panel, so the page includes the last minute.
+    pub fn activity_of(&self) -> Option<&str> {
+        match &self.view {
+            View::Activity(id) => Some(id),
             _ => None,
         }
     }
@@ -872,6 +890,16 @@ impl Manager {
             }
             el.extend(review::element_lines(&m.elements).into_iter().map(text));
         }
+        el.push(button(format!("activity:{id}"), "What it did", false));
+    }
+
+    /// An installed plugin's "What it did" page.
+    fn activity(&self, id: &str, el: &mut Vec<Element>) {
+        let inst = self.home.get(id).ok().flatten();
+        let name = inst.as_ref().map_or_else(|| id.to_string(), name_of);
+        let manifest = inst.as_ref().and_then(|i| i.manifest.as_ref());
+        let days = self.home.activity(id);
+        activity::page(&name, manifest, &days, ledger::today(), el);
     }
 
     /// The Developer tab: a Reload button per plugin, the plugins' log, and
@@ -1083,10 +1111,12 @@ impl Manager {
         }
     }
 
-    /// From a plugin's page to the list it was opened from, else to the
-    /// grid.
+    /// From what a plugin did to its page, from a plugin's page to the
+    /// list it was opened from, else to the grid.
     fn back(&mut self) {
-        if let (View::Detail(_), Some(list)) = (&self.view, self.list) {
+        if let View::Activity(id) = &self.view {
+            self.view = View::Detail(id.clone());
+        } else if let (View::Detail(_), Some(list)) = (&self.view, self.list) {
             self.view = View::List(list);
         } else {
             self.list = None;
@@ -1101,6 +1131,10 @@ impl Manager {
         match action {
             "open" => {
                 self.view = View::Detail(id.into());
+                Ok(Vec::new())
+            }
+            "activity" => {
+                self.view = View::Activity(id.into());
                 Ok(Vec::new())
             }
             "list" => {
