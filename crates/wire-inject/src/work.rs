@@ -143,6 +143,14 @@ pub struct PluginPress {
     pub element: String,
 }
 
+/// Text the user typed in an `input` node of a mount with a
+/// [`Handler::Plugin`]: the field's whole text after the edit.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PluginText {
+    pub press: PluginPress,
+    pub text: String,
+}
+
 impl Handler {
     /// What a [`Handler::Count`] writes after `n` presses.
     pub fn count_text(one: &str, many: &str, n: u32) -> String {

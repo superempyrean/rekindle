@@ -99,6 +99,10 @@ pub(crate) struct Look {
     pub(crate) column: Vec<Cell>,
     pub(crate) title: Vec<Cell>,
     pub(crate) subtitle: Vec<Cell>,
+    /// A text field under the title. Without these it takes the title's
+    /// cells, and its placeholder the subtitle's colour.
+    #[serde(default)]
+    pub(crate) input: Vec<Cell>,
     pub(crate) chevron_box: Vec<Cell>,
     pub(crate) chevron: Vec<Cell>,
     /// A switch: its box, its track and thumb, and what each adds when on
@@ -188,6 +192,9 @@ pub(crate) struct Row {
     /// A switch a press on does something of its own: the track's key and
     /// what the press reports. A press on the rest of the row is `press`.
     pub(crate) track: Option<(String, (String, UiInput))>,
+    /// A text field under the title: the panel's element, its text and
+    /// its placeholder. An edit reports `UiInput::Text` for the element.
+    pub(crate) input: Option<Box<(String, String, String)>>,
 }
 
 impl Row {
@@ -199,6 +206,7 @@ impl Row {
             end,
             press,
             track: None,
+            input: None,
         }
     }
 }
@@ -361,10 +369,13 @@ pub(crate) fn widget_items(widgets: &[Widget]) -> Vec<Item> {
                 items.push(Item::Row(row));
             }
             Widget::TextInput {
-                id, label, value, ..
+                id,
+                label,
+                value,
+                placeholder,
             } => {
                 let mut row = Row::new(id, label, End::Nothing, None);
-                row.subtitle = (!value.is_empty()).then(|| value.clone());
+                row.input = Some(Box::new((id.clone(), value.clone(), placeholder.clone())));
                 items.push(Item::Row(row));
             }
             Widget::Slider {
@@ -758,6 +769,43 @@ impl<'l> Builder<'l> {
         self.node(ElementKind::TEXT, cells, Vec::new(), None)
     }
 
+    /// A row's text field, whose edits report `UiInput::Text` for `key`.
+    fn input(
+        &mut self,
+        plugin: &str,
+        surface: &str,
+        key: &str,
+        (element, value, placeholder): &(String, String, String),
+        press: &dyn Fn((String, UiInput)) -> Press,
+    ) -> NodeId {
+        let prop = |name| PropId::from_name(name).expect("a PropId of the table");
+        let mut cells = if self.look.input.is_empty() {
+            let mut c = self.look.title.clone();
+            if let Some(color) = self.look.subtitle.iter().find(|c| c.prop == prop("color")) {
+                c.push(Cell::new(prop("placeholderColor"), color.value.clone()));
+            }
+            c
+        } else {
+            self.look.input.clone()
+        };
+        cells.push(Cell::new(prop("value"), Value::Str(value.clone())));
+        if !placeholder.is_empty() {
+            cells.push(Cell::new(prop("placeholder"), Value::Str(placeholder.into())));
+        }
+        cells.push(Cell::new(
+            a11y::ID,
+            Value::Str(format!("rekindle.{plugin}.{key}.input")),
+        ));
+        let edit = (element.clone(), UiInput::Text(value.clone()));
+        self.presses.insert((surface.into(), key.into()), press(edit));
+        self.node(
+            ElementKind::INPUT,
+            cells,
+            Vec::new(),
+            Some(handler(plugin, surface, key)),
+        )
+    }
+
     /// The icon of a row with this key, if it has one.
     fn icon(&self, key: &str) -> Option<String> {
         if !self.icons {
@@ -872,6 +920,9 @@ impl<'l> Builder<'l> {
                 let mut lines = vec![self.text(&look.title, &r.title)];
                 if let Some(s) = &r.subtitle {
                     lines.push(self.text(&look.subtitle, s));
+                }
+                if let Some(field) = &r.input {
+                    lines.push(self.input(plugin, surface, &r.key, field, press));
                 }
                 inner.push(self.node(ElementKind::VIEW, look.column.clone(), lines, None));
                 match r.end {
@@ -1296,6 +1347,49 @@ mod tests {
                 panel: "settings".into(),
                 element: "mode".into(),
                 value: UiInput::Selected(0),
+            }
+        );
+    }
+
+    #[test]
+    fn a_text_field_is_an_input_whose_edits_report_its_text() {
+        let panel = PanelItem {
+            plugin: "dev.a".into(),
+            id: "settings".into(),
+            title: "Settings".into(),
+            widgets: vec![Widget::TextInput {
+                id: "name".into(),
+                label: "Name".into(),
+                value: "Ann".into(),
+                placeholder: "Who".into(),
+            }],
+        };
+        let r = page(&look(), &[Widget::Heading("A".into())], &[panel], 0);
+        Work {
+            mounts: r.mounts.clone(),
+            ..Work::default()
+        }
+        .check()
+        .unwrap();
+        let field = node(&r, "rekindle.dev.a.settings/name.input");
+        assert_eq!(field.kind, ElementKind::INPUT);
+        assert_eq!(
+            field.on_press,
+            Some(handler("dev.a", PAGE_PANEL, "settings/name"))
+        );
+        let cell = |name| {
+            let prop = PropId::from_name(name).unwrap();
+            field.cells.iter().find(|c| c.prop == prop).map(|c| c.value.clone())
+        };
+        assert_eq!(cell("value"), Some(Value::Str("Ann".into())));
+        assert_eq!(cell("placeholder"), Some(Value::Str("Who".into())));
+        assert_eq!(
+            r.presses[&(PAGE_PANEL.to_string(), "settings/name".to_string())],
+            Press::Ui {
+                plugin: "dev.a".into(),
+                panel: "settings".into(),
+                element: "name".into(),
+                value: UiInput::Text("Ann".into()),
             }
         );
     }

@@ -2413,3 +2413,45 @@ fn a_flush_repaints_the_guests_cells_for_a_new_recolour() {
     host.apply(&Turn::from_bytes(&e.flush().expect("a flush")).unwrap());
     assert_eq!(host.props().get(PAGE, ids::BACKGROUND), Some(&rgba(0x31_3338ff)));
 }
+
+#[test]
+fn a_mounted_field_reports_its_text_to_the_host() {
+    let field = Mount {
+        under: feed(),
+        after: None,
+        before: None,
+        root: PLUGIN,
+        nodes: vec![MountNode {
+            id: PLUGIN,
+            kind: ElementKind::INPUT,
+            cells: vec![Cell::new(VALUE, str("old"))],
+            children: vec![],
+            on_press: Some(Handler::Plugin {
+                plugin: "dev.example.p".into(),
+                surface: "page.panel".into(),
+                element: "name".into(),
+            }),
+        }],
+    };
+    let (mut e, mut host) = engine(with_mounts(vec![field]));
+    let (applied, _) = send(&mut e, &mut host, &first());
+    // The field asks for its edits, not for presses.
+    let on = applied.ops.iter().find_map(|op| match op {
+        NodeOp::Create { node, props, .. } if *node == PLUGIN => {
+            props.iter().find(|(p, _)| *p == ON).map(|(_, v)| v.clone())
+        }
+        _ => None,
+    });
+    assert_eq!(on, Some(Value::Array(vec![str("changeText")])));
+    // An edit is the host's, and the guest never sees it.
+    assert!(matches!(
+        e.event(&change_text(PLUGIN, "new name", 3)).unwrap(),
+        Verdict::Consume(None)
+    ));
+    let texts = e.take_texts();
+    assert_eq!(texts.len(), 1);
+    assert_eq!(texts[0].text, "new name");
+    assert_eq!(texts[0].press.element, "name");
+    assert!(e.take_presses().is_empty());
+    assert!(e.take_texts().is_empty());
+}

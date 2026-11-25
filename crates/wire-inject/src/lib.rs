@@ -94,7 +94,7 @@ use rekindle_wire::frame::{self, Frame};
 use rekindle_wire::motion::ids::WORKLET;
 use rekindle_wire::motion::worklet::{PressLook, Worklet};
 use rekindle_wire::turn::{ON, SPANS, create_props};
-use rekindle_wire::{DecodeError, NodeId, NodeOp, PropId, Tree, Turn, Value};
+use rekindle_wire::{DecodeError, ElementKind, NodeId, NodeOp, PropId, Tree, Turn, Value};
 
 pub use compose::{
     CHANGE_TEXT, Composer, FORCE_VALUE, Field, Found, Inserted, SELECTION_CHANGE, Typed, VALUE,
@@ -103,7 +103,7 @@ pub use pick::{Basis, Candidate, Pick};
 pub use select::{Selector, TEXT};
 pub use switches::{NodeCells, Switch, SwitchState, Switches};
 pub use work::{
-    Cell, ColorRole, Handler, LabelRule, Mount, MountNode, PluginPress, PressAction, PressRule,
+    Cell, ColorRole, Handler, LabelRule, Mount, MountNode, PluginPress, PluginText, PressAction, PressRule,
     PropRecolor, Recolor, RowAction, RowRule, Work, WorkError, Write,
 };
 
@@ -180,6 +180,8 @@ pub struct Engine {
     unmount: Vec<Mount>,
     /// Presses on nodes with a [`Handler::Plugin`], for the host.
     presses: Vec<PluginPress>,
+    /// Text typed in rekindle's own fields since the last [`Engine::take_texts`].
+    texts: Vec<PluginText>,
     /// The guest's nodes kept out of the host's tree.
     dropped: BTreeSet<NodeId>,
     /// The cells each of rekindle's nodes should hold.
@@ -213,6 +215,7 @@ impl Engine {
             created: BTreeSet::new(),
             unmount: Vec::new(),
             presses: Vec::new(),
+            texts: Vec::new(),
             dropped: BTreeSet::new(),
             cells: BTreeMap::new(),
             counts: BTreeMap::new(),
@@ -316,6 +319,12 @@ impl Engine {
     /// in order.
     pub fn take_presses(&mut self) -> Vec<PluginPress> {
         std::mem::take(&mut self.presses)
+    }
+
+    /// The text typed in `input` nodes with a [`Handler::Plugin`] since the
+    /// last call, in order, each the field's whole text after the edit.
+    pub fn take_texts(&mut self) -> Vec<PluginText> {
+        std::mem::take(&mut self.texts)
     }
 
     /// Put `text` at the caret of the guest's text field the user last
@@ -555,6 +564,22 @@ impl Engine {
                     surface,
                     element,
                 }),
+                Some(Handler::Plugin {
+                    plugin,
+                    surface,
+                    element,
+                }) if ev.name == compose::CHANGE_TEXT => {
+                    if let Some(text) = compose::changed_text(&ev.value) {
+                        self.texts.push(PluginText {
+                            press: PluginPress {
+                                plugin,
+                                surface,
+                                element,
+                            },
+                            text,
+                        });
+                    }
+                }
                 _ => {}
             }
             return Ok(Verdict::Consume(None));
@@ -957,7 +982,9 @@ impl Engine {
                 .map(|n| {
                     let mut props = self.cells.get(&n.id).cloned().unwrap_or_default();
                     if n.on_press.is_some() {
-                        props.push((ON, Value::Array(vec![Value::Str("press".into())])));
+                        // A field reports its edits, anything else its presses.
+                        let on = if n.kind == ElementKind::INPUT { "changeText" } else { "press" };
+                        props.push((ON, Value::Array(vec![Value::Str(on.into())])));
                     }
                     NodeOp::Create {
                         node: n.id,

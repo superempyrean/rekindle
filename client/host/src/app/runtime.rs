@@ -45,7 +45,7 @@ use rekindle_plugin_host::model::{
     SLOT_USER_MENU,
 };
 use rekindle_ui_hook::{Click, UiInput, Widget};
-use rekindle_wire_inject::{Handler, Mount, PluginPress, Recolor, Write};
+use rekindle_wire_inject::{Handler, Mount, PluginPress, PluginText, Recolor, Write};
 
 use super::log;
 use crate::gateway::{Decision, Passed};
@@ -112,6 +112,12 @@ enum Request {
     /// done.
     Press {
         press: PluginPress,
+        done: mpsc::SyncSender<()>,
+    },
+    /// The user edited one of rekindle's text fields: report its text, and
+    /// say when done.
+    Text {
+        typed: PluginText,
         done: mpsc::SyncSender<()>,
     },
     /// Run a dispatch past the plugins' event filters, and send back its
@@ -216,6 +222,17 @@ pub(crate) fn press(p: &PluginPress) -> bool {
         ANSWER_WAIT
     };
     sent && answered.recv_timeout(wait).is_ok()
+}
+
+/// Report the text the user typed in one of rekindle's fields, and wait
+/// as [`press`] does.
+pub(crate) fn text(typed: &PluginText) -> bool {
+    let (done, answered) = mpsc::sync_channel(1);
+    let sent = send(Request::Text {
+        typed: typed.clone(),
+        done,
+    });
+    sent && answered.recv_timeout(ANSWER_WAIT).is_ok()
 }
 
 /// Run the slash command `text` names, and wait up to [`PAGE_WAIT`] for
@@ -527,8 +544,12 @@ fn run(rx: &mpsc::Receiver<Request>) {
     let mut received = 0u64;
     loop {
         match rx.recv_timeout(TICK) {
+            Ok(Request::Text { typed, done }) => {
+                serve(&mut driver, &mut surfaces, &typed.press, Some(&typed.text));
+                let _ = done.send(());
+            }
             Ok(Request::Press { press, done }) => {
-                serve(&mut driver, &mut surfaces, &press);
+                serve(&mut driver, &mut surfaces, &press, None);
                 // The press may have stopped waiting.
                 let _ = done.send(());
                 // The menu's counts, after the press is answered: reading
@@ -587,7 +608,7 @@ fn deliver_events(driver: &mut Driver, passed: Vec<Passed>, received: &mut u64) 
 
 /// Run one press: queue the click it reports, let the Driver take it, and
 /// hand the engine what changed.
-fn serve(driver: &mut Driver, surfaces: &mut Surfaces, p: &PluginPress) {
+fn serve(driver: &mut Driver, surfaces: &mut Surfaces, p: &PluginPress, text: Option<&str>) {
     let at = Instant::now();
     let before = running(driver);
     match p.surface.as_str() {
@@ -595,7 +616,11 @@ fn serve(driver: &mut Driver, surfaces: &mut Surfaces, p: &PluginPress) {
         crate::picker::GUEST_TAB => surfaces.picker_shown = None,
         _ => {}
     }
-    let click = surfaces.click(p, &before);
+    let mut click = surfaces.click(p, &before);
+    // An edit of a text field reports the field's text.
+    if let (Some(t), Some(Click::Ui { value, .. })) = (text, click.as_mut()) {
+        *value = UiInput::Text(t.to_string());
+    }
     let what = match &click {
         Some(Click::Ui {
             plugin,

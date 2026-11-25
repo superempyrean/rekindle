@@ -125,6 +125,15 @@ pub struct Inserted {
     pub force: ForceValue,
 }
 
+/// The text a `changeText` event's value carries: a string, or an object
+/// whose `text` is it.
+pub(crate) fn changed_text(value: &Value) -> Option<String> {
+    match value {
+        Value::Str(s) => Some(s.clone()),
+        v => ForceValue::from_value(v).map(|f| f.text),
+    }
+}
+
 impl Fields {
     /// Note a UI event on a guest node.
     pub(crate) fn on_event(&mut self, ev: &Event) {

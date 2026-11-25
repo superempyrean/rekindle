@@ -698,6 +698,17 @@ fn deliver_presses() -> Option<Vec<u8>> {
     for typed in with_engine(Engine::take_typed).unwrap_or_default() {
         run_typed(&typed);
     }
+    for typed in with_engine(Engine::take_texts).unwrap_or_default() {
+        let answered = runtime::handles(&typed.press) && runtime::text(&typed);
+        let flushed = flush_pending();
+        log(&format!(
+            "text {}/{}/{}: {} chars, answered={answered} flushed={flushed} bytes",
+            typed.press.plugin,
+            typed.press.surface,
+            typed.press.element,
+            typed.text.chars().count()
+        ));
+    }
     let presses = with_engine(Engine::take_presses).unwrap_or_default();
     let mut instead = None;
     for p in &presses {
