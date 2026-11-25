@@ -1,9 +1,12 @@
-//! Kaomoji: a picker for text faces, beside the client's emoji picker.
+//! Kaomoji: a picker for text faces, in or beside the client's emoji picker.
 //!
-//! - A chat-bar button (and a keybind) opens a modal: a search field, a
-//!   category list with the recently used ones first, and a button per face.
-//!   Clicking a face puts it in the composer at the cursor and closes the
-//!   modal, as picking an emoji does.
+//! - Where the client has room for it, a Kaomoji tab in the emoji picker,
+//!   beside Emoji, GIFs and Stickers: the categories, with the recently used
+//!   faces first, and a button per face. Picking a face puts it in the
+//!   composer at the cursor, and the picker stays open.
+//! - Elsewhere, a chat-bar button (and a keybind) opens a modal with a
+//!   search field as well. Clicking a face puts it in the composer and
+//!   closes the modal, as picking an emoji does.
 //! - `/kaomoji <search>` with autocomplete puts the chosen face in the
 //!   composer.
 //!
@@ -17,6 +20,7 @@ use rekindle_sdk::actions;
 use rekindle_sdk::prelude::*;
 use rekindle_sdk::slots::UiError;
 
+/// The modal's id, and the picker tab's and its panel's.
 const MODAL: &str = "kaomoji";
 const RECENT_KEY: &str = "recent";
 const MAX_RECENT: usize = 18;
@@ -32,6 +36,8 @@ struct Kaomoji {
     recent: Vec<String>,
     /// The faces on the modal's buttons now, by button index.
     shown: Vec<String>,
+    /// The faces are in a tab of the client's emoji picker, not a modal.
+    in_picker: bool,
 }
 
 impl Kaomoji {
@@ -89,14 +95,24 @@ impl Kaomoji {
         for (i, face) in self.shown.iter().enumerate() {
             p = p.button(&format!("face-{i}"), face);
         }
-        p.show_modal();
+        if self.in_picker {
+            p.show();
+        } else {
+            p.show_modal();
+        }
     }
 
     fn pick(&mut self, face: &str) {
         match actions::insert_text(face) {
             Ok(()) => {
                 self.used(face);
-                ui::close_modal();
+                if self.in_picker {
+                    // The picker stays open, with the face first in
+                    // Recently used.
+                    self.show();
+                } else {
+                    ui::close_modal();
+                }
             }
             Err(e) => ui::toast_kind(
                 &format!("Couldn't put the kaomoji in the composer: {e:?}"),
@@ -114,12 +130,22 @@ impl Plugin for Kaomoji {
             .filter(|f| !f.is_empty())
             .map(String::from)
             .collect();
-        match slots::button(slots::CHAT_BAR, "open", Icon::Smile, "Kaomoji", false) {
-            Err(UiError::Unavailable) => {
-                warn!("no chat-bar button on this client build; use /kaomoji or the keybind");
+        let in_picker = match slots::picker_tab(MODAL, "Kaomoji") {
+            Ok(()) => true,
+            Err(UiError::Unavailable) => false,
+            Err(e) => {
+                error!("emoji picker tab: {e:?}");
+                false
             }
-            Err(e) => error!("chat-bar button: {e:?}"),
-            Ok(()) => {}
+        };
+        if !in_picker {
+            match slots::button(slots::CHAT_BAR, "open", Icon::Smile, "Kaomoji", false) {
+                Err(UiError::Unavailable) => {
+                    warn!("no chat-bar button on this client build; use /kaomoji or the keybind");
+                }
+                Err(e) => error!("chat-bar button: {e:?}"),
+                Ok(()) => {}
+            }
         }
         if let Err(e) =
             ui::register_keybind("open", "Open the kaomoji picker", Some("Ctrl+Shift+K"))
@@ -132,17 +158,27 @@ impl Plugin for Kaomoji {
         if let Err(e) = commands::register(cmd) {
             warn!("no slash command: {e:?}");
         }
-        Ok(Kaomoji {
+        let mut k = Kaomoji {
             query: String::new(),
             category: 1,
             recent,
             shown: Vec::new(),
-        })
+            in_picker,
+        };
+        if in_picker {
+            // The tab's body is there before the user first picks it.
+            k.open();
+        }
+        Ok(k)
     }
 
     fn on_slot(&mut self, ev: SlotEvent) {
-        if matches!(&ev, SlotEvent::Clicked(c) if c.item == "open") {
-            self.open();
+        match &ev {
+            SlotEvent::Clicked(c) if c.slot == slots::EXPRESSION_PICKER_TAB && c.item == MODAL => {
+                self.open();
+            }
+            SlotEvent::Clicked(c) if c.item == "open" => self.open(),
+            _ => {}
         }
     }
 

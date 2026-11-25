@@ -1,6 +1,8 @@
 use rekindle_plugin_host::MockBackend;
 use rekindle_plugin_host::api::{CommandReply, OptionValue};
-use rekindle_plugin_host::model::{Element, SLOT_CHAT_BAR_BUTTON, SlotItem};
+use rekindle_plugin_host::model::{
+    Element, SLOT_CHAT_BAR_BUTTON, SLOT_EXPRESSION_PICKER_TAB, SlotItem,
+};
 use rekindle_plugin_host::testing::Harness;
 
 const PLUGIN: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../plugins/rust/kaomoji");
@@ -135,6 +137,47 @@ fn slash_command_with_autocomplete() {
     // Both count as used.
     open(&mut h);
     assert_eq!(faces(&h).len(), 2);
+}
+
+/// A harness on a client with an emoji picker that takes tabs.
+fn with_picker() -> Harness {
+    let mut b = MockBackend::new();
+    b.set_slot_available(SLOT_EXPRESSION_PICKER_TAB, true);
+    Harness::builder(PLUGIN).backend(b).start().unwrap()
+}
+
+/// The faces in the picker tab's panel, in order.
+fn tab_faces(h: &Harness) -> Vec<String> {
+    h.panel("kaomoji")
+        .expect("the tab's panel is shown")
+        .elements
+        .iter()
+        .filter_map(|e| match e {
+            Element::Button { id, label, .. } if id.starts_with("face-") => Some(label.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_tab_in_the_emoji_picker_replaces_the_chat_bar_button() {
+    let mut h = with_picker();
+    assert!(
+        matches!(&h.slot_items(SLOT_EXPRESSION_PICKER_TAB)[..], [SlotItem::ListItem { id, title }] if id == "kaomoji" && title == "Kaomoji")
+    );
+    assert!(h.slot_items(SLOT_CHAT_BAR_BUTTON).is_empty());
+    // The body is there before the tab is first picked.
+    let first = tab_faces(&h)[0].clone();
+    h.click_slot("kaomoji", rekindle_plugin_host::api::Target::None);
+    assert_eq!(tab_faces(&h)[0], first);
+
+    // A face goes in the composer, and the tab stays, with the face under
+    // Recently used.
+    h.click("kaomoji", "face-0");
+    assert_eq!(composer(&h), first);
+    assert!(h.modal().is_none());
+    h.select("kaomoji", "category", 0);
+    assert_eq!(tab_faces(&h), vec![first]);
 }
 
 #[test]
