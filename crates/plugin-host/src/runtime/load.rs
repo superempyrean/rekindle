@@ -195,6 +195,7 @@ impl Runtime {
         let storage = self.storage(&m.id)?;
         let settings = self.settings_store(m);
         let locale = self.backend.lock().unwrap().client_info().locale;
+        let ledger = self.ledger_of(&m.id);
         Ok(PluginState {
             id: m.id.clone(),
             role,
@@ -239,6 +240,7 @@ impl Runtime {
             wall: None,
             missing_slots: BTreeSet::new(),
             composing: None,
+            ledger,
         })
     }
 

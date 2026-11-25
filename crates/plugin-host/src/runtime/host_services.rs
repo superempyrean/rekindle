@@ -200,6 +200,9 @@ impl wit::theming::Host for PluginState {
             radius: fin(style.radius, 0.0, 32.0),
             background: style.background.map(color_from_wit),
         };
+        if super::state::valid_id(&surface) {
+            self.ledger.surface(&surface);
+        }
         let r = self
             .backend
             .lock()
@@ -544,7 +547,13 @@ impl wit::http::Host for PluginState {
             body: req.body,
         };
         let result = net::check_request(&req, &self.grants.network_allowlist, &self.net_limits)
+            .inspect_err(|e| {
+                if let net::HttpError::HostNotAllowed(host) = e {
+                    self.ledger.refused_host(host);
+                }
+            })
             .and_then(|host| {
+                self.ledger.request(&host);
                 self.log(
                     model::LogLevel::Debug,
                     format!("[host] {} https://{host}…", req.method.as_str()),

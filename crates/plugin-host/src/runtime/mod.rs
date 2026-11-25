@@ -32,7 +32,8 @@
 //! `inspect` and `load` for files, `events`, `gestures`,
 //! `compose` and `isolate` for the hooks, `call` for calling into a plugin
 //! and its faults, `stores` for storage and settings, `themes` for theme
-//! files. The `host_*` modules implement the host functions plugins import.
+//! files. The `host_*` modules implement the host functions plugins import,
+//! and `ledger` counts what each plugin did with them.
 
 mod call;
 pub mod compiled;
@@ -49,6 +50,7 @@ mod host_ui;
 mod http;
 mod inspect;
 mod isolate;
+pub mod ledger;
 mod load;
 mod logs;
 mod render;
@@ -154,6 +156,11 @@ pub struct RuntimeConfig {
     /// trusted as the host's own files: rekindle's home
     /// (`Home::runtime_config`), never a shared one.
     pub compile_cache: Option<PathBuf>,
+    /// The directory of plugin directories (`plugins/` in the home), where
+    /// each installed plugin's ledger keeps its days
+    /// (`<dir>/<id>/ledger.json`, [`ledger::Days`]). `None` keeps this
+    /// session's counts only.
+    pub ledger: Option<PathBuf>,
 }
 
 impl Default for RuntimeConfig {
@@ -164,6 +171,7 @@ impl Default for RuntimeConfig {
             limits: Limits::default(),
             log_capacity: 2000,
             compile_cache: None,
+            ledger: None,
         }
     }
 }
@@ -309,7 +317,14 @@ pub struct Runtime {
     themes: Vec<LoadedTheme>,
     /// The logged-in account (storage namespaces are per account).
     account: Option<u64>,
+    /// Each plugin's ledger, kept across reloads and unloads.
+    ledgers: HashMap<String, Arc<ledger::Ledger>>,
+    /// When the ledgers were last written to their files.
+    ledger_flushed: Instant,
 }
+
+/// How often [`Runtime::fire_due_timers`] writes the ledgers.
+const LEDGER_FLUSH: std::time::Duration = std::time::Duration::from_mins(1);
 
 impl Runtime {
     /// A runtime with nothing loaded, on the process's engine ([`engine`]),
@@ -321,10 +336,7 @@ impl Runtime {
             .clone()
             .map(compiled::CompileCache::new);
         let mut linker = Linker::new(&engine);
-        crate::bindings::Plugin::add_to_linker::<
-            PluginState,
-            wasmtime::component::HasSelf<PluginState>,
-        >(&mut linker, |s| s)?;
+        ledger::link(&mut linker)?;
         let logs = Logs::new(config.log_capacity);
         Ok(Self {
             engine,
@@ -338,6 +350,8 @@ impl Runtime {
             plugins: Vec::new(),
             themes: Vec::new(),
             account: None,
+            ledgers: HashMap::new(),
+            ledger_flushed: Instant::now(),
             last_load: LoadTimes::default(),
             compiled,
         })
@@ -393,6 +407,43 @@ impl Runtime {
         self.find(id).is_some() || self.find_theme(id).is_some()
     }
 
+    /// What plugin `id` did this session, whether or not it is still
+    /// loaded. `None` if it never loaded.
+    pub fn activity(&self, id: &str) -> Option<ledger::Activity> {
+        self.ledgers.get(id).map(|l| l.session())
+    }
+
+    /// Add what each plugin did since the last call to today's record in
+    /// its `ledger.json` ([`RuntimeConfig::ledger`]). A plugin that isn't
+    /// installed there keeps this session's counts only. The runtime calls
+    /// this every minute from [`Runtime::fire_due_timers`] and when it is
+    /// dropped. A client calls it before it shows a plugin's page.
+    pub fn flush_activity(&mut self) {
+        self.ledger_flushed = Instant::now();
+        let Some(dir) = self.config.ledger.clone() else {
+            return;
+        };
+        let today = ledger::today();
+        for (id, l) in &self.ledgers {
+            let delta = l.unflushed();
+            let plugin_dir = dir.join(id);
+            if delta.is_empty() || !plugin_dir.is_dir() {
+                continue;
+            }
+            let path = plugin_dir.join(ledger::FILE_NAME);
+            let mut days = ledger::Days::load(&path);
+            days.record(today, &delta);
+            if let Err(e) = days.save(&path) {
+                tracing::warn!("couldn't write {}: {e:#}", path.display());
+            }
+        }
+    }
+
+    /// This plugin's ledger, made the first time it loads.
+    fn ledger_of(&mut self, id: &str) -> Arc<ledger::Ledger> {
+        self.ledgers.entry(id.to_string()).or_default().clone()
+    }
+
     /// Everything that resolved on this build, as plugins see it through
     /// `host.features()`.
     pub fn features(&self) -> Vec<String> {
@@ -412,6 +463,12 @@ impl Runtime {
         for idx in 0..self.themes.len() {
             self.apply_theme(idx);
         }
+    }
+}
+
+impl Drop for Runtime {
+    fn drop(&mut self) {
+        self.flush_activity();
     }
 }
 

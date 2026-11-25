@@ -11,7 +11,8 @@ crate-type = ["cdylib"]
 [package.metadata.rekindle]
 id = "test.rekindle.probe"
 name = "Probe"
-capabilities = ["ui", "read-client", "read-messages", "act", "act-local", "moderate", "history", "view", "intercept", "read-users", "intercept-http", "wire-raw"]
+capabilities = ["ui", "read-client", "read-messages", "act", "act-local", "moderate", "history", "view", "intercept", "read-users", "intercept-http", "wire-raw", "network"]
+network = ["api.example.com"]
 
 [dependencies]
 rekindle-sdk = { path = "../../../../sdk" }

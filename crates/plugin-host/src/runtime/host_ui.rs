@@ -263,6 +263,7 @@ impl wit::ui::Host for PluginState {
             self.missing_slots.insert(slot.clone());
         }
         if r.is_ok() {
+            self.ledger.slot(&slot);
             self.slot_items.insert(key);
         }
         reply(r.map_err(UiError::from))
@@ -624,6 +625,7 @@ impl wit::ui::Host for PluginState {
         if !self.navigation_ok() {
             return err(UiError::NoGesture);
         }
+        self.ledger.action("navigate");
         let r = self
             .backend
             .lock()
@@ -644,6 +646,7 @@ impl wit::ui::Host for PluginState {
         if !self.navigation_ok() {
             return err(UiError::NoGesture);
         }
+        self.ledger.action("open-url");
         let r = self
             .backend
             .lock()
@@ -660,6 +663,7 @@ impl wit::ui::Host for PluginState {
         if !self.navigation_ok() {
             return err(UiError::NoGesture);
         }
+        self.ledger.action("open-media");
         let r = self
             .backend
             .lock()
