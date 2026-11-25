@@ -40,10 +40,13 @@
 //! (`crate::elements`).
 //!
 //! The plugins' context-menu rows go into the guest's own menu, as one
-//! group where `wire.json`'s `menus` puts it. A press on one reaches the
-//! plugin with the menu's target: the id under the list row whose event
-//! opened the menu. The guest then receives a `dismiss` on the menu's sheet
-//! in place of the press, and the menu closes.
+//! group where `wire.json`'s `menus` puts it ([`menus`]). A press on one
+//! reaches the plugin with the menu's target: the id at the node or list
+//! row whose event opened the menu. The guest then receives a `dismiss` on
+//! the menu's sheet in place of the press, and the menu closes.
+//!
+//! Plugins' `client-state` queries read the guest's own store through
+//! the platform's host calls ([`database`]).
 //!
 //! Android's hooks are `crate::android`. Another platform's hooks link this
 //! crate as a library, call [`set_platform`] and then [`start`], and hand
