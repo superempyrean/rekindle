@@ -57,6 +57,9 @@ pub enum Selector {
     /// a chain of `ChildOf`, it still matches when the guest wraps the node
     /// in one more `view`.
     Within(Box<Selector>),
+    /// A node with a descendant the selector matches, at any depth: the
+    /// sheet that holds a given element.
+    Has(Box<Selector>),
     /// The `n`th node `of` matches, counted from 0 in tree order: the root
     /// first, then each node's children in their order, depth first. A
     /// guest that draws one element twice gives both copies the same cells
@@ -237,6 +240,20 @@ impl<'t> View<'t> {
                         return true;
                     }
                     at = p;
+                }
+                false
+            }
+            Selector::Has(s) => {
+                let mut seen = HashSet::new();
+                let mut stack = self.children(node).to_vec();
+                while let Some(n) = stack.pop() {
+                    if !seen.insert(n) {
+                        continue;
+                    }
+                    if self.matches(n, s) {
+                        return true;
+                    }
+                    stack.extend(self.children(n).iter().copied());
                 }
                 false
             }

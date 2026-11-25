@@ -2296,6 +2296,39 @@ fn within_matches_an_ancestor_at_any_depth() {
     assert!(!view.matches(1, &Selector::cell(a11y::ID, "settings-phone").within()));
 }
 
+#[test]
+fn has_matches_a_descendant_at_any_depth() {
+    let tree = picker();
+    let view = select::View::new(&tree);
+    let holds_sheet = Selector::Has(Box::new(Selector::cell(a11y::ID, "settings-phone")));
+    let found = view.select(&holds_sheet);
+    assert!(!found.is_empty());
+    // A node holds its descendants, not itself.
+    let sheet = view.select(&Selector::cell(a11y::ID, "settings-phone"));
+    assert!(sheet.iter().all(|n| !found.contains(n)));
+    let json = serde_json::to_string(&holds_sheet).unwrap();
+    assert!(json.starts_with(r#"{"has":"#), "{json}");
+}
+
+#[test]
+fn last_of_is_the_latest_of_the_names() {
+    let mut e = Engine::new(Work::default()).unwrap();
+    let long = PropId::from_name("longPress").unwrap();
+    let row = PropId::from_name("rowLongPress").unwrap();
+    for (node, name) in [(3, row), (4, long)] {
+        let ev = rekindle_wire::event::Event {
+            node,
+            name,
+            value: Value::Null,
+        };
+        let _ = e.event(&ev.to_bytes());
+    }
+    let (at, ev) = e.last_of(&[row, long]).unwrap();
+    assert_eq!((ev.node, ev.name), (4, long));
+    let (earlier, _) = e.last_of(&[row]).unwrap();
+    assert!(earlier < at);
+}
+
 /// A channel list drawn twice, as Phoenix draws a server's: two copies of
 /// `guild-search` with the same id and subtree. The second copy's nodes
 /// have the lower ids, so tree order and id order differ.

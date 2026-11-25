@@ -198,8 +198,11 @@ pub struct Engine {
     composer: Composer,
     /// Slash commands sent from a field, for the host.
     typed: Vec<Typed>,
-    /// The last event of each name on one of the guest's nodes.
-    last: BTreeMap<PropId, Event>,
+    /// The last event of each name on one of the guest's nodes, with its
+    /// place among all the events the engine saw.
+    last: BTreeMap<PropId, (u64, Event)>,
+    /// How many events the engine has seen.
+    events: u64,
     /// Set by [`Engine::pick`] until a press arrives.
     picking: bool,
     picked: Option<Pick>,
@@ -225,6 +228,7 @@ impl Engine {
             composer: Composer::default(),
             typed: Vec::new(),
             last: BTreeMap::new(),
+            events: 0,
             picking: false,
             picked: None,
         };
@@ -406,7 +410,18 @@ impl Engine {
     /// nodes, whatever was done with it: the `rowLongPress` that opened a
     /// menu, say.
     pub fn last_event(&self, name: PropId) -> Option<&Event> {
-        self.last.get(&name)
+        self.last.get(&name).map(|(_, ev)| ev)
+    }
+
+    /// The latest of the last events of `names`, and its place among all
+    /// the events the engine saw: the long press or the accessibility
+    /// action that opened a menu, whichever came last.
+    pub fn last_of(&self, names: &[PropId]) -> Option<(u64, &Event)> {
+        names
+            .iter()
+            .filter_map(|n| self.last.get(n))
+            .max_by_key(|(at, _)| *at)
+            .map(|(at, ev)| (*at, ev))
     }
 
     /// The slash commands sent since the last call, in order.
@@ -589,7 +604,8 @@ impl Engine {
             self.picked = pick::pick(&self.guest, ev.node);
             return Ok(Verdict::Consume(None));
         }
-        self.last.insert(ev.name, ev.clone());
+        self.events += 1;
+        self.last.insert(ev.name, (self.events, ev.clone()));
         if let Some(typed) = self.typed_command(&ev) {
             self.typed.push(typed);
             return Ok(Verdict::Consume(None));
