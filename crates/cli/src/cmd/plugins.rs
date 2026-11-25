@@ -446,7 +446,7 @@ fn list(json: bool) -> Result<()> {
                     "  contacts: {}",
                     g.network_allowlist
                         .iter()
-                        .cloned()
+                        .map(|h| if h == "*" { "any website".into() } else { h.clone() })
                         .collect::<Vec<_>>()
                         .join(", ")
                 );

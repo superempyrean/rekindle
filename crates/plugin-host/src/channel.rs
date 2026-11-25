@@ -167,6 +167,10 @@ impl Source {
 pub struct Listing {
     pub author: String,
     pub source: Source,
+    /// A maintainer approved the plugin reaching any website
+    /// (`network = ["*"]`). Without it, a plugin that asks to isn't listed.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub any_host: bool,
 }
 
 /// Where a community plugin's [`Listing`] is.
@@ -482,6 +486,12 @@ pub fn build(opts: &BuildOptions) -> Result<Channel> {
                 .is_some()
             {
                 continue;
+            }
+            if m.any_host() && !listing.any_host {
+                bail!(
+                    "{} asks to contact any website, and its listing doesn't say a maintainer approved it (`\"any_host\": true`)",
+                    path.display()
+                );
             }
             let (capabilities, network) = (m.capabilities.clone(), m.network.clone());
             channel.community.push(CommunityPlugin {

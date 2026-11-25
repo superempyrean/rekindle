@@ -16,6 +16,9 @@ use crate::capability::{Capability, Trust};
 use crate::home::{InstallRecord, TrustResolution, TrustSource};
 use crate::manifest::{Manifest, UpdateSource, is_discord_host};
 
+/// The `network` line for a plugin that may reach any website.
+pub const ANY_HOST_ABILITY: &str = "make HTTPS requests to any website";
+
 /// Shown next to Discord hosts.
 pub const DISCORD_WARNING: &str = "talks to Discord's API (it never sees your token or password)";
 
@@ -144,7 +147,12 @@ pub fn screen(
             hosts.push(h);
         }
     }
-    let to = and_list(&hosts);
+    let any_host = manifest.any_host();
+    let to = if any_host {
+        "any website".to_string()
+    } else {
+        and_list(&hosts)
+    };
 
     let mut headline = Vec::new();
     if has(Capability::Network) {
@@ -191,7 +199,11 @@ pub fn screen(
         .iter()
         .map(|&cap| Ability {
             cap,
-            description: cap.describe(),
+            description: if cap == Capability::Network && any_host {
+                ANY_HOST_ABILITY
+            } else {
+                cap.describe()
+            },
             new: previous.is_some_and(|p| !p.capabilities.contains(&cap)),
         })
         .collect();
@@ -281,7 +293,10 @@ pub fn render(s: &Screen) -> String {
     for a in &s.abilities {
         line(format!("  - {}{}", a.description, new(a.new)));
     }
-    if !s.hosts.is_empty() {
+    if s.manifest.any_host() {
+        let new = s.hosts.iter().any(|h| h.new);
+        line(format!("It can contact any website.{}", if new { "  [NEW]" } else { "" }));
+    } else if !s.hosts.is_empty() {
         line("It can contact:".into());
         for h in &s.hosts {
             let warn = if h.discord {
@@ -365,6 +380,21 @@ mod tests {
         let s = screen(&m, &third(), None);
         assert_eq!(s.headline[0], "It can contact a.example and b.example.");
         assert_eq!(s.hosts.len(), 2);
+    }
+
+    #[test]
+    fn any_host_is_a_plain_line() {
+        use Capability::*;
+        let m = manifest(&[ReadMessages, Network], &["*"]);
+        let s = screen(&m, &third(), None);
+        assert_eq!(s.headline[0], "It can read your messages and send them to any website.");
+        let net = s.abilities.iter().find(|a| a.cap == Network).unwrap();
+        assert_eq!(net.description, ANY_HOST_ABILITY);
+        let text = render(&s);
+        assert!(text.contains("It can contact any website."), "{text}");
+        assert!(!text.contains("- *"), "{text}");
+        let rec = InstallRecord::new(&manifest(&[Network], &["a.example"]), &third(), true);
+        assert!(asks_for_more(&rec, &m), "`*` is a new host");
     }
 
     #[test]

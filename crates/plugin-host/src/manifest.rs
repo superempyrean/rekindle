@@ -31,7 +31,8 @@ pub struct Manifest {
     #[serde(default)]
     pub authors: Vec<String>,
     pub capabilities: Vec<Capability>,
-    /// Hosts the plugin wants to reach (requires `network`). Exact hostnames.
+    /// Hosts the plugin wants to reach (requires `network`). Exact
+    /// hostnames, or [`ANY_HOST`] alone for any website.
     #[serde(default)]
     pub network: Vec<String>,
     /// WIT package version the plugin was built against.
@@ -120,7 +121,10 @@ impl Manifest {
         if !has_net && !self.network.is_empty() {
             bail!("network hosts declared but the `network` capability is not requested");
         }
-        for h in &self.network {
+        if self.any_host() && self.network.len() > 1 {
+            bail!("`network` lists `*` and other hosts; `*` already covers every website");
+        }
+        for h in self.network.iter().filter(|h| *h != ANY_HOST) {
             validate_host(h)?;
         }
         settings::validate_schema(&self.settings)?;
@@ -164,6 +168,11 @@ impl Manifest {
             .map(String::as_str)
     }
 
+    /// The plugin may reach any website: its `network` is [`ANY_HOST`].
+    pub fn any_host(&self) -> bool {
+        self.network.iter().any(|h| h == ANY_HOST)
+    }
+
     /// Requested directly, or implied by a requested capability
     /// (`read-messages` covers `read-users`, `act` covers `react`).
     pub fn requests(&self, cap: Capability) -> bool {
@@ -198,8 +207,12 @@ pub fn validate_id(id: &str) -> Result<()> {
     Ok(())
 }
 
-/// Hosts must be plain DNS names: no scheme, port, path, or wildcard. Exact
-/// names keep the install screen honest about where data can go.
+/// The `network` entry that lets a plugin reach any website. It is the only
+/// entry when it is there.
+pub const ANY_HOST: &str = "*";
+
+/// Hosts must be plain DNS names: no scheme, port, path, or wildcard, except
+/// [`ANY_HOST`] on its own.
 pub fn validate_host(h: &str) -> Result<()> {
     let ok = !h.is_empty()
         && h.len() <= 253
@@ -491,6 +504,14 @@ mod tests {
         let mut m = sample();
         m.id = "Bad Id".into();
         assert!(m.validate().is_err());
+        let mut m = sample();
+        m.network = vec!["*".into()];
+        m.validate().unwrap();
+        assert!(m.any_host());
+        m.network.push("api.example.com".into());
+        assert!(m.validate().is_err(), "`*` stands alone");
+        m.network = vec!["*.example.com".into()];
+        assert!(m.validate().is_err(), "no other wildcard");
     }
 
     #[test]

@@ -310,7 +310,8 @@ impl Trust {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Grants {
     pub granted: BTreeSet<Capability>,
-    /// The hosts `network` may reach: exactly the declared ones.
+    /// The hosts `network` may reach: exactly the declared ones, or
+    /// [`ANY_HOST`](crate::manifest::ANY_HOST) alone for any website.
     pub network_allowlist: BTreeSet<String>,
 }
 
@@ -363,6 +364,16 @@ mod tests {
                 .network_allowlist
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn any_host_is_granted_with_network_only() {
+        let any = ["*".to_string()];
+        assert_eq!(
+            resolve_grants(&[Network], &any).network_allowlist,
+            BTreeSet::from(["*".to_string()])
+        );
+        assert!(resolve_grants(&[Ui], &any).network_allowlist.is_empty());
     }
 
     #[test]

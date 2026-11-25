@@ -232,6 +232,8 @@ fn submit(path: &Path, author: String, repo: Option<String>, out: Option<PathBuf
         version: m.version.clone(),
         author,
         source,
+        // A maintainer approves a plugin reaching any website in review.
+        any_host: false,
     };
     sub.validate()?;
     let out = out.unwrap_or_else(|| dir.join(format!("{}.json", m.id)));

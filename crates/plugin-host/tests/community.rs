@@ -63,6 +63,7 @@ fn publish(
         let listing = Listing {
             author: author.to_string(),
             source: source(),
+            any_host: false,
         };
         std::fs::write(
             channel::listing_path_for(&path),
@@ -443,6 +444,7 @@ fn the_index_keeps_namespaces_apart() {
                 serde_json::to_vec(&Listing {
                     author: author.to_string(),
                     source: source(),
+                    any_host: false,
                 })
                 .unwrap(),
             )

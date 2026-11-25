@@ -2,7 +2,9 @@
 //!
 //! Policy is enforced here, before any transport is touched:
 //! - `https://` only;
-//! - the URL host must be on the plugin's approved allowlist (exact match);
+//! - the URL host must be on the plugin's approved allowlist (exact match),
+//!   or the allowlist is `*` and the host is a public name: a name with a
+//!   dot, not under `localhost`, `local`, `internal` or `home.arpa`;
 //! - redirects are never followed (the 3xx is returned to the plugin);
 //! - request/response bodies and total time are capped;
 //! - the host never adds cookies or credentials. There is no cookie jar and
@@ -125,7 +127,8 @@ pub fn check_request(
         }
         None => return Err(HttpError::InvalidUrl("missing host".into())),
     };
-    if !allowlist.contains(&host) {
+    let any = allowlist.contains(crate::manifest::ANY_HOST) && is_public_name(&host);
+    if !any && !allowlist.contains(&host) {
         return Err(HttpError::HostNotAllowed(host));
     }
     if req
@@ -145,6 +148,17 @@ pub fn check_request(
         )));
     }
     Ok(host)
+}
+
+/// Whether `host` names a machine on the internet rather than on the user's
+/// own network: it has a dot and isn't under a name kept for local use.
+fn is_public_name(host: &str) -> bool {
+    const LOCAL: [&str; 4] = ["localhost", "local", "internal", "home.arpa"];
+    let host = host.trim_end_matches('.');
+    host.contains('.')
+        && !LOCAL
+            .iter()
+            .any(|l| host == *l || host.ends_with(&format!(".{l}")))
 }
 
 /// The transport. Called only after [`check_request`] passed.
@@ -306,5 +320,33 @@ mod tests {
         r.headers
             .push(("Authorization".into(), "Bearer plugin-own-key".into()));
         assert!(check_request(&r, &allow, &l).is_ok());
+    }
+
+    #[test]
+    fn any_host_reaches_public_names_only() {
+        let any = BTreeSet::from(["*".to_string()]);
+        let l = NetLimits::default();
+        for ok in ["https://evil.example/", "https://API.Example.com/x", "https://discord.com/api"] {
+            assert!(check_request(&req(ok), &any, &l).is_ok(), "{ok}");
+        }
+        for refused in [
+            "https://localhost/",
+            "https://printer.local/",
+            "https://router.home.arpa/",
+            "https://db.internal/",
+            "https://a.localhost/",
+            "https://intranet/",
+            "https://1.2.3.4/",
+            "https://[::1]/",
+        ] {
+            assert!(
+                matches!(check_request(&req(refused), &any, &l), Err(HttpError::HostNotAllowed(_))),
+                "{refused}"
+            );
+        }
+        assert_eq!(
+            check_request(&req("http://evil.example/"), &any, &l),
+            Err(HttpError::InsecureScheme)
+        );
     }
 }

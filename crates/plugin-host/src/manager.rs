@@ -1274,7 +1274,8 @@ fn review_elements(s: &Screen, el: &mut Vec<Element>) {
             el.push(text(format!("• {}{}", a.description, new(a.new))));
         }
     }
-    if !s.hosts.is_empty() {
+    // A plugin that may reach any website says so in its abilities.
+    if !s.hosts.is_empty() && !s.manifest.any_host() {
         el.push(Element::Heading {
             text: "It can contact".into(),
         });

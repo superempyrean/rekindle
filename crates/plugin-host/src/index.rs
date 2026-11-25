@@ -110,6 +110,9 @@ pub fn prereview(bytes: &[u8]) -> Result<Vec<Finding>> {
             }
         }
     }
+    if m.any_host() {
+        out.push(note("contacts any website (`network = [\"*\"]`): the listing needs `\"any_host\": true` once a maintainer has approved it"));
+    }
     for h in m.network.iter().filter(|h| is_discord_host(h)) {
         out.push(note(format!("contacts Discord's API at {h}")));
     }
@@ -132,6 +135,11 @@ pub struct Submission {
     /// claims it, and later ones must come from the same account.
     pub author: String,
     pub source: Source,
+    /// The plugin may reach any website (`network = ["*"]`). A maintainer
+    /// sets it when approving that, and the build refuses such a plugin
+    /// without it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub any_host: bool,
 }
 
 impl Submission {
@@ -305,6 +313,7 @@ pub fn build_submission(
     let listing = Listing {
         author: sub.author.clone(),
         source: sub.source.clone(),
+        any_host: sub.any_host,
     };
     std::fs::write(&listing_path, serde_json::to_vec_pretty(&listing)?)
         .with_context(|| format!("writing {}", listing_path.display()))?;
@@ -337,6 +346,7 @@ mod tests {
                 commit: "a".repeat(40),
                 path: String::new(),
             },
+            any_host: false,
         }
     }
 
