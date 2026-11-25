@@ -2389,3 +2389,27 @@ fn a_hidden_copy_is_one_rule() {
     assert!(host.node(61).is_some() && host.node(62).is_some());
     assert!(host.node(41).is_none() && host.node(42).is_none());
 }
+
+#[test]
+fn a_flush_repaints_the_guests_cells_for_a_new_recolour() {
+    let (mut e, mut host) = engine(recolours());
+    send(&mut e, &mut host, &first());
+    assert_eq!(host.props().get(PAGE, ids::BACKGROUND), Some(&rgba(0x0b0d_12ff)));
+    e.set_work(Work {
+        recolors: vec![Recolor::new(0x31_3338, 0x2233_44ff)],
+        ..Work::default()
+    })
+    .unwrap();
+    let flushed = Turn::from_bytes(&e.flush().expect("a flush")).unwrap();
+    host.apply(&flushed);
+    assert_eq!(host.props().get(PAGE, ids::BACKGROUND), Some(&rgba(0x2233_44ff)));
+    // The recolour the new work dropped goes back to the guest's colour.
+    assert_eq!(
+        host.props().get(RULE, ids::COLOR).and_then(Value::as_color),
+        Some(0xff94_9ba4)
+    );
+    // Back to no recolour at all.
+    e.set_work(Work::default()).unwrap();
+    host.apply(&Turn::from_bytes(&e.flush().expect("a flush")).unwrap());
+    assert_eq!(host.props().get(PAGE, ids::BACKGROUND), Some(&rgba(0x31_3338ff)));
+}
