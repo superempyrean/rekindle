@@ -10,6 +10,7 @@
 mod apk;
 mod axml;
 mod capture;
+mod database;
 mod device;
 mod drawable;
 mod export;
@@ -70,7 +71,11 @@ usage: phoenix-view [options]
                      snapshot-<n>.png; may repeat. scroll:<dp>,
                      wheel:<notches> and fling:<dp> scroll over the centre
                      (or at @<x>,<y> after them, in dp) instead, positive
-                     toward older rows, and link:<text> clicks a link
+                     toward older rows, and link:<text> clicks a link.
+                     press:<label> sends the node `press` whether it is
+                     painted or not, long:<label> long-presses it, and
+                     action:<name>@<label> performs its accessibility
+                     action <name>
   --frames <ms,...>  with --click: also save snapshot-<n>-<ms>.png that many
                      milliseconds after each click, to see motion
   --size <w>x<h>     the window's size in dp (default 412x860, a phone's)

@@ -19,7 +19,7 @@ use gpui::{
     App, Bounds, Entity, EntityInputHandler, Modifiers, MouseButton, MouseDownEvent,
     MouseMoveEvent, MouseUpEvent, Pixels, PlatformInput, Point, Window, px,
 };
-use rekindle_wire::Value;
+use rekindle_wire::{PropId, Value};
 
 use crate::view::{PhoenixView, ids};
 
@@ -298,6 +298,66 @@ pub fn snapshot(
                     })
                     .unwrap_or_default();
                 println!("phoenix-view: {kind} {n}: {}", frame_summary(&costs));
+                let _ = handle.update(cx, |_, window, cx| {
+                    save(&format!("snapshot-{}", n_click + 1), window, cx);
+                });
+                continue;
+            }
+            // `action:<name>@<label>` performs the accessibility action
+            // <name> on the node labelled <label>.
+            if let Some((name, want)) = label.strip_prefix("action:").and_then(|r| r.split_once('@')) {
+                let sent = handle
+                    .update(cx, |_, _, cx| {
+                        view.update(cx, |v, _| {
+                            let node = v.find_labelled(want)?;
+                            let value = Value::Object(vec![(
+                                PropId::from_name("name")?,
+                                Value::Str(name.to_string()),
+                            )]);
+                            Some((node, v.node_event(node, "accessibilityAction", value)))
+                        })
+                    })
+                    .ok()
+                    .flatten();
+                println!("phoenix-view: accessibility action {name:?} on {want:?}: {sent:?}");
+                wait(cx, 5).await;
+                let _ = handle.update(cx, |_, window, cx| {
+                    save(&format!("snapshot-{}", n_click + 1), window, cx);
+                });
+                continue;
+            }
+            // `press:<label>` sends `press` to the node labelled <label>,
+            // painted or not.
+            if let Some(want) = label.strip_prefix("press:") {
+                let sent = handle
+                    .update(cx, |_, _, cx| {
+                        view.update(cx, |v, _| {
+                            let node = v.find_labelled(want)?;
+                            Some((node, v.node_event(node, "press", Value::Null)))
+                        })
+                    })
+                    .ok()
+                    .flatten();
+                println!("phoenix-view: press on {want:?}: {sent:?}");
+                wait(cx, 5).await;
+                let _ = handle.update(cx, |_, window, cx| {
+                    save(&format!("snapshot-{}", n_click + 1), window, cx);
+                });
+                continue;
+            }
+            // `long:<label>` long-presses the node labelled <label>.
+            if let Some(want) = label.strip_prefix("long:") {
+                let sent = handle
+                    .update(cx, |_, _, cx| {
+                        view.update(cx, |v, _| {
+                            let node = v.find_labelled(want)?;
+                            Some((node, v.long_press(node)))
+                        })
+                    })
+                    .ok()
+                    .flatten();
+                println!("phoenix-view: long press on {want:?}: {sent:?}");
+                wait(cx, 5).await;
                 let _ = handle.update(cx, |_, window, cx| {
                     save(&format!("snapshot-{}", n_click + 1), window, cx);
                 });

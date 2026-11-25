@@ -642,6 +642,62 @@ impl PhoenixView {
         self.node_event(list, "rowPress", Value::Object(fields))
     }
 
+    /// A long press on `id`, as the platform raises one: `longPress` on the
+    /// innermost node at or above `id` that lists it, else `rowLongPress`
+    /// on the list whose row holds `id`.
+    pub fn long_press(&mut self, id: NodeId) -> bool {
+        let size = |n: NodeId| {
+            let mut count = 0;
+            let mut stack = vec![n];
+            while let Some(x) = stack.pop() {
+                count += 1;
+                if let Some(node) = self.tree.node(x) {
+                    stack.extend(&node.children);
+                }
+            }
+            count
+        };
+        let holder = self
+            .shown()
+            .into_iter()
+            .filter(|n| self.listens(*n, "longPress") && self.holds(*n, id))
+            .min_by_key(|n| size(*n));
+        if let Some(n) = holder {
+            return self.node_event(n, "longPress", Value::Null);
+        }
+        let row = self
+            .rows
+            .iter()
+            .filter(|(row, (list, _))| self.listens(*list, "rowLongPress") && self.holds(**row, id))
+            .map(|(_, at)| *at)
+            .next();
+        let Some((list, index)) = row else {
+            return false;
+        };
+        let epoch_id = PropId::from_name("epoch").unwrap();
+        let epoch = num(self.tree.props().get(list, epoch_id)).unwrap_or(0.) as i64;
+        let mut fields = vec![
+            (ids().index, Value::I32(index)),
+            (epoch_id, Value::I64(epoch)),
+        ];
+        fields.sort_by_key(|(p, _)| p.0);
+        self.node_event(list, "rowLongPress", Value::Object(fields))
+    }
+
+    /// Whether `id` is `node` or under it.
+    fn holds(&self, node: NodeId, id: NodeId) -> bool {
+        let mut stack = vec![node];
+        while let Some(x) = stack.pop() {
+            if x == id {
+                return true;
+            }
+            if let Some(n) = self.tree.node(x) {
+                stack.extend(&n.children);
+            }
+        }
+        false
+    }
+
     pub fn back(&mut self) {
         self.send(&UiEvent::Back);
     }

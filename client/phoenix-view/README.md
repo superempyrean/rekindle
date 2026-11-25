@@ -59,6 +59,10 @@ sealed with DPAPI in `%LOCALAPPDATA%\phoenix-view\storage.dpapi` (or
 `--storage <file>`), so the next `--live` run starts signed in. Delete that
 file to sign out.
 
+The guest's cache store (`Database`) is kept in memory, so each run starts
+with an empty cache, as a fresh install does. The guest fills it as it
+syncs.
+
 `--selftest` drives the window off the desktop and checks what it paints,
 without synthesising any OS input and without an account. `--live --selftest`
 adds a refused host and a login with an address under `.invalid`, which

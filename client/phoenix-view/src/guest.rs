@@ -182,6 +182,8 @@ struct State {
     storage: HashMap<String, Vec<u8>>,
     /// `Timing`: id to deadline.
     timers: HashMap<i64, Instant>,
+    /// `Database`: the guest's cache store, in memory.
+    database: crate::database::Database,
 }
 
 enum Wake {
@@ -561,6 +563,13 @@ impl Platform {
                         .unwrap_or("?");
                     (None, format!("REFUSED, no network without --live: {host}"))
                 }
+            }
+            379..=389 | 2838 | 2950 => {
+                self.state
+                    .lock()
+                    .unwrap()
+                    .database
+                    .call(call.method, record, &call.body)
             }
             method::OPEN_URL => match self.link_url(record) {
                 Some(url) => (None, self.open_link(&url)),
