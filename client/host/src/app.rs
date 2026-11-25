@@ -718,7 +718,7 @@ fn gateway_filter(buf: &[u8]) -> gateway::Filtered {
         log(&format!("gateway: dropped {:?}", f.dropped));
     }
     GATEWAY_REPLACED.fetch_add(f.replaced as u64, Ordering::Relaxed);
-    if let Some(s) = &f.socket {
+    if let Some(s) = f.socket.as_ref().filter(|s| **s != gateway::TEST_SOCKET) {
         *lock_socket() = Some(s.clone());
     }
     f
@@ -1033,8 +1033,9 @@ fn dispatch_test_press() {
 /// The host reads it every second and clears it. Each reaches the guest in
 /// the next dispatch, on the socket and with the sequence number of the
 /// gateway's last dispatch, through the plugins' event filters as the
-/// gateway's own would. A run can check the event and intercept path with
-/// nothing sent to Discord.
+/// gateway's own would. Before login they go on [`gateway::TEST_SOCKET`].
+/// A run can check the event and intercept path with nothing sent to
+/// Discord.
 const TEST_GATEWAY: &str = "gateway.txt";
 
 /// The test run's dispatches, until a dispatch takes them.
@@ -1071,8 +1072,10 @@ fn poll_test_gateway() {
     }
 }
 
-/// The test run's dispatches as the platform's `@ws` events, once the
-/// gateway's socket is known.
+/// The test run's dispatches as the platform's `@ws` events, on the
+/// gateway's socket. Before the gateway has opened one, as before login,
+/// they go on [`gateway::TEST_SOCKET`], and the plugins receive them all
+/// the same.
 fn take_test_dispatches() -> Vec<Vec<u8>> {
     let mut queued = TEST_DISPATCHES
         .lock()
@@ -1080,14 +1083,17 @@ fn take_test_dispatches() -> Vec<Vec<u8>> {
     if queued.is_empty() {
         return Vec::new();
     }
-    let Some(socket) = lock_socket().clone() else {
-        log("test dispatches wait for the gateway's socket");
-        return Vec::new();
-    };
+    let socket = lock_socket().clone().unwrap_or(gateway::TEST_SOCKET);
     queued
         .drain(..)
         .map(|(t, d)| {
-            log(&format!("test dispatch {t} on socket {:?}", socket.id));
+            if socket == gateway::TEST_SOCKET {
+                log(&format!(
+                    "test dispatch {t} on a test socket, as the gateway has none"
+                ));
+            } else {
+                log(&format!("test dispatch {t} on socket {:?}", socket.id));
+            }
             gateway::socket_event(&socket, &gateway::dispatch_message(&t, &d, socket.seq))
         })
         .collect()

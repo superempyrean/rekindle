@@ -235,6 +235,14 @@ pub(crate) fn socket_event(socket: &Socket, message: &[u8]) -> Vec<u8> {
     .to_bytes()
 }
 
+/// The socket a test run's dispatches go on while the gateway has none, as
+/// before login. Its `id` is null, which no socket the guest opened has, and
+/// the host never keeps it as the gateway's socket.
+pub(crate) const TEST_SOCKET: Socket = Socket {
+    id: Value::Null,
+    seq: None,
+};
+
 /// The gateway message of dispatch `t` with `d`, numbered `seq`.
 pub(crate) fn dispatch_message(t: &str, d: &serde_json::Value, seq: Option<i64>) -> Vec<u8> {
     serde_json::to_vec(&serde_json::json!({ "op": 0, "t": t, "s": seq, "d": d }))
@@ -269,6 +277,28 @@ mod tests {
                 Decision::Pass
             }
         }
+    }
+
+    #[test]
+    fn a_dispatch_on_the_test_socket_reaches_the_filters() {
+        let muted = socket_event(
+            &TEST_SOCKET,
+            &dispatch_message("MESSAGE_CREATE", &json!({"content": "a spoiler"}), None),
+        );
+        let f = filter(&muted, &|t| t == "MESSAGE_CREATE", &mut mute("spoiler"));
+        assert_eq!(f.dropped, ["MESSAGE_CREATE"]);
+        assert_eq!(f.change, Change::Drop);
+
+        let typing = socket_event(
+            &TEST_SOCKET,
+            &dispatch_message("TYPING_START", &json!({"user_id": "3"}), None),
+        );
+        let f = filter(&typing, &|t| t == "MESSAGE_CREATE", &mut mute("spoiler"));
+        assert_eq!(f.change, Change::Keep);
+        assert_eq!(f.passed.len(), 1);
+        assert_eq!(f.passed[0].t, "TYPING_START");
+        assert_eq!(f.passed[0].d()["user_id"], "3");
+        assert_eq!(f.socket, Some(TEST_SOCKET));
     }
 
     #[test]
