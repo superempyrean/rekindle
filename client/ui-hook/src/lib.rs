@@ -53,7 +53,8 @@ pub use framework::{
 };
 pub use insert::{queue_insert, take_inserts};
 pub use overlay::{
-    OverlayItem, OverlayPicture, OverlayRect, OverlayView, overlay_view, set_overlay,
+    OverlayItem, OverlayPicture, OverlayRect, OverlayView, overlay_generation, overlay_items,
+    overlay_view, set_overlay, set_overlay_view,
 };
 pub use panel::{
     CardItem, PanelItem, UiInput, Widget, panels, report_ui, set_panels, set_shown_plugin,

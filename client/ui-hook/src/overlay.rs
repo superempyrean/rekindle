@@ -3,7 +3,7 @@
 //! client's overlay registry.
 
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use rekindle_native::{Edges, Len, Node, Rgba, Style, client};
 
@@ -45,24 +45,52 @@ pub struct OverlayItem {
 /// Set the sprites rekindle's overlay layer draws (empty: the layer draws nothing).
 pub fn set_overlay(items: Vec<OverlayItem>) {
     *OVERLAY_ITEMS.lock().unwrap() = items;
+    OVERLAY_GENERATION.fetch_add(1, Ordering::SeqCst);
 }
 
-/// What the client's window last reported while drawing rekindle's layer: the
-/// cursor and the viewport, in logical pixels. `None` until the layer has been
-/// drawn once (the client's window is up).
+/// The sprites last passed to [`set_overlay`].
+///
+/// A platform that draws the sprites with its own layer reads them here.
+/// Poll [`overlay_generation`] first to skip a set that hasn't changed.
+pub fn overlay_items() -> Vec<OverlayItem> {
+    OVERLAY_ITEMS.lock().unwrap().clone()
+}
+
+/// How many times [`set_overlay`] has been called. Starts at 0.
+pub fn overlay_generation() -> u64 {
+    OVERLAY_GENERATION.load(Ordering::SeqCst)
+}
+
+/// The cursor and the viewport, in logical pixels, as rekindle's layer
+/// recorded them while drawing or as a platform published them with
+/// [`set_overlay_view`].
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct OverlayView {
     pub pointer: (f32, f32),
     pub viewport: (f32, f32),
 }
 
-/// What the client's window last reported, once rekindle's layer has been
-/// drawn.
+/// The last cursor and viewport recorded. `None` until rekindle's layer has
+/// drawn once or [`set_overlay_view`] has been called.
 pub fn overlay_view() -> Option<OverlayView> {
     *OVERLAY_VIEW.lock().unwrap()
 }
 
+/// Publish the cursor and viewport, in the window's logical pixels, for a
+/// platform that reads them itself instead of drawing rekindle's layer.
+///
+/// [`overlay_view`] returns `view` until the next call, or until rekindle's
+/// layer draws and records its own. The extension's tick reads it: the
+/// viewport bounds the overlay plugins' sprites, and a changed `pointer`
+/// reaches `pointer` plugins as a move. The client should supply the
+/// cursor relative to the top left of the area the sprites are drawn over,
+/// and that area's size as the viewport.
+pub fn set_overlay_view(view: OverlayView) {
+    *OVERLAY_VIEW.lock().unwrap() = Some(view);
+}
+
 pub(crate) static OVERLAY_ITEMS: Mutex<Vec<OverlayItem>> = Mutex::new(Vec::new());
+static OVERLAY_GENERATION: AtomicU64 = AtomicU64::new(0);
 static OVERLAY_VIEW: Mutex<Option<OverlayView>> = Mutex::new(None);
 
 /// How often rekindle built the sprites' elements: the drive checks the
@@ -247,5 +275,55 @@ pub(crate) unsafe fn note_view(window: *const u8) {
     let (pointer, viewport) = unsafe { (client::mouse_position(window), client::viewport(window)) };
     if let (Some(pointer), Some(viewport)) = (pointer, viewport) {
         *OVERLAY_VIEW.lock().unwrap() = Some(OverlayView { pointer, viewport });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+
+    fn item(x: f32) -> OverlayItem {
+        OverlayItem {
+            x,
+            y: 2.0,
+            rects: Arc::new(vec![OverlayRect {
+                x: 0.0,
+                y: 0.0,
+                w: 1.0,
+                h: 1.0,
+                rgba: 0xff0000ff,
+            }]),
+            picture: None,
+        }
+    }
+
+    // One test: the items, the generation and the view are process-wide.
+    #[test]
+    fn items_generation_and_view() {
+        let before = overlay_generation();
+        set_overlay(vec![item(1.0), item(5.0)]);
+        assert_eq!(overlay_generation(), before + 1);
+        let items = overlay_items();
+        assert_eq!(items.iter().map(|i| i.x).collect::<Vec<_>>(), [1.0, 5.0]);
+        assert_eq!(items[0].rects[0].rgba, 0xff0000ff);
+        assert_eq!(overlay_generation(), before + 1, "reading doesn't bump it");
+
+        set_overlay(Vec::new());
+        assert_eq!(overlay_generation(), before + 2);
+        assert!(overlay_items().is_empty());
+
+        let view = OverlayView {
+            pointer: (12.5, 40.0),
+            viewport: (1000.0, 632.8),
+        };
+        set_overlay_view(view);
+        assert_eq!(overlay_view(), Some(view));
+        let moved = OverlayView {
+            pointer: (13.0, 41.0),
+            ..view
+        };
+        set_overlay_view(moved);
+        assert_eq!(overlay_view(), Some(moved));
     }
 }
