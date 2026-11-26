@@ -68,6 +68,14 @@ Plugins run on wasmtime's Pulley
 interpreter on both, so the app never maps executable memory and iOS needs
 no JIT entitlement.
 
+A client with no wire links the host the same way and calls
+`embedded::start` with a plugin home and palettes. The runtime installs no
+hook. `embedded::snapshot` returns what the plugins contribute, which is
+their chat-bar buttons, toasts, panels, theme overrides and slash commands.
+The platform's hooks draw from it and hand clicks back with
+`rekindle_ui_hook::queue_click`. Such a crate turns off the host's `entry`
+feature, which holds the initializer that starts the worker on load.
+
 ## Build
 
 ```sh

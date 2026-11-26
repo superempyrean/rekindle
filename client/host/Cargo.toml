@@ -12,6 +12,13 @@ publish.workspace = true
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+# `entry` is the library's initializer, which starts the worker when the
+# client maps it. A crate that links this one for `app` or `embedded` and
+# has an entry of its own turns it off.
+[features]
+default = ["entry"]
+entry = []
+
 [dependencies]
 # The PE reader that maps an anchor's file offset to its address.
 rekindle-sigmatch = { workspace = true }

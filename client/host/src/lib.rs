@@ -34,6 +34,7 @@ pub mod app;
 mod debug;
 #[cfg(any(target_os = "android", target_os = "ios", test))]
 mod elements;
+pub mod embedded;
 #[cfg(any(target_os = "android", target_os = "ios", test))]
 mod gateway;
 mod hooks;
@@ -72,12 +73,12 @@ pub extern "system" fn rekindle_host_ready() -> u32 {
     READY.load(Ordering::Acquire)
 }
 
-#[cfg(windows)]
+#[cfg(all(windows, feature = "entry"))]
 #[used]
 #[unsafe(link_section = ".CRT$XCU")]
 static HOST_CTOR: extern "C" fn() = host_ctor;
 
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(all(any(target_os = "linux", target_os = "android"), feature = "entry"))]
 #[used]
 #[unsafe(link_section = ".init_array")]
 static HOST_CTOR: extern "C" fn() = host_ctor;
@@ -86,6 +87,10 @@ static HOST_CTOR: extern "C" fn() = host_ctor;
 /// is fine; the thread must not touch the loader until the loader lock is
 /// released, which the sleep in [`worker`] ensures.
 #[cfg(any(windows, target_os = "linux", target_os = "android"))]
+#[cfg_attr(
+    not(feature = "entry"),
+    expect(dead_code, reason = "the crate that links this one has its own entry")
+)]
 extern "C" fn host_ctor() {
     // The initializer runs when the app maps this library. The first log
     // line proves the loader reached rekindle, before any other work.
