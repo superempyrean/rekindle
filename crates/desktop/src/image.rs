@@ -19,6 +19,36 @@ impl<'a> Image<'a> {
         Ok(Self { pe, bytes })
     }
 
+    /// An image in its mapped layout, such as a live module, whose RVA 0 is
+    /// at `base`. Its addresses are the live ones.
+    pub fn mapped(bytes: &'a [u8], base: u64) -> Result<Self> {
+        let mut pe = PeImage::parse(bytes).context("parse the mapped image")?;
+        pe.image_base = base;
+        for s in &mut pe.sections {
+            s.raw_offset = s.rva;
+            s.raw_size = s.virtual_size;
+        }
+        // The function table was read through the file's offsets.
+        let le = |o: usize| {
+            bytes
+                .get(o..o + 4)
+                .map(|b| u32::from_le_bytes(b.try_into().unwrap()))
+        };
+        let nt = le(0x3c).context("no PE header")? as usize;
+        let dir = nt + 24 + 112 + 3 * 8;
+        let (rva, size) = (
+            le(dir).unwrap_or(0) as usize,
+            le(dir + 4).unwrap_or(0) as usize,
+        );
+        pe.functions = (0..size / 12)
+            .filter_map(|i| Some((le(rva + i * 12)?, le(rva + i * 12 + 4)?)))
+            .filter(|&(b, e)| b != 0 && e > b)
+            .collect();
+        pe.functions.sort_unstable();
+        pe.functions.dedup();
+        Ok(Self { pe, bytes })
+    }
+
     #[must_use]
     pub fn base(&self) -> u64 {
         self.pe.image_base

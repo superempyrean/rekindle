@@ -75,6 +75,23 @@ safe. A native detour can also build a new `MenuItem::Action` with
 the old row with `Vec::push`; the captured menu then has the new row at
 Reply's position and `len + 1` rows. The resolver locates every builder.
 
+## The request function
+
+`typing::resolve` finds the function every REST request goes through, from
+the client's typing indicator. Each place that sends `POST
+/channels/{id}/typing` loads a format template holding `/channels/` and
+`/typing`, formats the path, and passes it to that function with the method:
+`(client, &method, path pointer, path length, a, b)`. It returns the
+request's boxed future in `rax:rdx`, and only the future reaches the network
+once it is polled. The resolver takes the first call after each site's
+`format` that every site makes and whose entry stores `r8` and `r9`.
+
+`typing::is_typing_path` says whether a path is a typing request's.
+
+A platform running inside the client resolves it from the live module with
+`Image::mapped`, which reads the image in its loaded layout instead of the
+file's.
+
 ## Writing a style
 
 `native::write_style` writes a `rekindle_ui::GpuiStyle` into a live

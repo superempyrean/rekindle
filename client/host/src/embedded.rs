@@ -17,6 +17,9 @@
 //! The profile reads no client state. Plugins' `get-selection` is answered
 //! by `Options::selection` when the platform gives one, and is empty
 //! otherwise.
+//!
+//! A tweak named in `Options::tweaks` is one the platform carries out
+//! itself. Its hooks read the value with [`tweaks::on`].
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -27,6 +30,7 @@ use std::time::{Duration, Instant};
 
 use rekindle_extension::theme::ThemeProfile;
 pub use rekindle_extension::LiveSelection;
+pub use rekindle_extension::tweaks;
 use rekindle_extension::{Driver, ExtArgs, RecoveredProfile};
 use serde::Serialize;
 
