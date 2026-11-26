@@ -64,7 +64,7 @@ pub use registry::{
 };
 pub use theme::{ThemePalette, detected_theme, recolored_last_frame, set_theme_palettes};
 pub use toast::{
-    LiveToast, MAX_TOASTS, ToastStyle, live_toasts, push_toast, push_toast_for, toast_cards,
+    LiveToast, MAX_TOASTS, ToastStyle, dismiss_toast, live_toasts, push_toast, push_toast_for, toast_cards,
     toast_texts,
 };
 

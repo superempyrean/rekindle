@@ -103,6 +103,11 @@ pub fn live_toasts() -> Vec<LiveToast> {
         .collect()
 }
 
+/// Take the toast `id` down before its time is up.
+pub fn dismiss_toast(id: u64) {
+    TOASTS.lock().unwrap().retain(|t| t.id != id);
+}
+
 /// Where the cards were painted (logical pixels: x, y, width, height), as
 /// last measured by [`note_cards`]. For self-tests.
 pub fn toast_cards() -> Vec<Rect> {
@@ -233,7 +238,7 @@ fn close(id: u64) -> Node {
         },
         vec![Node::text("\u{d7}")],
     )
-    .on_click(move || TOASTS.lock().unwrap().retain(|t| t.id != id))
+    .on_click(move || dismiss_toast(id))
 }
 
 #[cfg(test)]

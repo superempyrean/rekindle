@@ -172,6 +172,17 @@ pub fn inline(text: &str) -> Result<[u8; SHARED_STRING]> {
     Ok(out)
 }
 
+/// A `SharedString` borrowing `text`, of any length: tag 24, the pointer at
+/// `+8` and the length at `+16`. It owns nothing, so the client never frees
+/// `text`.
+pub fn borrowed(text: &'static str) -> [u8; SHARED_STRING] {
+    let mut out = [0u8; SHARED_STRING];
+    out[0] = 24;
+    out[8..16].copy_from_slice(&(text.as_ptr() as u64).to_le_bytes());
+    out[16..24].copy_from_slice(&(text.len() as u64).to_le_bytes());
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -184,5 +195,20 @@ mod tests {
         assert!(s[9..].iter().all(|&b| b == 0));
         assert!(inline(&"x".repeat(24)).is_err());
         assert_eq!(inline(&"x".repeat(23)).unwrap()[0], 23);
+    }
+
+    #[test]
+    fn borrowed_string() {
+        let text: &'static str = "a toast longer than an inline string";
+        let s = borrowed(text);
+        assert_eq!(s[0], 24);
+        assert_eq!(
+            u64::from_le_bytes(s[8..16].try_into().unwrap()),
+            text.as_ptr() as u64
+        );
+        assert_eq!(
+            u64::from_le_bytes(s[16..24].try_into().unwrap()),
+            text.len() as u64
+        );
     }
 }
