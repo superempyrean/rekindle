@@ -12,7 +12,10 @@ use crate::layout::Layout;
 pub(crate) fn configure_native(layout: &Layout, hooks: &Hooks) -> anyhow::Result<()> {
     let opt = |name: &str| hooks.addr(name).unwrap_or(0);
     let native = rekindle_native::Fns {
-        interactivity_new: hooks.addr("gpui_interactivity_new")?,
+        // Either the old `Interactivity::new` or the newer `div()`, which
+        // boxes the `Interactivity`; `rekindle-native` picks by `div_boxed`.
+        interactivity_new: opt("gpui_interactivity_new"),
+        div_new: opt("gpui_div_new"),
         div_into_any_element: hooks.addr("gpui_div_into_any_element")?,
         str_into_any_element: hooks.addr("gpui_str_into_any_element")?,
         dispatch_event: hooks.addr("gpui_window_dispatch_event")?,

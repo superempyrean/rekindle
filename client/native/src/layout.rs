@@ -16,6 +16,8 @@ pub(crate) struct Resolved {
     pub window_root: usize,
     pub view_render: usize,
     pub div_size: usize,
+    /// Where the build keeps the `Interactivity` out of line, if it does.
+    pub div_boxed: Option<DivBox>,
     /// `Div.interactivity.base_style`, a `Box<StyleRefinement>`.
     pub base_style: usize,
     /// `Div.children`, a `SmallVec<[AnyElement; 2]>`.
@@ -31,6 +33,23 @@ pub(crate) struct Resolved {
     pub scroll: Option<ScrollLayout>,
     pub paint: Option<PaintLayout>,
     pub image: Option<ImageLayout>,
+}
+
+/// A `Div` whose `Interactivity` is out of line: the box's offset in the
+/// Div, the pointer's offset in the box, and the allocation's size. The
+/// interaction fields and `base_style` are then offsets inside the
+/// allocation, not inside the Div.
+#[derive(Clone, Debug)]
+pub(crate) struct DivBox {
+    pub offset: usize,
+    pub ptr: usize,
+    pub size: usize,
+    /// The box's first word for the heap variant (0: a null arena, which
+    /// `InteractivityBox` reads as `Heap`).
+    pub heap_tag: usize,
+    /// A fresh `Interactivity`'s bytes, and a fresh `StyleRefinement`'s.
+    pub default: Vec<u8>,
+    pub style_default: Vec<u8>,
 }
 
 /// Offsets of the style fields rekindle writes, from the start of a

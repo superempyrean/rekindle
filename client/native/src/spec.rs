@@ -8,8 +8,8 @@ use std::collections::BTreeMap;
 use anyhow::{Context, Result, bail};
 
 use crate::layout::{
-    ActionLayout, ClientLayout, EventLayout, ImageLayout, InputLayout, Interaction, KeyLayout,
-    PaintLayout, Resolved, ScrollLayout, StyleOffsets, Tags,
+    ActionLayout, ClientLayout, DivBox, EventLayout, ImageLayout, InputLayout, Interaction,
+    KeyLayout, PaintLayout, Resolved, ScrollLayout, StyleOffsets, Tags,
 };
 
 /// An `AnyElement`'s size: three words.
@@ -27,7 +27,14 @@ pub struct Fns {
     /// zeros (children `SmallVec` with capacity 0, `None` boxes), so `div()`
     /// is this on a zeroed buffer. `#[track_caller]`: a hidden `Location`
     /// follows sret (stored only in debug builds; harmless otherwise).
+    ///
+    /// 0 where the build boxes the `Interactivity` instead (`Div` holds an
+    /// `InteractivityBox`), and [`Self::div_new`] is used.
     pub interactivity_new: usize,
+    /// `div() -> Div`: the build's own constructor, for a `Div` whose
+    /// `Interactivity` is out of line (an `InteractivityBox`, see
+    /// [`Resolved::div_boxed`]). 0 where [`Self::interactivity_new`] is used.
+    pub div_new: usize,
     /// `<Div as IntoElement>::into_any_element(ret: *mut AnyElement, div:
     /// *const Div)`. Consumes the `Div` (copies it into the element arena).
     pub div_into_any_element: usize,
@@ -207,7 +214,6 @@ impl Spec {
     pub(crate) fn resolve(self) -> Result<Resolved> {
         let f = &self.fns;
         if [
-            f.interactivity_new,
             f.div_into_any_element,
             f.str_into_any_element,
             f.dispatch_event,
@@ -227,8 +233,16 @@ impl Spec {
         let div_size = self.size("gpui_div")?;
         let base_style = self.off("gpui_div_base_style")?;
         let children = self.off("gpui_div_children")?;
+        // A newer gpui keeps the `Interactivity` out of line, in a box at
+        // `gpui_div_interactivity`: the interaction fields and the style
+        // box are offsets inside that allocation, not inside the Div.
+        let div_boxed = self.div_boxed()?;
+        if div_boxed.is_none() && f.interactivity_new == 0 && f.div_new == 0 {
+            bail!("the Div constructor (interactivity_new or div_new) is missing");
+        }
+        let inter_size = div_boxed.as_ref().map_or(div_size, |b| b.size);
         if !(64..=16384).contains(&div_size)
-            || base_style + 8 > div_size
+            || base_style + 8 > inter_size
             || !base_style.is_multiple_of(8)
             || children + 24 > div_size
             || !children.is_multiple_of(8)
@@ -237,9 +251,18 @@ impl Spec {
                 "implausible Div layout: size {div_size}, base_style at {base_style}, children at {children}"
             );
         }
+        if let Some(b) = &div_boxed {
+            fits("the Div's Interactivity box", div_size, &[(b.offset + b.ptr, 8)])?;
+            if b.style_default.len() != style_size {
+                bail!(
+                    "the style default is {} bytes, not {style_size}",
+                    b.style_default.len()
+                );
+            }
+        }
         let s = self.style_offsets()?;
         let t = self.tags()?;
-        let i = self.interaction(div_size)?;
+        let i = self.interaction(inter_size)?;
         let c = self.client_layout()?;
         if c.children_inline == 0 {
             bail!("the Div's children have no inline capacity");
@@ -260,6 +283,7 @@ impl Spec {
             window_root: c.window_root,
             view_render: self.off("gpui_anyview_render")?,
             div_size,
+            div_boxed,
             base_style,
             children,
             i,
@@ -267,11 +291,43 @@ impl Spec {
             s,
             t,
             fill,
-            scroll: self.scroll(style_size, div_size)?,
+            scroll: self.scroll(style_size, inter_size)?,
             paint: self.paint()?,
             image: self.image()?,
             c,
         })
+    }
+
+    /// The `InteractivityBox` in the Div, where the build keeps the
+    /// `Interactivity` out of line: its offset in the Div and in the box
+    /// (both 0 and 8 on the builds seen so far), and the allocation's size.
+    /// Absent on a build that keeps the `Interactivity` inline.
+    fn div_boxed(&self) -> Result<Option<DivBox>> {
+        self.optional(
+            &[
+                "offsets:gpui_div_interactivity",
+                "offsets:gpui_div_interactivity_ptr",
+                "sizes:gpui_interactivity",
+            ],
+            || {
+                let b = DivBox {
+                    offset: self.off("gpui_div_interactivity")?,
+                    ptr: self.off("gpui_div_interactivity_ptr")?,
+                    size: self.size("gpui_interactivity")?,
+                    heap_tag: self.tag("gpui_div_interactivity_heap")?,
+                    default: self.template("gpui_interactivity_default")?,
+                    style_default: self.template("gpui_style_default")?,
+                };
+                if b.size < 16 || b.default.len() != b.size {
+                    bail!(
+                        "implausible Interactivity: size {}, default {} bytes",
+                        b.size,
+                        b.default.len()
+                    );
+                }
+                Ok(b)
+            },
+        )
     }
 
     fn style_offsets(&self) -> Result<StyleOffsets> {
@@ -881,6 +937,7 @@ pub(crate) mod tests {
         let v = json_lite::Value(include_str!("../testdata/mock-layout.json"));
         let fns = Fns {
             interactivity_new: 1,
+            div_new: 0,
             div_into_any_element: 2,
             str_into_any_element: 3,
             dispatch_event: 7,
@@ -1018,6 +1075,40 @@ pub(crate) mod tests {
         let mut s = mock_spec();
         s.offsets.remove("gpui_hashmap_ctrl");
         assert!(s.resolve().unwrap_err().to_string().contains("9 of the 10"));
+    }
+
+    #[test]
+    fn a_boxed_interactivity_resolves() {
+        // A newer gpui: the Div holds an `InteractivityBox` (heap tag 0,
+        // pointer at +8) and the Interactivity is 1248 bytes of its own,
+        // with the interaction offsets and `base_style` inside it.
+        let mut s = mock_spec();
+        s.sizes.insert("gpui_div".into(), 120);
+        s.offsets.insert("gpui_div_children".into(), 64);
+        s.offsets.insert("gpui_div_interactivity".into(), 0);
+        s.offsets.insert("gpui_div_interactivity_ptr".into(), 8);
+        s.sizes.insert("gpui_interactivity".into(), 1248);
+        s.tags.insert("gpui_div_interactivity_heap".into(), 0);
+        s.templates
+            .insert("gpui_interactivity_default".into(), vec![0u8; 1248]);
+        s.templates
+            .insert("gpui_style_default".into(), vec![0u8; 640]);
+        let r = s.resolve().unwrap();
+        let b = r.div_boxed.expect("the layout says the Interactivity is boxed");
+        assert_eq!((b.offset, b.ptr, b.size, b.heap_tag), (0, 8, 1248, 0));
+        assert_eq!((r.div_size, r.children, r.base_style), (120, 64, 1040));
+        // The default must be the whole allocation; a short one is refused.
+        let mut s = mock_spec();
+        s.sizes.insert("gpui_div".into(), 120);
+        s.offsets.insert("gpui_div_children".into(), 64);
+        s.offsets.insert("gpui_div_interactivity".into(), 0);
+        s.offsets.insert("gpui_div_interactivity_ptr".into(), 8);
+        s.sizes.insert("gpui_interactivity".into(), 1248);
+        s.tags.insert("gpui_div_interactivity_heap".into(), 0);
+        s.templates.insert("gpui_interactivity_default".into(), vec![0u8; 1]);
+        s.templates
+            .insert("gpui_style_default".into(), vec![0u8; 640]);
+        assert!(s.resolve().is_err());
     }
 
     #[test]

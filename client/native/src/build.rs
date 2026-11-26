@@ -45,11 +45,14 @@ pub(crate) unsafe fn build(r: &Arc<Resolved>, node: &Node) -> Result<AnyElement>
         .collect::<Result<Vec<_>>>()?;
     // SAFETY: the caller's contract.
     let mut div = unsafe { new_div(r)? };
+    // SAFETY: `new_div` checked the `InteractivityBox` (or the inline
+    // `Interactivity`) is there, rekindle's until `into_any`, so nothing
+    // else touches it meanwhile.
+    let inter = unsafe { interactivity(r, &mut div) };
     // SAFETY: `div()` left the Div's `Box<StyleRefinement>` at `base_style`
-    // (`new_div` checked it's there), `style_size` bytes long. The Div is
-    // rekindle's until `into_any`, so nothing else touches the box meanwhile.
+    // (`new_div` checked it's there), `style_size` bytes long.
     let style = unsafe {
-        std::slice::from_raw_parts_mut(word(&div, r.base_style) as *mut u8, r.style_size)
+        std::slice::from_raw_parts_mut(word(inter, r.base_style) as *mut u8, r.style_size)
     };
     // Extra styles start from a copy of the still-default base.
     let default = style.to_vec();
@@ -60,41 +63,41 @@ pub(crate) unsafe fn build(r: &Arc<Resolved>, node: &Node) -> Result<AnyElement>
             ..Style::default()
         };
         put_word(
-            &mut div,
+            &mut *inter,
             r.i.hover_style,
             boxed(&styled(r, &default, &hover)),
         );
     }
     if let Some(key) = &d.style.scroll_y {
-        scroll::attach(r, &mut div, style, key);
+        scroll::attach(r, &mut *inter, style, key);
     }
     if d.style.occlude {
-        div[r.i.hitbox_behavior] = r.t.hitbox_block_mouse;
+        inter[r.i.hitbox_behavior] = r.t.hitbox_block_mouse;
     }
     if let Some(h) = &d.on_click {
         let listener = mouse_down_listener(r, h.clone());
-        push_listener(r, &mut div, r.i.mouse_down_listeners, listener);
+        push_listener(r, &mut *inter, r.i.mouse_down_listeners, listener);
     }
     if let Some(focus) = &d.focus {
         // SAFETY: the caller's contract.
-        unsafe { track_focus(r, &mut div, focus) };
+        unsafe { track_focus(r, &mut *inter, focus) };
     }
     if let Some(h) = &d.on_key {
         let listener = key_down_listener(r, h.clone());
-        push_listener(r, &mut div, r.i.key_down_listeners, listener);
+        push_listener(r, &mut *inter, r.i.key_down_listeners, listener);
     }
     if let Some(name) = &d.group {
-        write_static_str(r, &mut div[r.i.group..], intern(name));
+        write_static_str(r, &mut inter[r.i.group..], intern(name));
     } else if d.paint.is_some() {
         // A group gets a hitbox, which is where the painted element finds
         // its bounds.
-        write_static_str(r, &mut div[r.i.group..], "rekindle-paint");
+        write_static_str(r, &mut inter[r.i.group..], "rekindle-paint");
     }
     if let Some((name, style)) = &d.group_hover {
         let at = r.i.group_hover_style;
-        write_static_str(r, &mut div[at..], intern(name));
+        write_static_str(r, &mut inter[at..], intern(name));
         let boxed = boxed(&styled(r, &default, style));
-        put_word(&mut div, at + r.i.group_style_box, boxed);
+        put_word(&mut *inter, at + r.i.group_style_box, boxed);
     }
     for k in kids {
         push_child(r, &mut div, k);
@@ -111,26 +114,80 @@ pub(crate) unsafe fn build(r: &Arc<Resolved>, node: &Node) -> Result<AnyElement>
     Ok(e)
 }
 
-/// `div()`: `Interactivity::new` into a zeroed Div (see `crate::Fns`).
+/// `div()`: the client's own `div()` (or, on a build without it,
+/// `Interactivity::new` into a zeroed Div; see `crate::Fns`).
 ///
 /// # Safety
 /// As [`build`].
 pub(crate) unsafe fn new_div(r: &Resolved) -> Result<Bytes> {
     let mut div = Bytes::zeroed(r.div_size);
-    // SAFETY: the caller's contract: this is the client's
-    // `Interactivity::new`, writing a Div's first bytes into `div`, which
-    // holds a whole Div.
-    unsafe {
-        let f = std::mem::transmute::<usize, unsafe fn(*mut u8, *const Location<'static>) -> *mut u8>(
-            r.fns.interactivity_new,
-        );
-        f(div.as_mut_ptr(), Location::caller());
+    if let Some(b) = &r.div_boxed {
+        // A build whose Div boxes the Interactivity: no constructor to
+        // call, so make one from the measured default (and a fresh style
+        // box), then point the Div's box at it. `mem::alloc` is the process
+        // heap the client frees to, as for the style boxes below.
+        let style = mem::alloc(r.style_size, 8, false);
+        let inter = mem::alloc(b.size, 8, false);
+        // SAFETY: both are fresh allocations of at least the template's
+        // length (`resolve` checked the Interactivity default is `b.size`
+        // bytes and the style default is `style_size`).
+        unsafe {
+            std::ptr::copy_nonoverlapping(b.style_default.as_ptr(), style, r.style_size);
+            std::ptr::copy_nonoverlapping(b.default.as_ptr(), inter, b.size);
+            mem::write(inter.add(r.base_style) as usize, style as usize);
+        }
+        put_word(&mut div, b.offset, b.heap_tag);
+        put_word(&mut div, b.offset + b.ptr, inter as usize);
+    } else if r.fns.div_new != 0 {
+        // SAFETY: the caller's contract: the client's `div()`, writing a
+        // whole Div into `div`.
+        unsafe {
+            let f = std::mem::transmute::<usize, unsafe fn(*mut u8)>(r.fns.div_new);
+            f(div.as_mut_ptr());
+        }
+    } else {
+        // SAFETY: the caller's contract: this is the client's
+        // `Interactivity::new`, writing a Div's first bytes into `div`,
+        // which holds a whole Div.
+        unsafe {
+            let f =
+                std::mem::transmute::<usize, unsafe fn(*mut u8, *const Location<'static>) -> *mut u8>(
+                    r.fns.interactivity_new,
+                );
+            f(div.as_mut_ptr(), Location::caller());
+        }
     }
-    let style = word(&div, r.base_style);
+    // SAFETY: `div` is the Div the client just wrote.
+    let inter = unsafe { interactivity(r, &mut div) };
+    let style = word(inter, r.base_style);
     if style == 0 || !style.is_multiple_of(8) {
         bail!("div() left no style box at +{}", r.base_style);
     }
     Ok(div)
+}
+
+/// The Div's `Interactivity`, as bytes: the Div itself where the build keeps
+/// it inline, or the allocation its `InteractivityBox` points at.
+///
+/// # Safety
+/// `div` is a whole Div the client just made, rekindle's until `into_any`,
+/// on the thread that draws it.
+pub(crate) unsafe fn interactivity<'a>(r: &Resolved, div: &'a mut Bytes) -> &'a mut [u8] {
+    match &r.div_boxed {
+        None => &mut div[..],
+        Some(b) => {
+            let ptr = word(div, b.offset + b.ptr);
+            assert!(
+                ptr != 0 && ptr.is_multiple_of(8),
+                "div() left no Interactivity at +{}",
+                b.offset + b.ptr
+            );
+            // SAFETY: the caller's contract: the box points at the
+            // `Interactivity` the Div owns, `b.size` bytes, alive until the
+            // Div is consumed.
+            unsafe { std::slice::from_raw_parts_mut(ptr as *mut u8, b.size) }
+        }
+    }
 }
 
 /// The Div as an `AnyElement`. gpui copies its bytes into the element
@@ -312,7 +369,7 @@ fn key_down_listener(r: &Arc<Resolved>, h: KeyHandler) -> [usize; 2] {
 /// Make the fresh (empty) listener `Vec` at `at` in the Div hold `listener`
 /// alone. A one-element `Vec`'s buffer is the allocation `Box` makes for
 /// that element.
-fn push_listener(r: &Resolved, div: &mut Bytes, at: usize, listener: [usize; 2]) {
+fn push_listener(r: &Resolved, div: &mut [u8], at: usize, listener: [usize; 2]) {
     let buf = Box::into_raw(Box::new(listener));
     let [cap, ptr, len] = r.c.vec;
     put_word(div, at + cap, 1);
@@ -325,7 +382,7 @@ fn push_listener(r: &Resolved, div: &mut Bytes, at: usize, listener: [usize; 2])
 ///
 /// # Safety
 /// As [`build`].
-unsafe fn track_focus(r: &Resolved, div: &mut Bytes, focus: &Focus) {
+unsafe fn track_focus(r: &Resolved, div: &mut [u8], focus: &Focus) {
     let slot = div[r.i.tracked_focus_handle..].as_mut_ptr();
     // SAFETY: the caller's contract: the client's `FocusHandle::clone`,
     // writing a handle into the Div's `Option<FocusHandle>` (32 bytes,
