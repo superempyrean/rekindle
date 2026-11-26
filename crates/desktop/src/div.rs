@@ -48,6 +48,9 @@ pub struct Div {
     pub style_at: usize,
     /// The accessor the client's own components call for a `Div`'s style.
     pub style_fn: u64,
+    /// `Div::into_any_element`: the arena conversion that copies the `Div`
+    /// into a `Drawable<Div>` and returns an owned `AnyElement`.
+    pub into_any: u64,
     /// The children `SmallVec` and its element.
     pub children: Children,
 }
@@ -203,6 +206,11 @@ pub fn resolve(image: &Image<'_>) -> Result<Div> {
     let (initialize, style_at, style_fn) =
         initialize.context("div() no longer calls a StyleRefinement initializer")?;
     let children = children(image, &instructions)?;
+    let vtable = crate::symbols::div_vtables(image)?
+        .first()
+        .copied()
+        .context("no Drawable<Div> vtable")?;
+    let into_any = into_any_function(image, vtable)?;
 
     Ok(Div {
         new,
@@ -212,8 +220,44 @@ pub fn resolve(image: &Image<'_>) -> Result<Div> {
         drawable_element: DRAWABLE_ELEMENT,
         style_at,
         style_fn,
+        into_any,
         children,
     })
+}
+
+/// `Div::into_any_element`: the only function that references the plain
+/// `Drawable<Div>` vtable, checks the live element arena (`xor ecx, ecx;
+/// call`), and copies a 0x88-byte `Div`.
+fn into_any_function(image: &Image<'_>, vtable: u64) -> Result<u64> {
+    let mut functions = Vec::new();
+    for hit in image.leas_to(vtable, vtable + 1) {
+        if let Some((start, _)) = image.function(hit) {
+            functions.push(start);
+        }
+    }
+    functions.sort_unstable();
+    functions.dedup();
+    let mut live = Vec::new();
+    for start in functions {
+        let (_, end) = image.function(start).context("into_any is outside .pdata")?;
+        let len = usize::try_from(end - start)?;
+        let code = image.read(start, len).context("into_any is unmapped")?;
+        if code.windows(3).any(|w| w == [0x31, 0xC9, 0xE8])
+            && code
+                .windows(6)
+                .any(|w| w == [0x41, 0xB8, 0x88, 0x00, 0x00, 0x00])
+        {
+            live.push(start);
+        }
+    }
+    match live.as_slice() {
+        [one] => Ok(*one),
+        [] => bail!("no arena into_any for the Drawable<Div> vtable {vtable:#x}"),
+        many => bail!(
+            "{} arena into_any functions for vtable {vtable:#x}: {many:x?}",
+            many.len()
+        ),
+    }
 }
 
 /// The children `SmallVec`'s shape, from the function `Div::drop` calls on
