@@ -16,6 +16,10 @@
 //! call DebugStruct::field
 //! ```
 //!
+//! A field at `self`'s current address is passed as `mov r9, rsi` instead:
+//! the first field (`text`, at offset 0), or one the code reached with
+//! `add rsi, 0x18` first, as `EdgesRefinement::fmt` does for `left`.
+//!
 //! Nested structs (`text`, `padding`, `gap`, ...) have their own derived
 //! `Debug::fmt`, reached through the field's `&dyn Debug` vtable at `+0x18`.
 
@@ -199,16 +203,30 @@ fn standalone(image: &Image<'_>, va: u64) -> bool {
 
 /// Scan one `Debug::fmt` for `name -> offset` and `@name -> vtable`.
 fn scan(image: &Image<'_>, start: u64, end: u64, depth: u8) -> BTreeMap<String, usize> {
-    let mut out = BTreeMap::new();
     let len = usize::try_from(end.saturating_sub(start)).unwrap_or(0);
     let Some(code) = image.read(start, len) else {
-        return out;
+        return BTreeMap::new();
     };
+    scan_code(code, start, depth, |va, len| image.read(va, len))
+}
+
+/// [`scan`] over `code` at `start`, reading field names with `read`.
+fn scan_code<'a>(
+    code: &[u8],
+    start: u64,
+    depth: u8,
+    read: impl Fn(u64, usize) -> Option<&'a [u8]>,
+) -> BTreeMap<String, usize> {
+    let mut out = BTreeMap::new();
     let mut decoder = Decoder::with_ip(64, code, start, DecoderOptions::NONE);
     let mut insn = Instruction::default();
     let mut name: Option<(u64, usize)> = None;
     let mut value: Option<usize> = None;
     let mut vtable: Option<u64> = None;
+    // The register holding `self` (`mov rsi, rcx` at entry), and how far the
+    // code has moved it in the current block.
+    let mut this: Option<Register> = None;
+    let mut moved = 0usize;
     while decoder.can_decode() {
         decoder.decode_out(&mut insn);
         match insn.mnemonic() {
@@ -234,11 +252,42 @@ fn scan(image: &Image<'_>, start: u64, end: u64, depth: u8) -> BTreeMap<String, 
                         base,
                         Register::RSP | Register::RBP | Register::RIP | Register::None
                     ) {
-                        value = Some(insn.memory_displacement64() as usize);
+                        let shift = if this == Some(base) { moved } else { 0 };
+                        value = Some(shift.wrapping_add(insn.memory_displacement64() as usize));
                     }
                 }
             }
+            // `self` moved forward to a field: `add rsi, 0x18` before the
+            // `mov r9, rsi` that passes it.
+            iced_x86::Mnemonic::Add
+                if this.is_some_and(|r| insn.op0_register() == r)
+                    && matches!(
+                        insn.op1_kind(),
+                        OpKind::Immediate8to64 | OpKind::Immediate32to64
+                    ) =>
+            {
+                moved = moved.wrapping_add(insn.immediate(1) as usize);
+            }
+            // The `add` belongs to one branch; the next block starts from `self`.
+            iced_x86::Mnemonic::Jmp | iced_x86::Mnemonic::Ret => moved = 0,
             iced_x86::Mnemonic::Mov => {
+                if this.is_none()
+                    && insn.op0_kind() == OpKind::Register
+                    && insn.op1_kind() == OpKind::Register
+                    && insn.op1_register() == Register::RCX
+                {
+                    this = Some(insn.op0_register());
+                }
+                // A field at `self`'s current offset is passed as
+                // `mov r9, rsi`, not a `lea`: the first field, or one the
+                // code moved `self` to.
+                if insn.op0_kind() == OpKind::Register
+                    && insn.op0_register() == Register::R9
+                    && insn.op1_kind() == OpKind::Register
+                    && this.is_some_and(|r| insn.op1_register() == r)
+                {
+                    value = Some(moved);
+                }
                 if insn.op0_kind() == OpKind::Register
                     && insn.op0_register() == Register::R8D
                     && insn.op1_kind() == OpKind::Immediate32
@@ -250,7 +299,7 @@ fn scan(image: &Image<'_>, start: u64, end: u64, depth: u8) -> BTreeMap<String, 
             iced_x86::Mnemonic::Call => {
                 if let (Some((name_va, name_len)), Some(offset)) = (name, value)
                     && (1..=64).contains(&name_len)
-                    && let Some(text) = image.read(name_va, name_len)
+                    && let Some(text) = read(name_va, name_len)
                     && let Ok(text) = std::str::from_utf8(text)
                     && text
                         .bytes()
@@ -277,49 +326,112 @@ fn scan(image: &Image<'_>, start: u64, end: u64, depth: u8) -> BTreeMap<String, 
 mod tests {
     use super::*;
 
-    /// Hand-encode the field sequence the scanner must recognise:
-    /// `lea r9,[rsi+0x150]; lea rax,[rip+0x10]; mov [rsp+0x20],rax;
-    ///  lea rdx,[rip+0x20]; mov r8d,10; call +0`
-    fn sequence() -> Vec<u8> {
-        let mut code = Vec::new();
-        // lea r9, [rsi + 0x150]
-        code.extend_from_slice(&[0x4c, 0x8d, 0x8e, 0x50, 0x01, 0x00, 0x00]);
-        // lea rax, [rip + 0x10]
-        code.extend_from_slice(&[0x48, 0x8d, 0x05, 0x10, 0x00, 0x00, 0x00]);
-        // mov [rsp+0x20], rax
-        code.extend_from_slice(&[0x48, 0x89, 0x44, 0x24, 0x20]);
-        // lea rdx, [rip + 0x20]
-        code.extend_from_slice(&[0x48, 0x8d, 0x15, 0x20, 0x00, 0x00, 0x00]);
-        // mov r8d, 10
-        code.extend_from_slice(&[0x41, 0xb8, 0x0a, 0x00, 0x00, 0x00]);
-        // call rel32 0
-        code.extend_from_slice(&[0xe8, 0x00, 0x00, 0x00, 0x00]);
-        code
+    const START: u64 = 0x1000;
+    const NAMES: u64 = 0x9000;
+
+    /// Hand-assembled `Debug::fmt` bodies, with the field names at `NAMES`.
+    struct Asm {
+        code: Vec<u8>,
+        names: Vec<u8>,
+    }
+
+    impl Asm {
+        fn new() -> Self {
+            // mov rsi, rcx
+            Self {
+                code: vec![0x48, 0x89, 0xce],
+                names: Vec::new(),
+            }
+        }
+
+        fn ip(&self) -> u64 {
+            START + self.code.len() as u64
+        }
+
+        /// `lea r9, [rsi + offset]`
+        fn lea_field(&mut self, offset: u32) {
+            self.code.extend_from_slice(&[0x4c, 0x8d, 0x8e]);
+            self.code.extend_from_slice(&offset.to_le_bytes());
+        }
+
+        /// `mov r9, rsi`
+        fn mov_self(&mut self) {
+            self.code.extend_from_slice(&[0x49, 0x89, 0xf1]);
+        }
+
+        /// `add rsi, imm8`
+        fn add_self(&mut self, by: u8) {
+            self.code.extend_from_slice(&[0x48, 0x83, 0xc6, by]);
+        }
+
+        /// `jmp` to the next instruction.
+        fn jmp(&mut self) {
+            self.code.extend_from_slice(&[0xeb, 0x00]);
+        }
+
+        /// `lea rdx, [rip + name]; mov r8d, len; call DebugStruct::field`
+        fn field(&mut self, name: &str) {
+            let va = NAMES + self.names.len() as u64;
+            self.names.extend_from_slice(name.as_bytes());
+            let next = self.ip() + 7;
+            self.code.extend_from_slice(&[0x48, 0x8d, 0x15]);
+            self.code
+                .extend_from_slice(&u32::try_from(va - next).unwrap().to_le_bytes());
+            self.code.extend_from_slice(&[0x41, 0xb8]);
+            self.code
+                .extend_from_slice(&u32::try_from(name.len()).unwrap().to_le_bytes());
+            self.code.extend_from_slice(&[0xe8, 0, 0, 0, 0]);
+        }
+
+        fn scan(&self) -> BTreeMap<String, usize> {
+            let names = self.names.as_slice();
+            scan_code(&self.code, START, 0, |va, len| {
+                let at = usize::try_from(va.checked_sub(NAMES)?).ok()?;
+                names.get(at..at + len)
+            })
+        }
     }
 
     #[test]
-    fn the_field_sequence_is_decoded() {
-        let code = sequence();
-        let start = 0x1000u64;
-        let mut decoder = Decoder::with_ip(64, &code, start, DecoderOptions::NONE);
-        let mut insn = Instruction::default();
-        let mut name = None;
-        let mut len = 0usize;
-        let mut value = None;
-        while decoder.can_decode() {
-            decoder.decode_out(&mut insn);
-            if insn.mnemonic() == iced_x86::Mnemonic::Lea && insn.op0_register() == Register::R9 {
-                value = Some(insn.memory_displacement64() as usize);
-            }
-            if insn.mnemonic() == iced_x86::Mnemonic::Lea && insn.op0_register() == Register::RDX {
-                name = Some(insn.ip_rel_memory_address());
-            }
-            if insn.mnemonic() == iced_x86::Mnemonic::Mov && insn.op0_register() == Register::R8D {
-                len = insn.immediate32() as usize;
-            }
-        }
-        assert_eq!(value, Some(0x150));
-        assert_eq!(len, 10);
-        assert!(name.is_some());
+    fn a_lea_names_the_field_offset() {
+        let mut asm = Asm::new();
+        asm.lea_field(0x150);
+        asm.field("background");
+        assert_eq!(asm.scan().get("background"), Some(&0x150));
+    }
+
+    #[test]
+    fn the_first_field_is_passed_as_self() {
+        // `StyleRefinement::fmt` passes `text`, at offset 0, as `mov r9, rsi`.
+        let mut asm = Asm::new();
+        asm.mov_self();
+        asm.field("text");
+        asm.lea_field(0x100);
+        asm.field("opacity");
+        let fields = asm.scan();
+        assert_eq!(fields.get("text"), Some(&0));
+        assert_eq!(fields.get("opacity"), Some(&0x100));
+    }
+
+    #[test]
+    fn a_moved_self_is_followed_within_its_block() {
+        // `EdgesRefinement::fmt`: `left` is `add rsi, 0x18; mov r9, rsi`,
+        // and the block after a `jmp` starts from `self` again.
+        let mut asm = Asm::new();
+        asm.mov_self();
+        asm.field("top");
+        asm.lea_field(0x10);
+        asm.field("bottom");
+        asm.add_self(0x18);
+        asm.mov_self();
+        asm.field("left");
+        asm.jmp();
+        asm.mov_self();
+        asm.field("first");
+        let fields = asm.scan();
+        assert_eq!(fields.get("top"), Some(&0));
+        assert_eq!(fields.get("bottom"), Some(&0x10));
+        assert_eq!(fields.get("left"), Some(&0x18));
+        assert_eq!(fields.get("first"), Some(&0));
     }
 }
