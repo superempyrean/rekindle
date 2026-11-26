@@ -140,6 +140,65 @@ pub(crate) fn cache() -> Option<Arc<CacheStore>> {
         .clone()
 }
 
+/// What the client shows as selected, read by the platform when a plugin
+/// asks.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LiveSelection {
+    /// The guild open, or `None` for the DM list.
+    pub guild: Option<u64>,
+    /// The channel or DM open, or `None` when none is.
+    pub channel: Option<u64>,
+    /// The open channel's name, without its `#` or `@`.
+    pub channel_name: Option<String>,
+    /// The open guild's name.
+    pub guild_name: Option<String>,
+}
+
+/// The platform's reader of the selection, when it has one.
+static SELECTION: Mutex<Option<fn() -> LiveSelection>> = Mutex::new(None);
+
+/// Answer `get-selection` with `read`, called on every query, from now on.
+/// `get-channel` and `get-guild` for the selected channel and guild come
+/// from it too, when the client's cache store doesn't have them.
+pub fn read_selection(read: fn() -> LiveSelection) {
+    *SELECTION
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(read);
+}
+
+fn live_selection() -> Option<LiveSelection> {
+    let read = (*SELECTION
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner))?;
+    Some(read())
+}
+
+/// The selected channel as a channel record, if it is `id` and its name is
+/// known. A channel outside a guild is given kind 1 (a DM).
+fn live_channel(id: u64) -> Option<api::Channel> {
+    let s = live_selection()?;
+    (s.channel == Some(id)).then_some(())?;
+    Some(api::Channel {
+        id,
+        kind: u16::from(s.guild.is_none()),
+        guild: s.guild,
+        name: s.channel_name?,
+        ..Default::default()
+    })
+}
+
+/// The selected guild as a guild record, if it is `id` and its name is
+/// known.
+fn live_guild(id: u64) -> Option<api::Guild> {
+    let s = live_selection()?;
+    (s.guild == Some(id)).then_some(())?;
+    Some(api::Guild {
+        id,
+        name: s.guild_name?,
+        ..Default::default()
+    })
+}
+
 /// rekindle's `ClientBackend` inside the client, built from recovered layout.
 pub(crate) struct DetourBackend {
     shared: Shared,
@@ -235,6 +294,8 @@ impl ClientBackend for DetourBackend {
     fn selection(&self) -> api::Selection {
         let (guild, channel) = if let Some(c) = cache() {
             c.selection().unwrap_or((None, None))
+        } else if let Some(s) = live_selection() {
+            (s.guild, s.channel)
         } else {
             let (g, c) = client::read(client::Client::selection).unwrap_or((None, 0));
             (g, (c != 0).then_some(c))
@@ -273,6 +334,9 @@ impl ClientBackend for DetourBackend {
         if let Some(c) = cache() {
             return c.guild(id);
         }
+        if let Some(g) = live_guild(id) {
+            return Some(g);
+        }
         let g = client::read(move |c| c.guild(id)).flatten()?;
         Some(api::Guild {
             id: g.id,
@@ -293,7 +357,10 @@ impl ClientBackend for DetourBackend {
     }
 
     fn channel(&self, id: u64) -> Option<api::Channel> {
-        cache()?.channel(id)
+        match cache() {
+            Some(c) => c.channel(id),
+            None => live_channel(id),
+        }
     }
 
     fn channels(&self, guild: u64, include_hidden: bool) -> Vec<api::Channel> {
@@ -850,5 +917,29 @@ fn member_record(guild: u64, m: client::MemberRead) -> rekindle_plugin_host::api
         timed_out_until_ms: None,
         pending: false,
         ..Default::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn in_a_guild() -> LiveSelection {
+        LiveSelection {
+            guild: Some(7),
+            channel: Some(9),
+            channel_name: Some("general".into()),
+            guild_name: Some("test".into()),
+        }
+    }
+
+    #[test]
+    fn the_selection_reader_names_the_selected_channel_and_guild() {
+        read_selection(in_a_guild);
+        let c = live_channel(9).unwrap();
+        assert_eq!((c.guild, c.name.as_str(), c.kind), (Some(7), "general", 0));
+        assert!(live_channel(8).is_none());
+        assert_eq!(live_guild(7).unwrap().name, "test");
+        assert!(live_guild(9).is_none());
     }
 }

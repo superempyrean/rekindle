@@ -13,6 +13,10 @@
 //! changes, and [`generation`] counts the snapshots published. The
 //! platform's hooks draw from it, and hand a click on one of them back with
 //! `rekindle_ui_hook::queue_click`, which the next tick runs.
+//!
+//! The profile reads no client state. Plugins' `get-selection` is answered
+//! by `Options::selection` when the platform gives one, and is empty
+//! otherwise.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -22,6 +26,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use rekindle_extension::theme::ThemeProfile;
+pub use rekindle_extension::LiveSelection;
 use rekindle_extension::{Driver, ExtArgs, RecoveredProfile};
 use serde::Serialize;
 
@@ -41,6 +46,10 @@ pub struct Options {
     pub log: fn(&str),
     /// A file the snapshot is written to as JSON whenever it changes.
     pub report: Option<PathBuf>,
+    /// Reads what the client shows as selected, for plugins'
+    /// `get-selection`, and `get-channel` and `get-guild` of the selection.
+    /// Without it, the selection is empty.
+    pub selection: Option<fn() -> LiveSelection>,
 }
 
 /// What the runtime last made of its plugins.
@@ -199,6 +208,9 @@ fn run(o: &Options) {
 /// The Driver on the plugin home, with the palettes' tokens as the client's.
 fn up(o: &Options) -> anyhow::Result<Driver> {
     std::fs::create_dir_all(&o.home)?;
+    if let Some(read) = o.selection {
+        rekindle_extension::read_selection(read);
+    }
     let names: std::collections::BTreeSet<&String> = o
         .palettes
         .iter()
@@ -345,6 +357,7 @@ mod tests {
             tweaks: Vec::new(),
             log: |_| {},
             report: Some(report.clone()),
+            selection: None,
         }));
         let deadline = Instant::now() + Duration::from_secs(30);
         let shot = loop {

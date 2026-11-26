@@ -40,7 +40,7 @@ use rekindle_ui_hook::{
 };
 
 use backend::{DetourBackend, Shared};
-pub use backend::{PickerTab, read_cache};
+pub use backend::{LiveSelection, PickerTab, read_cache, read_selection};
 use overlay::OverlayState;
 pub use rekindle::Rekindle;
 use theme::{ThemeHook, ThemeProfile, ThemeState};
