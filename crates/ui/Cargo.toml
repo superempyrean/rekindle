@@ -1,0 +1,19 @@
+[package]
+name = "rekindle-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "One semantic plugin UI and theme, lowered to the wire on mobile and to native GPUI elements on desktop."
+publish = false
+
+[dependencies]
+serde = { workspace = true }
+rekindle-wire = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

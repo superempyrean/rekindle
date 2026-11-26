@@ -1,0 +1,29 @@
+[package]
+name = "rekindle-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Resolve the desktop client's own GPUI types and offsets at runtime, and build native elements with them."
+publish = false
+
+[lib]
+name = "rekindle_desktop"
+path = "src/lib.rs"
+
+[[bin]]
+name = "rekindle-desktop"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true }
+iced-x86 = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+rekindle-sigmatch = { workspace = true }
+rekindle-ui = { workspace = true }
+
+[lints]
+workspace = true

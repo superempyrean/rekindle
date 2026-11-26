@@ -12,6 +12,8 @@ members = [
     "crates/hook",
     "crates/wire",
     "crates/wire-inject",
+    "crates/ui",
+    "crates/desktop",
     "playground",
     "crates/phoenix-guest",
     "crates/install",
@@ -72,6 +74,8 @@ rekindle-release = { path = "crates/release" }
 rekindle-sigmatch = { path = "crates/sigmatch" }
 rekindle-wire = { path = "crates/wire" }
 rekindle-wire-inject = { path = "crates/wire-inject" }
+rekindle-ui = { path = "crates/ui" }
+rekindle-desktop = { path = "crates/desktop" }
 
 # The lint policy. Every crate opts in with `[lints] workspace = true`, and CI
 # denies warnings. A suppression is `#[expect(lint, reason = "...")]` on the

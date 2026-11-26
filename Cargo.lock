@@ -2882,6 +2882,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "rekindle-desktop"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "iced-x86",
+ "rekindle-sigmatch",
+ "rekindle-ui",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "rekindle-hook"
 version = "0.0.0"
 dependencies = [
@@ -3002,6 +3015,15 @@ dependencies = [
 name = "rekindle-test"
 version = "0.0.0"
 dependencies = [
+ "serde_json",
+]
+
+[[package]]
+name = "rekindle-ui"
+version = "0.0.0"
+dependencies = [
+ "rekindle-wire",
+ "serde",
  "serde_json",
 ]
 

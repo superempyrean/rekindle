@@ -1,0 +1,21 @@
+//! Desktop Phoenix's own GPUI, resolved from the build.
+//!
+//! The desktop client has no wire and no webview. rekindle builds its UI out
+//! of the client's own `Div`, `StyleRefinement` and text elements. This crate
+//! finds those types and their fields in a specific `Discord.exe` by shape —
+//! strings, call graphs, `.pdata` extents and the derived `Debug::fmt` — and
+//! writes styles at the offsets that build actually has. Nothing is a fixed
+//! RVA.
+//!
+//! [`symbols::Symbols::resolve`] is the entry point; `rekindle-desktop check`
+//! runs it on a build and fails loudly when a shape changed.
+
+pub mod debug;
+pub mod image;
+pub mod native;
+pub mod symbols;
+
+pub use debug::StyleOffsets;
+pub use image::Image;
+pub use native::{Written, write_style};
+pub use symbols::{Report, Symbols};
