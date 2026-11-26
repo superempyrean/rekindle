@@ -529,7 +529,7 @@ impl ClientBackend for DetourBackend {
                 Ok(())
             }
             (
-                SLOT_MESSAGE_MENU | SLOT_USER_MENU | SLOT_CHANNEL_MENU,
+                SLOT_MESSAGE_MENU | SLOT_USER_MENU | SLOT_CHANNEL_MENU | SLOT_GUILD_MENU,
                 SlotItem::MenuItem {
                     id, label, danger, ..
                 },
@@ -557,6 +557,7 @@ impl ClientBackend for DetourBackend {
                 | SLOT_MESSAGE_MENU
                 | SLOT_USER_MENU
                 | SLOT_CHANNEL_MENU
+                | SLOT_GUILD_MENU
                 | SLOT_EXPRESSION_PICKER_TAB,
                 _,
             ) => Err(SlotError::Invalid),
