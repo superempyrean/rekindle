@@ -49,9 +49,8 @@ StyleRefinement 640 bytes
 check: ok (44 fields, StyleRefinement 640 bytes)
 ```
 
-`--json` writes the same report for tooling;
-[`tools/phoenix-desktop/resolved-desktop.json`](../../../tools/phoenix-desktop/resolved-desktop.json)
-is this build's.
+`--json` writes the same report for tooling; a release's CI keeps the JSON
+beside the anchors it validates.
 
 ## Writing a style
 
@@ -71,6 +70,5 @@ build, so there is no standalone constructor to call. The resolver finds the
 layout; the remaining step is to splice a newly built `Div` into a surface
 whose `render` returns an `AnyElement` we can replace. Probing the composer
 and message row on the disposable client has not yet found that splice point,
-because both return custom element structs rather than `AnyElement`. This is
-the open item in `docs/PHOENIX-CHECKLIST.md`; until it lands, no desktop UI
-capture is claimed.
+because both return custom element structs rather than `AnyElement`. Until it
+lands, no desktop UI capture is claimed.
