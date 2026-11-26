@@ -10,13 +10,15 @@
 //! loaded, their chat-bar buttons, the toasts up, their panels, the theme
 //! overrides and their slash commands. [`snapshot`] returns the latest one,
 //! and `Options::report` names a file it is written to as JSON whenever it
-//! changes. The platform's hooks draw from it, and hand a click on one of
-//! them back with `rekindle_ui_hook::queue_click`, which the next tick runs.
+//! changes, and [`generation`] counts the snapshots published. The
+//! platform's hooks draw from it, and hand a click on one of them back with
+//! `rekindle_ui_hook::queue_click`, which the next tick runs.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use rekindle_extension::theme::ThemeProfile;
@@ -73,8 +75,8 @@ pub struct Plugin {
     pub granted: Vec<String>,
 }
 
-/// A plugin's chat-bar button. A click on it is
-/// `Click::Button { plugin, item: key }`.
+/// A plugin's chat-bar button. A click on it is `Click::Button { plugin,
+/// item }`, `item` the part of `key` after the plugin and `\u{1f}`.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct ChatBarButton {
     pub plugin: String,
@@ -84,6 +86,7 @@ pub struct ChatBarButton {
 }
 
 static SNAPSHOT: Mutex<Option<Snapshot>> = Mutex::new(None);
+static GENERATION: AtomicU64 = AtomicU64::new(0);
 
 /// The snapshot the runtime published last, or `None` before it is up.
 pub fn snapshot() -> Option<Snapshot> {
@@ -91,6 +94,13 @@ pub fn snapshot() -> Option<Snapshot> {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .clone()
+}
+
+/// How many snapshots the runtime has published, 0 before the first. A
+/// platform that polls compares it with the last one it drew from and
+/// calls [`snapshot`] only when it has moved.
+pub fn generation() -> u64 {
+    GENERATION.load(Ordering::Acquire)
 }
 
 /// The palettes in a palette file: `{"themes": {name: {token: "#rrggbb"}}}`.
@@ -167,6 +177,7 @@ fn run(o: &Options) {
             *SNAPSHOT
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(now.clone());
+            GENERATION.fetch_add(1, Ordering::Release);
             last = Some(now);
         }
         std::thread::sleep(TICK);
@@ -303,6 +314,7 @@ mod tests {
             assert!(Instant::now() < deadline, "no snapshot");
             std::thread::sleep(TICK);
         };
+        assert!(generation() >= 1);
         assert!(shot.plugins.is_empty());
         assert!(!shot.developer_mode);
         assert!(shot.theme.is_empty());
