@@ -147,6 +147,13 @@ fn print_div(div: &rekindle_desktop::Div, base: u64) {
         div.style_fn,
         div.drawable_element
     );
+    println!(
+        "children SmallVec at +{:#x}, {:#x}-byte elements, {:#x} inline, length/capacity at +{:#x}",
+        div.children.at,
+        div.children.element,
+        div.children.inline,
+        div.children.capacity_at
+    );
 }
 
 fn print_menu(menu: &rekindle_desktop::Menu, base: u64) {
