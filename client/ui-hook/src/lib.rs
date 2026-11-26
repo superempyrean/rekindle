@@ -57,6 +57,7 @@ pub use overlay::{
 };
 pub use panel::{
     CardItem, PanelItem, UiInput, Widget, panels, report_ui, set_panels, set_shown_plugin,
+    shown_plugin,
 };
 pub use registry::{
     Button, Command, MenuItem, MenuKind, MenuTargetRef, Modal, ProfileSectionItem, menu_rows,

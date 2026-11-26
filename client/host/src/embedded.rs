@@ -7,7 +7,7 @@
 //! other client. The tokens plugins can set are the ones in the palettes.
 //!
 //! After every tick the runtime publishes a [`Snapshot`]: the plugins
-//! loaded, their chat-bar buttons, the toasts up, their panels, the theme
+//! loaded and the installed ones that aren't, their chat-bar buttons, the toasts up, their panels, the theme
 //! overrides and their slash commands. [`snapshot`] returns the latest one,
 //! and `Options::report` names a file it is written to as JSON whenever it
 //! changes, and [`generation`] counts the snapshots published. The
@@ -64,13 +64,15 @@ pub struct Snapshot {
 /// How many of the plugins' log lines a snapshot keeps.
 pub const LOG_LINES: usize = 32;
 
-/// A loaded plugin.
+/// A plugin loaded or installed.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Plugin {
     pub id: String,
     pub version: String,
     pub trust: String,
-    /// `Active`, or `Faulted: <reason>`.
+    /// `Active` or `Faulted: <reason>` for a loaded plugin. An installed
+    /// one that isn't loaded is `Off` when the user turned it off, `Not
+    /// loaded` when it is on but didn't load, and otherwise `Off: <why>`.
     pub status: String,
     pub granted: Vec<String>,
 }
@@ -138,6 +140,10 @@ fn run(o: &Options) {
     let mut lines = Vec::new();
     let mut logs = 0;
     let mut last = None;
+    // The installed plugins that aren't loaded, read from the home again
+    // only when the loaded set changes.
+    let mut loaded_ids = None;
+    let mut not_loaded = Vec::new();
     loop {
         driver.tick();
         let (records, next) = driver.rekindle().logs_since(logs);
@@ -150,12 +156,18 @@ fn run(o: &Options) {
         if lines.len() > LOG_LINES {
             lines.drain(..lines.len() - LOG_LINES);
         }
-        let now = Snapshot {
+        let mut now = Snapshot {
             started_ms,
             developer_mode: home.developer_mode().unwrap_or(false),
             log: lines.clone(),
             ..take(&mut driver)
         };
+        let ids: Vec<String> = now.plugins.iter().map(|p| p.id.clone()).collect();
+        if loaded_ids.as_ref() != Some(&ids) {
+            not_loaded = not_loaded_plugins(&home, &ids);
+            loaded_ids = Some(ids);
+        }
+        now.plugins.extend(not_loaded.iter().cloned());
         if last.as_ref() != Some(&now) {
             if last.is_none() {
                 (o.log)(&format!(
@@ -227,6 +239,34 @@ fn up(o: &Options) -> anyhow::Result<Driver> {
     let mut driver = unsafe { Driver::start(args, profile) }.map_err(|e| anyhow::anyhow!(e))?;
     driver.use_framework_theme(o.palettes.clone());
     Ok(driver)
+}
+
+/// The plugins installed in `home` whose ids aren't in `loaded`, with the
+/// status `Off` or `Off: <why>`.
+fn not_loaded_plugins(home: &rekindle_plugin_host::home::Home, loaded: &[String]) -> Vec<Plugin> {
+    use rekindle_plugin_host::home::InstallState;
+    home.installed()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|i| !loaded.contains(&i.id))
+        .map(|i| Plugin {
+            version: i
+                .manifest
+                .as_ref()
+                .map_or_else(String::new, |m| m.version.clone()),
+            trust: i
+                .trust
+                .as_ref()
+                .map_or_else(String::new, |t| t.trust.as_str().to_string()),
+            status: match &i.state {
+                InstallState::Off => "Off".to_string(),
+                InstallState::Ready => "Not loaded".to_string(),
+                other => format!("Off: {}", other.describe()),
+            },
+            granted: Vec::new(),
+            id: i.id,
+        })
+        .collect()
 }
 
 /// What the Driver and the UI contributions hold now.

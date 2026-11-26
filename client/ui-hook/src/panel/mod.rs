@@ -21,7 +21,7 @@ use field::{local_value, set_local, text_field};
 use crate::{Click, queue_click};
 
 /// A plugin panel rekindle shows on its settings page.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PanelItem {
     pub plugin: String,
     /// The plugin's panel id (interactions are reported against it).
@@ -132,6 +132,11 @@ pub(crate) static SETTINGS_RENDERS: AtomicUsize = AtomicUsize::new(0);
 /// page is open in the grid), or none of the plugins' panels.
 pub fn set_shown_plugin(plugin: Option<String>) {
     *SHOWN_PLUGIN.lock().unwrap() = plugin;
+}
+
+/// The plugin whose panels are shown under rekindle's own, if any.
+pub fn shown_plugin() -> Option<String> {
+    SHOWN_PLUGIN.lock().unwrap().clone()
 }
 
 /// Set the panels rekindle's settings page renders.
