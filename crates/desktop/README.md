@@ -70,9 +70,10 @@ label at +0xb0 (tag), +0xb8 (ptr), +0xc0 (len); Action tag 2
 On a disposable client, rewriting that `SharedString` on the returned Vec
 renders **rekindle** in place of the Reply row. The label is the client's own
 24-byte static `SharedString` and owns nothing, so the menu's normal drop is
-safe. Appending a *new* `Action` row needs `MenuItemProps::new` and the
-`with_*` builders; the resolver locates them, the native detour is the next
-step.
+safe. A native detour can also build a new `MenuItem::Action` with
+`MenuItemProps::new` and `with_id`, keep the Reply row's handler, and append
+the old row with `Vec::push`; the captured menu then has the new row at
+Reply's position and `len + 1` rows. The resolver locates every builder.
 
 ## Writing a style
 
@@ -94,7 +95,8 @@ whose `render` returns an `AnyElement` we can replace. Probing the composer
 and message row on the disposable client has not yet found that splice point,
 because both return custom element structs rather than `AnyElement`.
 
-What is proven live is narrower: the message context menu's own
-`MenuItem`/`SharedString` row can be relabelled from the image-resolved field
-offsets, and the row renders natively in the open menu. Appending a new row
-and building a `Div` remain open.
+What is proven live is narrower: the message context menu can carry a new
+`MenuItem::Action` built with the client's own `MenuItemProps::new`/
+`with_id` and appended with `Vec::push`; the captured menu shows it at
+Reply's position with the old Reply kept at the end. Building and placing a
+`Div` remains open.

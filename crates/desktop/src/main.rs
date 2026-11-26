@@ -125,6 +125,10 @@ fn print_menu(menu: &rekindle_desktop::Menu, base: u64) {
         menu.vec_push - base
     );
     println!(
+        "builders: props_new {:#x}, with_id {:#x}, with_icon {:#x}, with_color {:#x}",
+        menu.props_new, menu.with_id, menu.with_icon, menu.with_color
+    );
+    println!(
         "item {:#x} bytes, props at {:#x} ({:#x} bytes)",
         menu.item_size, menu.props, menu.props_size
     );

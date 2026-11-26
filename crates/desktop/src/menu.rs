@@ -31,6 +31,11 @@ const ROW_PROLOGUE: &[u8] = &[
 pub struct Menu {
     pub build_fn: u64,
     pub vec_push: u64,
+    /// `MenuItemProps::new`, `with_id`, `with_icon`, `with_color`.
+    pub props_new: u64,
+    pub with_id: u64,
+    pub with_icon: u64,
+    pub with_color: u64,
     pub item_size: usize,
     /// `MenuItemProps` inside a `MenuItem`.
     pub props: usize,
@@ -64,9 +69,11 @@ impl Menu {
             bail!("Copy Message ID block has only {} calls", calls.len());
         }
         let vec_push = calls[4];
+        let with_id = calls[2];
+        let with_icon = calls[3];
         let core = core_ctor(image, calls[1])?;
-        let (props, props_size) = props_layout(image, core)?;
-        let (label_tag, label_ptr, label_len) = label_layout(image, core)?;
+        let (props, props_size, props_new) = props_layout(image, core)?;
+        let (label_tag, label_ptr, label_len) = label_layout(image, props_new)?;
         let item_size = push_stride(image, vec_push)?;
         if item_size < props + props_size {
             bail!("MenuItem is {item_size:#x} but props ({props:#x}+{props_size:#x}) does not fit");
@@ -86,9 +93,14 @@ impl Menu {
             }
         }
         let action_tag = action_tag(image, core)?;
+        let with_color = with_color(image, copy_lea)?;
         Ok(Self {
             build_fn,
             vec_push,
+            props_new,
+            with_id,
+            with_icon,
+            with_color,
             item_size,
             props,
             props_size,
@@ -192,7 +204,7 @@ fn core_ctor(image: &Image<'_>, copy_ctor: u64) -> Result<u64> {
     last_call(image, wrapper, 0x100).context("MenuItem wrapper has no core call")
 }
 
-fn props_layout(image: &Image<'_>, core: u64) -> Result<(usize, usize)> {
+fn props_layout(image: &Image<'_>, core: u64) -> Result<(usize, usize, u64)> {
     let (start, end) = image.function_named("MenuItem core ctor", core)?;
     let len = usize::try_from(end - start)?;
     let code = image
@@ -220,17 +232,17 @@ fn props_layout(image: &Image<'_>, core: u64) -> Result<(usize, usize)> {
             props_size = Some(insn.immediate32() as usize);
         }
     }
-    match (props, props_size) {
-        (Some(props), Some(size)) if size > 0 => Ok((props, size)),
-        _ => bail!("MenuItem props layout not found"),
-    }
-}
-
-fn label_layout(image: &Image<'_>, core: u64) -> Result<(usize, usize, usize)> {
     let props_new = calls_after(image, core, 0x80)
         .first()
         .copied()
         .context("MenuItem core ctor has no props_new call")?;
+    match (props, props_size) {
+        (Some(props), Some(size)) if size > 0 => Ok((props, size, props_new)),
+        _ => bail!("MenuItem props layout not found"),
+    }
+}
+
+fn label_layout(image: &Image<'_>, props_new: u64) -> Result<(usize, usize, usize)> {
     let (start, end) = image
         .function(props_new)
         .unwrap_or((props_new, props_new + 0x200));
@@ -256,6 +268,16 @@ fn label_layout(image: &Image<'_>, core: u64) -> Result<(usize, usize, usize)> {
     }
     let tag = tag.context("MenuItemProps label store not found")?;
     Ok((tag, tag + 8, tag + 16))
+}
+
+fn with_color(image: &Image<'_>, copy_lea: u64) -> Result<u64> {
+    let (start, end) = image.function_named("MessageContextMenu", copy_lea)?;
+    let delete_lea = lea_in_function(image, start, end, b"Delete Message")
+        .context("Delete Message lea not found in MessageContextMenu")?;
+    calls_after(image, delete_lea, 0x150)
+        .get(4)
+        .copied()
+        .context("Delete Message block has no with_color call")
 }
 
 fn push_stride(image: &Image<'_>, vec_push: u64) -> Result<usize> {
