@@ -27,8 +27,8 @@ const MESSAGE_CONTENT: &[u8] = b"\x10message-content-\xc0\x00";
 const ROW_PROLOGUE: &[u8] = &[
     0x55, 0x41, 0x57, 0x41, 0x56, 0x41, 0x55, 0x41, 0x54, 0x56, 0x57, 0x53,
 ];
-/// `Drawable<E>` for the client's `Div`: 0x100 bytes of phase/state and 0x78
-/// of `Div` at `+0x80`.
+/// `Drawable<E>` for the client's `Div`: 0x108 bytes, the `Div` at `+0x80`.
+/// (The client's build differs from the published crate, which measures 0xF8.)
 const DRAWABLE_SIZE: u64 = 0x108;
 /// The boxed `Interactivity`'s allocation (`1248` plus the `Rc` header).
 const INTERACTIVITY_ALLOC: u32 = 0x4e8;
