@@ -46,6 +46,16 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Resolve the client's `SharedString` text element and its
+    /// `AnyElement` conversion.
+    Text {
+        /// The client image (`Discord.exe`).
+        #[arg(long)]
+        exe: PathBuf,
+        /// Write the report as JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Resolve the message context menu's `MenuItem` layout.
     Menu {
         /// The client image (`Discord.exe`).
@@ -86,6 +96,17 @@ fn run() -> Result<()> {
             }
             Ok(())
         }
+        Command::Text { exe, json } => {
+            let bytes = std::fs::read(&exe).with_context(|| format!("read {}", exe.display()))?;
+            let image = Image::parse(&bytes).context("parse the client image")?;
+            let text = rekindle_desktop::text::resolve(&image)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&text)?);
+            } else {
+                print_text(&text, image.base());
+            }
+            Ok(())
+        }
         Command::Menu { exe, json } => {
             let bytes = std::fs::read(&exe).with_context(|| format!("read {}", exe.display()))?;
             let image = Image::parse(&bytes).context("parse the client image")?;
@@ -103,14 +124,17 @@ fn run() -> Result<()> {
             let symbols = Symbols::resolve(&image)?;
             let menu = rekindle_desktop::Menu::resolve(&image)?;
             let div = rekindle_desktop::div::resolve(&image)?;
+            let text = rekindle_desktop::text::resolve(&image)?;
             let report = symbols.report();
             if json {
-                let out = serde_json::json!({ "symbols": report, "menu": menu, "div": div });
+                let out =
+                    serde_json::json!({ "symbols": report, "menu": menu, "div": div, "text": text });
                 println!("{}", serde_json::to_string_pretty(&out)?);
             } else {
                 print(&symbols, false);
                 print_menu(&menu, image.base());
                 print_div(&div, image.base());
+                print_text(&text, image.base());
             }
             let failed: Vec<_> = report.checks.iter().filter(|c| !c.ok).collect();
             if failed.is_empty() {
@@ -133,6 +157,17 @@ fn run() -> Result<()> {
             }
         }
     }
+}
+
+fn print_text(text: &rekindle_desktop::Text, base: u64) {
+    println!(
+        "SharedString into_any {:#x} (RVA {:#x}); Drawable<SharedString> vtable {:#x}, {:#x} bytes, element at +{:#x}",
+        text.into_any,
+        text.into_any - base,
+        text.vtable,
+        text.drawable_size,
+        text.element_at
+    );
 }
 
 fn print_div(div: &rekindle_desktop::Div, base: u64) {
