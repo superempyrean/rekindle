@@ -37,6 +37,15 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Resolve the client's `div()` constructor and its layout.
+    Div {
+        /// The client image (`Discord.exe`).
+        #[arg(long)]
+        exe: PathBuf,
+        /// Write the report as JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Resolve the message context menu's `MenuItem` layout.
     Menu {
         /// The client image (`Discord.exe`).
@@ -66,6 +75,17 @@ fn run() -> Result<()> {
             print(&symbols, json);
             Ok(())
         }
+        Command::Div { exe, json } => {
+            let bytes = std::fs::read(&exe).with_context(|| format!("read {}", exe.display()))?;
+            let image = Image::parse(&bytes).context("parse the client image")?;
+            let div = rekindle_desktop::div::resolve(&image)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&div)?);
+            } else {
+                print_div(&div, image.base());
+            }
+            Ok(())
+        }
         Command::Menu { exe, json } => {
             let bytes = std::fs::read(&exe).with_context(|| format!("read {}", exe.display()))?;
             let image = Image::parse(&bytes).context("parse the client image")?;
@@ -82,13 +102,15 @@ fn run() -> Result<()> {
             let image = Image::parse(&bytes).context("parse the client image")?;
             let symbols = Symbols::resolve(&image)?;
             let menu = rekindle_desktop::Menu::resolve(&image)?;
+            let div = rekindle_desktop::div::resolve(&image)?;
             let report = symbols.report();
             if json {
-                let out = serde_json::json!({ "symbols": report, "menu": menu });
+                let out = serde_json::json!({ "symbols": report, "menu": menu, "div": div });
                 println!("{}", serde_json::to_string_pretty(&out)?);
             } else {
                 print(&symbols, false);
                 print_menu(&menu, image.base());
+                print_div(&div, image.base());
             }
             let failed: Vec<_> = report.checks.iter().filter(|c| !c.ok).collect();
             if failed.is_empty() {
@@ -111,6 +133,20 @@ fn run() -> Result<()> {
             }
         }
     }
+}
+
+fn print_div(div: &rekindle_desktop::Div, base: u64) {
+    println!(
+        "div() {:#x} (RVA {:#x}) via init {:#x}; Div {:#x} bytes, Interactivity at +{:#x}, style at +{:#x} (accessor {:#x}), Drawable element +{:#x}",
+        div.new,
+        div.new - base,
+        div.initialize,
+        div.size,
+        div.interactivity,
+        div.style_at,
+        div.style_fn,
+        div.drawable_element
+    );
 }
 
 fn print_menu(menu: &rekindle_desktop::Menu, base: u64) {

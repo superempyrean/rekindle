@@ -11,12 +11,14 @@
 //! runs it on a build and fails loudly when a shape changed.
 
 pub mod debug;
+pub mod div;
 pub mod image;
 pub mod menu;
 pub mod native;
 pub mod symbols;
 
 pub use debug::StyleOffsets;
+pub use div::Div;
 pub use image::Image;
 pub use menu::{Label, Menu};
 pub use native::{Written, write_style};
