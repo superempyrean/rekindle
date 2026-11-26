@@ -73,6 +73,7 @@ pub(crate) fn drive_and_verify(layout: &Layout, hooks: &Hooks) -> Result<(String
         wire_picker_tabs: false,
         elements: std::collections::BTreeMap::new(),
         wire_values: false,
+        tweaks: Vec::new(),
     };
     let (mut ext, n_plugins) = ext_args();
     // Plugins' queries read the client. Live, the plugins start once the

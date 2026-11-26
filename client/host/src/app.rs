@@ -48,6 +48,9 @@
 //! Plugins' `client-state` queries read the guest's own store through
 //! the platform's host calls ([`database`]).
 //!
+//! With the `silent-typing` tweak on, the guest's typing requests are
+//! answered here and never made ([`typing`]).
+//!
 //! Android's hooks are `crate::android`. Another platform's hooks link this
 //! crate as a library, call [`set_platform`] and then [`start`], and hand
 //! over what the guest sends and receives.
@@ -56,6 +59,7 @@ mod database;
 mod menus;
 mod runtime;
 mod theme;
+mod typing;
 
 use crate::gateway;
 use std::path::PathBuf;
@@ -198,8 +202,11 @@ pub fn turn(ops: &[u8]) -> Option<Vec<u8>> {
 
 /// A host call the guest made. If it names a palette, the plugins' theme is
 /// recoloured for it from the guest's next turn. An open or close of the
-/// guest's store is noted for [`database`]. On the guest's thread.
-pub fn host_call(buf: &[u8]) {
+/// guest's store is noted for [`database`]. Returns true if the platform
+/// should return without making the call, as for none. On the guest's
+/// thread.
+#[must_use]
+pub fn host_call(buf: &[u8]) -> bool {
     let n = CALLS.fetch_add(1, Ordering::Relaxed);
     if n < 8 {
         log(&format!(
@@ -214,6 +221,7 @@ pub fn host_call(buf: &[u8]) {
     database::on_call(buf);
     // A panic can't unwind into the guest's frame.
     let _ = std::panic::catch_unwind(database::serve);
+    typing::drops(buf)
 }
 
 /// The REPLY a host module gave to a call the guest made: the handle of
@@ -239,6 +247,12 @@ pub fn dispatch<R>(buf: &[u8], mut original: impl FnMut(Option<&[u8]>) -> R) -> 
     for queued in std::panic::catch_unwind(take_test_dispatches).unwrap_or_default() {
         let _ = deliver(&queued, &mut original);
     }
+    // The answers to typing requests rekindle dropped go straight to the
+    // guest, as the platform's would.
+    for answer in typing::take_answers() {
+        let _ = original(Some(&answer));
+    }
+    typing::on_event(buf);
     let r = deliver(buf, &mut original);
     // What the runtime changed outside a turn, after the guest's own turns
     // for this event. A panic can't unwind into the host's frame.

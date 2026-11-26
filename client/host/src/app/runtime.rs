@@ -831,6 +831,8 @@ fn up() -> anyhow::Result<(Driver, Home)> {
             })
             .unwrap_or_default(),
         wire_values: true,
+        // `super::typing` drops the guest's typing requests.
+        tweaks: vec![rekindle_extension::tweaks::SILENT_TYPING.to_string()],
     };
     let args = ExtArgs {
         dev_paths: Vec::new(),

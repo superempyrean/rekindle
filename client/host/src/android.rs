@@ -157,6 +157,9 @@ pub(crate) fn package() -> Option<String> {
 pub(crate) struct EmitResult([u64; 3]);
 
 impl EmitResult {
+    /// `Ok(None)`: the call made, with no REPLY.
+    const NONE: EmitResult = EmitResult([u64::MAX, 0, 0]);
+
     /// The REPLY to a host call: `Ok(Some(Vec<u8>))`, laid out as
     /// `{cap, ptr, len}`. `Ok(None)` is a `cap` of `-1` and an error `-2`
     /// (the emit at `0x5ae4d2c` in the `x86_64` library of 356207).
@@ -532,7 +535,9 @@ unsafe extern "C" fn hooked_emit(
     let buf = unsafe { std::slice::from_raw_parts(bytes, len) };
     let Some(ops) = op_stream(buf) else {
         // A panic can't unwind into the guest's frame.
-        let _ = std::panic::catch_unwind(|| app::host_call(buf));
+        if std::panic::catch_unwind(|| app::host_call(buf)).unwrap_or(false) {
+            return EmitResult::NONE;
+        }
         // SAFETY: the guest's own arguments.
         let result = unsafe { original(transport, bytes, len) };
         if let Some(reply) = result.reply() {

@@ -24,6 +24,7 @@ mod picker;
 mod rekindle;
 pub mod slash;
 pub mod theme;
+pub mod tweaks;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -85,6 +86,9 @@ pub struct RecoveredProfile {
     /// work, back with [`Driver::named_elements`]. With none, every call
     /// to either fails with `unavailable`.
     pub elements: std::collections::BTreeMap<String, String>,
+    /// The tweaks the host implements on this client ([`tweaks`]). Setting
+    /// any other fails with `unavailable`.
+    pub tweaks: Vec<String>,
 }
 
 /// How long a send waits for `compose` plugins before going out unchanged.
@@ -197,6 +201,7 @@ impl Driver {
         // Without a page of rekindle's on the client's settings page, a
         // button in the chat bar opens rekindle's own window.
         rekindle_ui_hook::window::set_button(!surfaces.settings);
+        tweaks::offer(&profile.tweaks);
         let backend = DetourBackend::new(shared.clone(), surfaces, profile.wire_menus);
         // Gateway dispatches read the client through a backend of their own,
         // so a plugin's call during an event filter never waits on the lock

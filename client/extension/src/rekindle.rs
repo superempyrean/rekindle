@@ -107,6 +107,7 @@ impl Rekindle {
             let dir = home.storage_dir();
             std::fs::create_dir_all(&dir)
                 .with_context(|| format!("creating storage dir {}", dir.display()))?;
+            crate::tweaks::load(home.root().join("tweaks.json"));
             StorageLocation::Dir(dir)
         };
         config.net = if opts.allow_network {

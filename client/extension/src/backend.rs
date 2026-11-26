@@ -18,7 +18,8 @@ use rekindle_plugin_host::backend::cache::CacheStore;
 use rekindle_plugin_host::model::{
     Action, ActionError, Element, OverlaySprite, Panel, SLOT_CHANNEL_MENU, SLOT_CHAT_BAR_BUTTON,
     SLOT_EXPRESSION_PICKER_TAB, SLOT_GUILD_MENU, SLOT_MESSAGE_MENU, SLOT_PROFILE_SECTION,
-    SLOT_USER_MENU, SlotError, SlotItem, SurfaceStyle, ThemeValue, Tint, ToastKind, UiError, UiOp,
+    SLOT_USER_MENU, SlotError, SlotItem, SurfaceStyle, ThemeValue, Tint, ToastKind, Tweak,
+    TweakError, UiError, UiOp,
 };
 use rekindle_plugin_host::tokens::{self, ThemeError, TokenInfo};
 use rekindle_ui_hook::registry::Surfaces;
@@ -754,6 +755,18 @@ impl ClientBackend for DetourBackend {
             menus.retain(|(p, _)| p != plugin);
             self.publish_menus();
         }
+    }
+
+    fn tweaks(&self) -> Vec<Tweak> {
+        crate::tweaks::all()
+    }
+
+    fn set_tweak(&mut self, plugin: &str, id: &str, value: &str) -> Result<(), TweakError> {
+        crate::tweaks::set(plugin, id, value)
+    }
+
+    fn reset_tweak(&mut self, plugin: &str, id: &str) {
+        crate::tweaks::reset(plugin, id);
     }
 }
 

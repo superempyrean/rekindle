@@ -397,6 +397,7 @@ fn framework_only(
         wire_picker_tabs: false,
         elements: std::collections::BTreeMap::new(),
         wire_values: false,
+        tweaks: Vec::new(),
     };
     let (ext, n_plugins) = profile::ext_args();
     // SAFETY: the profile's addresses come from anchors resolved against this
