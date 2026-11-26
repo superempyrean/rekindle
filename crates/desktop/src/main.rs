@@ -37,6 +37,15 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Resolve the message context menu's `MenuItem` layout.
+    Menu {
+        /// The client image (`Discord.exe`).
+        #[arg(long)]
+        exe: PathBuf,
+        /// Write the report as JSON.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 fn main() -> ExitCode {
@@ -57,10 +66,30 @@ fn run() -> Result<()> {
             print(&symbols, json);
             Ok(())
         }
+        Command::Menu { exe, json } => {
+            let bytes = std::fs::read(&exe).with_context(|| format!("read {}", exe.display()))?;
+            let image = Image::parse(&bytes).context("parse the client image")?;
+            let menu = rekindle_desktop::Menu::resolve(&image)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&menu)?);
+            } else {
+                print_menu(&menu, image.base());
+            }
+            Ok(())
+        }
         Command::Check { exe, json } => {
-            let symbols = resolve(&exe)?;
+            let bytes = std::fs::read(&exe).with_context(|| format!("read {}", exe.display()))?;
+            let image = Image::parse(&bytes).context("parse the client image")?;
+            let symbols = Symbols::resolve(&image)?;
+            let menu = rekindle_desktop::Menu::resolve(&image)?;
             let report = symbols.report();
-            print(&symbols, json);
+            if json {
+                let out = serde_json::json!({ "symbols": report, "menu": menu });
+                println!("{}", serde_json::to_string_pretty(&out)?);
+            } else {
+                print(&symbols, false);
+                print_menu(&menu, image.base());
+            }
             let failed: Vec<_> = report.checks.iter().filter(|c| !c.ok).collect();
             if failed.is_empty() {
                 if !json {
@@ -82,6 +111,27 @@ fn run() -> Result<()> {
             }
         }
     }
+}
+
+fn print_menu(menu: &rekindle_desktop::Menu, base: u64) {
+    println!(
+        "MessageContextMenu {:#x} (RVA {:#x})",
+        menu.build_fn,
+        menu.build_fn - base
+    );
+    println!(
+        "Vec<MenuItem>::push {:#x} (RVA {:#x})",
+        menu.vec_push,
+        menu.vec_push - base
+    );
+    println!(
+        "item {:#x} bytes, props at {:#x} ({:#x} bytes)",
+        menu.item_size, menu.props, menu.props_size
+    );
+    println!(
+        "label at +{:#x} (tag), +{:#x} (ptr), +{:#x} (len); Action tag {}",
+        menu.label.tag, menu.label.ptr, menu.label.len, menu.action_tag
+    );
 }
 
 fn resolve(exe: &PathBuf) -> Result<Symbols> {

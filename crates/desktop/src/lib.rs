@@ -12,10 +12,12 @@
 
 pub mod debug;
 pub mod image;
+pub mod menu;
 pub mod native;
 pub mod symbols;
 
 pub use debug::StyleOffsets;
 pub use image::Image;
+pub use menu::{Label, Menu};
 pub use native::{Written, write_style};
 pub use symbols::{Report, Symbols};

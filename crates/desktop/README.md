@@ -52,6 +52,28 @@ check: ok (44 fields, StyleRefinement 640 bytes)
 `--json` writes the same report for tooling; a release's CI keeps the JSON
 beside the anchors it validates.
 
+## The message context menu
+
+`Menu::resolve` finds `MessageContextMenu` and the `Vec<MenuItem>` it builds:
+`Vec<MenuItem>::push`, the `0x1F8` item stride, `MenuItemProps` at `0x20`, the
+visible label `SharedString` at `0xB0` (`0x8018`, pointer at `0xB8`, length at
+`0xC0`), `Action` tag `2`, and the separator tag.
+
+```
+$ rekindle-desktop menu --exe ...\Discord.exe.orig
+MessageContextMenu 0x142816d4c (RVA 0x2816d4c)
+Vec<MenuItem>::push 0x142814c4e (RVA 0x2814c4e)
+item 0x1f8 bytes, props at 0x20 (0x1c8 bytes)
+label at +0xb0 (tag), +0xb8 (ptr), +0xc0 (len); Action tag 2
+```
+
+On a disposable client, rewriting that `SharedString` on the returned Vec
+renders **rekindle** in place of the Reply row. The label is the client's own
+24-byte static `SharedString` and owns nothing, so the menu's normal drop is
+safe. Appending a *new* `Action` row needs `MenuItemProps::new` and the
+`with_*` builders; the resolver locates them, the native detour is the next
+step.
+
 ## Writing a style
 
 `native::write_style` writes a `rekindle_ui::GpuiStyle` into a live
@@ -70,5 +92,9 @@ build, so there is no standalone constructor to call. The resolver finds the
 layout; the remaining step is to splice a newly built `Div` into a surface
 whose `render` returns an `AnyElement` we can replace. Probing the composer
 and message row on the disposable client has not yet found that splice point,
-because both return custom element structs rather than `AnyElement`. Until it
-lands, no desktop UI capture is claimed.
+because both return custom element structs rather than `AnyElement`.
+
+What is proven live is narrower: the message context menu's own
+`MenuItem`/`SharedString` row can be relabelled from the image-resolved field
+offsets, and the row renders natively in the open menu. Appending a new row
+and building a `Div` remain open.
