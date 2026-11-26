@@ -137,7 +137,7 @@ fn run() -> Result<()> {
 
 fn print_div(div: &rekindle_desktop::Div, base: u64) {
     println!(
-        "div() {:#x} (RVA {:#x}) via init {:#x}; Div {:#x} bytes, Interactivity at +{:#x}, style at +{:#x} (accessor {:#x}), into_any {:#x}, Drawable element +{:#x}",
+        "div() {:#x} (RVA {:#x}) via init {:#x}; Div {:#x} bytes, Interactivity at +{:#x}, style at +{:#x} (accessor {:#x}), into_any {:#x}, paint {:#x}, Drawable element +{:#x}",
         div.new,
         div.new - base,
         div.initialize,
@@ -146,6 +146,7 @@ fn print_div(div: &rekindle_desktop::Div, base: u64) {
         div.style_at,
         div.style_fn,
         div.into_any,
+        div.paint,
         div.drawable_element
     );
     println!(

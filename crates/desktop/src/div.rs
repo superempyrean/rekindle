@@ -51,6 +51,9 @@ pub struct Div {
     /// `Div::into_any_element`: the arena conversion that copies the `Div`
     /// into a `Drawable<Div>` and returns an owned `AnyElement`.
     pub into_any: u64,
+    /// `Drawable<Div>::paint` (the vtable's `+0x38` entry, followed through
+    /// its `jmp` thunk).
+    pub paint: u64,
     /// The children `SmallVec` and its element.
     pub children: Children,
 }
@@ -211,6 +214,7 @@ pub fn resolve(image: &Image<'_>) -> Result<Div> {
         .copied()
         .context("no Drawable<Div> vtable")?;
     let into_any = into_any_function(image, vtable)?;
+    let paint = paint_function(image, vtable)?;
 
     Ok(Div {
         new,
@@ -221,8 +225,30 @@ pub fn resolve(image: &Image<'_>) -> Result<Div> {
         style_at,
         style_fn,
         into_any,
+        paint,
         children,
     })
+}
+
+/// `Drawable<Div>::paint`: the vtable's `+0x38` entry is a `jmp rel32` thunk;
+/// return the target it jumps to.
+fn paint_function(image: &Image<'_>, vtable: u64) -> Result<u64> {
+    let shim = image
+        .qword(vtable + 0x38)
+        .context("the Drawable<Div> vtable has no +0x38 paint entry")?;
+    let code = image.read(shim, 5).context("paint entry is unmapped")?;
+    if code[0] != 0xE9 {
+        bail!("paint entry {shim:#x} is not a jmp thunk");
+    }
+    let rel = i32::from_le_bytes(code[1..5].try_into().unwrap());
+    let target = shim.wrapping_add(5).wrapping_add_signed(i64::from(rel));
+    let (start, _) = image
+        .function(target)
+        .with_context(|| format!("paint target {target:#x} is outside .pdata"))?;
+    if start != target {
+        bail!("paint target {target:#x} is not a function entry");
+    }
+    Ok(target)
 }
 
 /// `Div::into_any_element`: the only function that references the plain
