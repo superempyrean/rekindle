@@ -71,6 +71,16 @@ static INTERCEPTED: AtomicU64 = AtomicU64::new(0);
 /// The kinds of REST route some plugin's `http-filter` sees.
 static HTTP_KINDS: AtomicU64 = AtomicU64::new(0);
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+static EVENTS: AtomicU64 = AtomicU64::new(0);
+static REQUESTS: AtomicU64 = AtomicU64::new(0);
+
+/// How many dispatches and requests are logged, then one in this many.
+const LOGGED: u64 = 64;
+
+fn counted(counter: &AtomicU64) -> bool {
+    let n = counter.fetch_add(1, Ordering::Relaxed);
+    n < LOGGED || n.is_multiple_of(LOGGED)
+}
 
 /// The kinds whose REST routes the runtime knows (`route_kind`).
 const ROUTED: [EventKind; 11] = [
@@ -252,9 +262,15 @@ impl Pending {
             }
             Request::Received { t, d } => {
                 let value = serde_json::from_str(&d).unwrap_or(serde_json::Value::Null);
-                rk.gateway_events(&t, value, now_ms);
+                let n = rk.gateway_events(&t, value, now_ms);
+                if n > 0 && counted(&EVENTS) {
+                    log(&format!("gateway: {t} delivered as {n} events"));
+                }
             }
             Request::Rest { req, done } => {
+                if counted(&REQUESTS) {
+                    log(&format!("http: {} {} filtered", req.method, route(&req.path)));
+                }
                 let decision = match rk.http_request(&req) {
                     RequestOutcome::Drop => Decision::Drop,
                     RequestOutcome::Send(body) if body != req.body => {

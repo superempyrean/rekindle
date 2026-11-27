@@ -21,10 +21,11 @@ const RETRY_MS: u64 = 60 * 1000;
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 struct Badge {
+    #[serde(default)]
     tooltip: String,
-    #[serde(rename = "mod")]
+    #[serde(default, rename = "mod")]
     source: String,
-    #[serde(rename = "badge")]
+    #[serde(default, rename = "badge")]
     image: String,
 }
 
@@ -51,7 +52,7 @@ fn with_badges(body: &str, badges: &[Badge]) -> Option<String> {
     for (k, b) in badges.iter().enumerate() {
         list.push(json!({
             "id": format!("rekindle-{}-{k}", b.source),
-            "description": b.tooltip,
+            "description": if b.tooltip.is_empty() { &b.source } else { &b.tooltip },
             "icon": b.image,
             "link": b.image,
         }));
