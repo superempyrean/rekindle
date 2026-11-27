@@ -13,6 +13,7 @@ use anyhow::{Context as _, Result, bail};
 use rekindle_plugin_host::api::{Target, UserRef};
 use rekindle_plugin_host::backend::gateway::Dispatch;
 use rekindle_plugin_host::backend::gateway::echo::Echoes;
+use rekindle_plugin_host::backend::gateway::outgoing;
 use rekindle_plugin_host::home::{Home, InstallState};
 use rekindle_plugin_host::manager::{self, DevPlugin, Effect, Manager, Synced};
 use rekindle_plugin_host::model::{LogLevel, LogRecord, Mods, ToastKind, UiEvent};
@@ -772,6 +773,33 @@ impl Rekindle {
             self.check_faults();
         }
         events.len()
+    }
+
+    /// Run a frame the client is about to send to the gateway past the
+    /// plugins' event filters (`outgoing`). `None`: a plugin dropped it.
+    /// Otherwise the frame to send, changed if a filter replaced its event.
+    pub fn outgoing_filter(&mut self, frame: &str) -> Option<String> {
+        let Some(ev) = outgoing::event(frame) else {
+            return Some(frame.to_string());
+        };
+        let after = self.runtime.intercept(ev.clone());
+        self.check_faults();
+        match after {
+            None => None,
+            Some(new) if new == ev => Some(frame.to_string()),
+            Some(new) => Some(outgoing::frame(frame, &new).unwrap_or_else(|| frame.to_string())),
+        }
+    }
+
+    /// Deliver the event of a frame the client sent to the gateway. Returns
+    /// how many events there were.
+    pub fn outgoing_events(&mut self, frame: &str) -> usize {
+        let Some(ev) = outgoing::event(frame) else {
+            return 0;
+        };
+        self.runtime.dispatch_events(&[ev]);
+        self.check_faults();
+        1
     }
 
     // ---- REST requests (`runtime::http`) ----

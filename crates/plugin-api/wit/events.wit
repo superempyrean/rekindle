@@ -46,6 +46,31 @@ interface events {
         message, reaction, poll-vote, pins, raw,
         // pointer
         pointer,
+        // read-client
+        outgoing,
+    }
+
+    /// A presence update the client sends to Discord's gateway (op 3).
+    record outgoing-presence {
+        /// `online`, `idle`, `dnd` or `invisible`.
+        status: string,
+        afk: bool,
+        /// The activities, a JSON array of Discord activity objects. Their
+        /// `secrets` are left out, and kept on an activity a filter returns
+        /// with the same `name` and `type`.
+        activities: string,
+    }
+
+    /// A voice state update the client sends to Discord's gateway (op 4):
+    /// joining, moving or leaving a voice channel, or muting and deafening.
+    record outgoing-voice-state {
+        /// `none` for a DM call.
+        guild: option<snowflake>,
+        /// `none` leaves voice.
+        channel: option<snowflake>,
+        self-mute: bool,
+        self-deaf: bool,
+        self-video: bool,
     }
 
     record selection-change {
@@ -171,6 +196,12 @@ interface events {
         /// Never sent: events aren't queued or dropped. Kept because removing
         /// a case changes the ABI; it goes at the next contract change.
         dropped(u32),
+
+        // ---- outgoing (read-client) ----
+        /// The client sent the user's presence to Discord.
+        presence-sent(outgoing-presence),
+        /// The client sent the user's voice state to Discord.
+        voice-state-sent(outgoing-voice-state),
     }
 }
 
@@ -192,10 +223,11 @@ interface host-events {
 
     /// Replace the kinds the plugin's `event-filter` sees with `kinds`. It
     /// sees none until this is called. Needs `intercept` and each kind's
-    /// own capability. Only events from Discord can be intercepted (the
+    /// own capability. Events from Discord can be intercepted (the
     /// message, reaction, poll-vote, pins, typing, presence, voice-state,
-    /// member, relationship, guild, channel, role and emoji kinds); the
-    /// others come back `unavailable`.
+    /// member, relationship, guild, channel, role and emoji kinds), and so
+    /// can `outgoing`, the frames the client sends, before they are sent.
+    /// The others come back `unavailable`.
     intercept: func(kinds: list<event-kind>) -> list<tuple<event-kind, result<_, subscribe-error>>>;
 
     /// Replace the kinds of REST request the plugin's `http-filter` sees

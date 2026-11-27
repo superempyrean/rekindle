@@ -23,6 +23,7 @@ use std::time::Duration;
 
 use rekindle_plugin_host::api::EventKind;
 use rekindle_plugin_host::backend::gateway;
+use rekindle_plugin_host::backend::gateway::outgoing;
 use rekindle_plugin_host::runtime::{RequestOutcome, RestRequest, api_path, route_kind};
 
 /// How long a dispatch waits for the plugins' event filters.
@@ -43,7 +44,7 @@ pub enum Decision {
 }
 
 /// What a hook hands the runtime.
-pub(super) enum Request {
+pub(crate) enum Request {
     Filter {
         t: String,
         d: String,
@@ -52,6 +53,13 @@ pub(super) enum Request {
     Received {
         t: String,
         d: String,
+    },
+    Sending {
+        frame: String,
+        done: mpsc::SyncSender<Decision>,
+    },
+    Sent {
+        frame: String,
     },
     Rest {
         req: RestRequest,
@@ -97,7 +105,7 @@ const ROUTED: [EventKind; 11] = [
     EventKind::Emoji,
 ];
 
-pub(super) fn open() -> mpsc::Receiver<Request> {
+pub(crate) fn open() -> mpsc::Receiver<Request> {
     let (tx, rx) = mpsc::channel();
     *SENDER
         .lock()
@@ -105,7 +113,7 @@ pub(super) fn open() -> mpsc::Receiver<Request> {
     rx
 }
 
-pub(super) fn close() {
+pub(crate) fn close() {
     *SENDER
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
@@ -126,7 +134,7 @@ fn bits(kinds: impl IntoIterator<Item = EventKind>) -> u64 {
 }
 
 /// Publish what the plugins filter now, after a tick.
-pub(super) fn publish(rk: &rekindle_extension::Rekindle) {
+pub(crate) fn publish(rk: &rekindle_extension::Rekindle) {
     INTERCEPTED.store(bits(rk.intercepted_kinds()), Ordering::Relaxed);
     let http = ROUTED.into_iter().filter(|&k| rk.filters_http(k));
     HTTP_KINDS.store(bits(http), Ordering::Relaxed);
@@ -182,6 +190,37 @@ pub fn received(t: &str, d: &str) {
     });
 }
 
+/// Run a text frame the client is about to send to the gateway past the
+/// plugins' event filters (`outgoing`). On the client's thread; waits up to
+/// [`FILTER_WAIT`], and only for a presence or voice state update while a
+/// plugin filters them. `Replace` holds the whole frame to send instead.
+/// Identify and Resume always pass, unread.
+#[must_use]
+pub fn sending(frame: &str) -> Decision {
+    let readable = outgoing::opcode(frame).is_some_and(outgoing::readable);
+    let filtered = INTERCEPTED.load(Ordering::Relaxed) & (1 << (EventKind::Outgoing as u8)) != 0;
+    if !readable || !filtered {
+        return Decision::Pass;
+    }
+    let (done, answer) = mpsc::sync_channel(1);
+    if !send(Request::Sending {
+        frame: frame.to_string(),
+        done,
+    }) {
+        return Decision::Pass;
+    }
+    wait(&answer, FILTER_WAIT).unwrap_or(Decision::Pass)
+}
+
+/// The client sent `frame` to the gateway: deliver its event. Doesn't wait.
+pub fn sent(frame: &str) {
+    if outgoing::opcode(frame).is_some_and(outgoing::readable) {
+        send(Request::Sent {
+            frame: frame.to_string(),
+        });
+    }
+}
+
 /// Run a request to `url` past the plugins' `http-filter`s, before the
 /// client sends it. Returns what to do with it, and the id its response
 /// is filtered under, or `None` for a request no plugin sees.
@@ -225,13 +264,13 @@ pub fn http_response(id: u64, status: u16, body: Option<&str>) -> Option<String>
 
 /// The runtime's side: the requests waiting for their responses.
 #[derive(Default)]
-pub(super) struct Pending {
+pub(crate) struct Pending {
     requests: VecDeque<RestRequest>,
 }
 
 impl Pending {
     /// Answer one request from a hook.
-    pub(super) fn serve(
+    pub(crate) fn serve(
         &mut self,
         rk: &mut rekindle_extension::Rekindle,
         r: Request,
@@ -265,6 +304,31 @@ impl Pending {
                 let n = rk.gateway_events(&t, value, now_ms);
                 if n > 0 && counted(&EVENTS) {
                     log(&format!("gateway: {t} delivered as {n} events"));
+                }
+            }
+            Request::Sending { frame, done } => {
+                let decision = match rk.outgoing_filter(&frame) {
+                    None => Decision::Drop,
+                    Some(new) if new != frame => Decision::Replace(new),
+                    Some(_) => Decision::Pass,
+                };
+                if decision != Decision::Pass {
+                    let op = outgoing::opcode(&frame).unwrap_or_default();
+                    log(&format!(
+                        "gateway: sent op {op} {}",
+                        if decision == Decision::Drop {
+                            "dropped"
+                        } else {
+                            "replaced"
+                        }
+                    ));
+                }
+                let _ = done.send(decision);
+            }
+            Request::Sent { frame } => {
+                if rk.outgoing_events(&frame) > 0 && counted(&EVENTS) {
+                    let op = outgoing::opcode(&frame).unwrap_or_default();
+                    log(&format!("gateway: sent op {op} delivered as an event"));
                 }
             }
             Request::Rest { req, done } => {

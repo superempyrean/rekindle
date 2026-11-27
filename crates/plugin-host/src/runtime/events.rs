@@ -13,10 +13,11 @@ pub fn event_kind(ev: &api::Event) -> Option<api::EventKind> {
     convert::event_kind(ev)
 }
 
-/// The kinds an `event-filter` may see: events that arrive from Discord.
-/// The client's own (selection, window, the user's own state, the
-/// composer) and `raw` can't be intercepted.
-pub const INTERCEPTABLE: [api::EventKind; 13] = {
+/// The kinds an `event-filter` may see: events that arrive from Discord,
+/// and `outgoing`, the frames the client sends to it. The client's own
+/// (selection, window, the user's own state, the composer) and `raw` can't
+/// be intercepted.
+pub const INTERCEPTABLE: [api::EventKind; 14] = {
     use api::EventKind as K;
     [
         K::Message,
@@ -32,6 +33,7 @@ pub const INTERCEPTABLE: [api::EventKind; 13] = {
         K::Channel,
         K::Role,
         K::Emoji,
+        K::Outgoing,
     ]
 };
 

@@ -368,6 +368,7 @@ pub(super) fn event_kind(e: &api::Event) -> Option<api::EventKind> {
         E::Pins(_) => K::Pins,
         E::Raw(_) => K::Raw,
         E::PointerMoved(_) => K::Pointer,
+        E::PresenceSent(_) | E::VoiceStateSent(_) => K::Outgoing,
         E::Dropped(_) => return None,
     })
 }
@@ -389,7 +390,8 @@ pub(super) fn kind_capability(kind: api::EventKind) -> Capability {
         | K::MySettings
         | K::Composer
         | K::Hook
-        | K::Account => Capability::ReadClient,
+        | K::Account
+        | K::Outgoing => Capability::ReadClient,
         K::Presence | K::Typing | K::VoiceState | K::Speaking | K::Member | K::Relationship => {
             Capability::ReadUsers
         }

@@ -1,5 +1,5 @@
 version 0.11.0
-wit-sha256 6d9ada827a7cbfacbbf47d2064e61fc17c6b8c666e1736498526471f284f3ebb
+wit-sha256 d24762c737a24203242062e444ba38d51fe1b0d9d329a75757c2c89e17f8b88a
 func actions.create-invite
 func actions.delete-message
 func actions.edit-message

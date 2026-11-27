@@ -19,8 +19,8 @@ pub use crate::bindings::wit::compose_types::{
     AttachmentInfo, ComposeKind, ComposeResult, Draft, ReplyInfo, Rewrite, Upload, UploadResult,
 };
 pub use crate::bindings::wit::events::{
-    ConnectionState, DeletedMessage, Event, EventKind, EventPatch, GuildLeftReason, ReactionChange,
-    RelationshipChange, SelectionChange,
+    ConnectionState, DeletedMessage, Event, EventKind, EventPatch, GuildLeftReason,
+    OutgoingPresence, OutgoingVoiceState, ReactionChange, RelationshipChange, SelectionChange,
 };
 pub use crate::bindings::wit::host::{ClientInfo, TimeStyle};
 pub use crate::bindings::wit::notification_types::{

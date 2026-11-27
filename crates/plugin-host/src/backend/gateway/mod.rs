@@ -24,6 +24,7 @@
 
 pub mod convert;
 pub mod echo;
+pub mod outgoing;
 pub mod settings;
 pub mod wire;
 
