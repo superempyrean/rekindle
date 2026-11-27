@@ -280,8 +280,10 @@ pub(crate) fn insert(
 
 /// The toasts that are up as a mount over the screen, oldest on top. `set`
 /// counts the sets of toasts shown so far, and picks the mount's ids.
-/// Nothing when no toast is up, or the look has no place for them.
-pub(crate) fn toasts(look: &Look, toasts: &[LiveToast], set: u32) -> Rendered {
+/// `fill`, `0xRRGGBBAA`, is the cards' background in place of the look's:
+/// the `toast-background` a plugin set. Nothing when no toast is up, or the
+/// look has no place for them.
+pub(crate) fn toasts(look: &Look, toasts: &[LiveToast], set: u32, fill: Option<u32>) -> Rendered {
     let Some(under) = &look.modal_under else {
         return Rendered::default();
     };
@@ -299,6 +301,13 @@ pub(crate) fn toasts(look: &Look, toasts: &[LiveToast], set: u32) -> Rendered {
         }
         children.push(b.text(&look.toast_text, &t.text));
         let mut cells = look.toast.clone();
+        if let Some(fill) = fill {
+            cells.retain(|c| c.prop != rekindle_wire::ids::BACKGROUND);
+            cells.push(Cell::new(
+                rekindle_wire::ids::BACKGROUND,
+                rekindle_wire_inject::rgba(fill),
+            ));
+        }
         cells.push(Cell::new(a11y::LABEL, Value::Str(t.text.clone())));
         cards.push(b.node(ElementKind::VIEW, cells, children, None));
     }
@@ -1055,7 +1064,7 @@ mod tests {
             toast(1, "Saved", ToastStyle::Success),
             toast(2, "Oops", ToastStyle::Error),
         ];
-        assert_eq!(toasts(&l, &up, 0), Rendered::default());
+        assert_eq!(toasts(&l, &up, 0, None), Rendered::default());
         l.toast_layer = vec![Cell::new(
             PropId::from_name("absolute").unwrap(),
             Value::Bool(true),
@@ -1067,7 +1076,7 @@ mod tests {
                 Value::Str("red".into()),
             )],
         );
-        let r = toasts(&l, &up, 3);
+        let r = toasts(&l, &up, 3, None);
         assert!(r.presses.is_empty());
         let [m] = r.mounts.as_slice() else {
             panic!("one mount: {:?}", r.mounts)
@@ -1091,13 +1100,40 @@ mod tests {
         let error = m.nodes.iter().find(|n| n.id == root.children[1]).unwrap();
         assert_eq!(error.children.len(), 2);
         // The next set has ids of its own, and the work takes both.
-        let next = toasts(&l, &up[1..], 4);
+        let next = toasts(&l, &up[1..], 4, None);
         let ids =
             |r: &Rendered| -> Vec<NodeId> { r.mounts[0].nodes.iter().map(|n| n.id).collect() };
         assert!(ids(&r).iter().all(|i| !ids(&next).contains(i)));
         let mut work = Work::default();
         work.mounts.extend(join([r, next]).mounts);
         work.check().unwrap();
-        assert_eq!(toasts(&l, &[], 5), Rendered::default());
+        assert_eq!(toasts(&l, &[], 5, None), Rendered::default());
+    }
+
+    #[test]
+    fn a_plugins_toast_background_is_the_cards_fill() {
+        let mut l = look();
+        l.toast_layer = vec![Cell::new(
+            PropId::from_name("absolute").unwrap(),
+            Value::Bool(true),
+        )];
+        l.toast = vec![Cell::new(
+            rekindle_wire::ids::BACKGROUND,
+            rekindle_wire_inject::rgba(0x3232_38ff),
+        )];
+        let r = toasts(
+            &l,
+            &[toast(1, "Saved", ToastStyle::Info)],
+            0,
+            Some(0x2a1f_3dff),
+        );
+        let fills: Vec<&Value> = r.mounts[0]
+            .nodes
+            .iter()
+            .flat_map(|n| &n.cells)
+            .filter(|c| c.prop == rekindle_wire::ids::BACKGROUND)
+            .map(|c| &c.value)
+            .collect();
+        assert_eq!(fills, [&rekindle_wire_inject::rgba(0x2a1f_3dff)]);
     }
 }

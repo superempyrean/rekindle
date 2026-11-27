@@ -1058,7 +1058,11 @@ fn publish(driver: &mut Driver, surfaces: &mut Surfaces) -> State {
                 surfaces.toast_sets
             ));
         }
-        let toasts = rows::toasts(look, &up, surfaces.toast_sets);
+        let fill = driver
+            .theme_overrides()
+            .get("toast-background")
+            .map(|hsla| crate::wire::rgba(*hsla));
+        let toasts = rows::toasts(look, &up, surfaces.toast_sets, fill);
         let rendered = rows::join(
             std::iter::once(menu)
                 .chain(page)

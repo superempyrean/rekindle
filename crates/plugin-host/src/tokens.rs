@@ -198,6 +198,22 @@ pub const ALIASES: &[(&str, &str)] = &[
     ("text-normal", "text-default"),
 ];
 
+/// Contract tokens that Discord's clients draw under tokens of their own,
+/// with those tokens. A colour a plugin sets for the first applies to each
+/// of the others that no plugin set, and reads of those return it. Read
+/// off the desktop client (build 2208) with every one of its tokens given
+/// a colour of its own.
+pub const DRAWN_AS: &[(&str, &[&str])] = &[
+    // The composer. The client carries the contract's token but draws
+    // nothing with it.
+    ("channeltextarea-background", &["chat-background-default"]),
+];
+
+/// Contract tokens that rekindle's own surfaces draw with on every client:
+/// its toasts' fill. A plugin can set them whether or not the client has a
+/// token of its own for them.
+pub const OWN: &[&str] = &["toast-background"];
+
 const DENSITY_CHOICES: &[&str] = &["compact", "cozy", "default"];
 
 /// Resolve an alias to its canonical name (canonical names pass through).
