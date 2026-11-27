@@ -53,6 +53,11 @@ pub struct Menu {
     /// second argument.
     pub message_id: usize,
     pub channel_id: usize,
+    /// The colour Delete Message passes `with_color`: the danger colour.
+    pub danger: u8,
+    /// The icons Copy Message ID and Delete Message pass `with_icon`.
+    pub id_icon: u16,
+    pub trash_icon: u16,
 }
 
 /// A `SharedString`'s fields, relative to the item.
@@ -104,6 +109,14 @@ impl Menu {
         let (on_click_tag, on_click) = handler(image, core)?;
         let (message_id, channel_id) = ids(image, build_fn)?;
         let with_color = with_color(image, copy_lea)?;
+        let id_icon = immediate_before(image, copy_lea, 3, Register::R8W)
+            .context("Copy Message ID's icon")?;
+        let delete_lea = lea_in_function(image, start, end, b"Delete Message")
+            .context("Delete Message lea not found in MessageContextMenu")?;
+        let trash_icon = immediate_before(image, delete_lea, 3, Register::R8W)
+            .context("Delete Message's icon")?;
+        let danger = immediate_before(image, delete_lea, 4, Register::R8L)
+            .context("Delete Message's colour")?;
         Ok(Self {
             build_fn,
             vec_push,
@@ -121,8 +134,40 @@ impl Menu {
             on_click_tag,
             message_id,
             channel_id,
+            danger: u8::try_from(danger).context("a colour over 255")?,
+            id_icon: u16::try_from(id_icon).context("an icon over 0xffff")?,
+            trash_icon: u16::try_from(trash_icon).context("an icon over 0xffff")?,
         })
     }
+}
+
+/// The immediate the last `mov reg, imm` puts in `reg` before the `nth`
+/// call (from 0) after `from`.
+fn immediate_before(image: &Image<'_>, from: u64, nth: usize, reg: Register) -> Option<u64> {
+    let code = image.read(from, 0x200)?;
+    let mut value = None;
+    let mut calls = 0;
+    for insn in Decoder::with_ip(64, code, from, DecoderOptions::NONE) {
+        if insn.mnemonic() == Mnemonic::Call {
+            if calls == nth {
+                return value;
+            }
+            calls += 1;
+            value = None;
+        }
+        if insn.mnemonic() == Mnemonic::Mov
+            && insn.op0_kind() == OpKind::Register
+            && insn.op0_register() == reg
+        {
+            value = match insn.op1_kind() {
+                OpKind::Immediate8 => Some(u64::from(insn.immediate8())),
+                OpKind::Immediate16 => Some(u64::from(insn.immediate16())),
+                OpKind::Immediate32 => Some(u64::from(insn.immediate32())),
+                _ => None,
+            };
+        }
+    }
+    None
 }
 
 fn build_fn(image: &Image<'_>) -> Result<u64> {
@@ -479,6 +524,133 @@ impl Builder {
     }
 }
 
+/// The client's icon for each icon of the plugin contract, by the names in
+/// the client's icon table. The contract's `note` has no notepad in the
+/// client's set, so it is a file.
+pub const CONTRACT_ICONS: &[(&str, &str)] = &[
+    ("star", "Star"),
+    ("bookmark", "Bookmark"),
+    ("note", "File"),
+    ("palette", "PaintPalette"),
+    ("bolt", "Flash"),
+    ("heart", "Heart"),
+    ("bell", "Bell"),
+    ("gear", "Settings"),
+    ("link", "Link"),
+    ("search", "MagnifyingGlass"),
+    ("sparkle", "Sparkles"),
+    ("eye", "Eye"),
+    ("eye-off", "EyeSlash"),
+    ("clock", "Clock"),
+    ("pin", "Pin"),
+    ("puzzle", "PuzzlePiece"),
+    ("translate", "Language"),
+    ("microphone", "Microphone"),
+    ("headphones", "Headphones"),
+    ("camera", "Camera"),
+    ("shield", "Shield"),
+    ("lock", "Lock"),
+    ("user", "User"),
+    ("users", "Group"),
+    ("chat", "Chat"),
+    ("reply", "ArrowAngleLeftUp"),
+    ("copy", "Copy"),
+    ("trash", "Trash"),
+    ("edit", "Pencil"),
+    ("check", "CheckmarkLarge"),
+    ("cross", "XSmall"),
+    ("info", "CircleInformation"),
+    ("warning", "Warning"),
+    ("download", "Download"),
+    ("upload", "Upload"),
+    ("globe", "GlobeEarth"),
+    ("code", "AngleBrackets"),
+    ("hash", "Hashmark"),
+    ("at", "At"),
+    ("smile", "Reaction"),
+    ("image", "Image"),
+    ("music", "Music"),
+    ("play", "Play"),
+    ("pause", "Pause"),
+];
+
+/// The icon a menu row passes `with_icon`, for each contract icon name.
+///
+/// The client's icons are the indices of its icon table, an array of
+/// records sorted by name, each holding the name as a `&str`. The table is
+/// found from the records of `CircleInformation`, and checked against the
+/// client's own rows: Copy Message ID's icon is `Id` and Delete Message's
+/// is `Trash`.
+pub fn icons(image: &Image<'_>, menu: &Menu) -> Result<std::collections::BTreeMap<String, u16>> {
+    let names = icon_names(image)?;
+    let index = |name: &str| names.iter().position(|n| n == name);
+    for (name, used) in [("Id", menu.id_icon), ("Trash", menu.trash_icon)] {
+        if index(name) != Some(usize::from(used)) {
+            bail!(
+                "the client's rows use icon {used:#x} for {name}, the table has it at {:?}",
+                index(name)
+            );
+        }
+    }
+    let mut out = std::collections::BTreeMap::new();
+    for (contract, client) in CONTRACT_ICONS {
+        let i = index(client).with_context(|| format!("no {client} icon for {contract}"))?;
+        out.insert((*contract).to_string(), u16::try_from(i)?);
+    }
+    Ok(out)
+}
+
+/// The names in the client's icon table, in order.
+fn icon_names(image: &Image<'_>) -> Result<Vec<String>> {
+    const ANCHOR: &str = "CircleInformation";
+    let name_at = |field: u64| -> Option<String> {
+        let ptr = image.qword(field)?;
+        let len = usize::try_from(image.qword(field + 8)?).ok()?;
+        if !(1..64).contains(&len) {
+            return None;
+        }
+        let bytes = image.read(ptr, len)?;
+        bytes
+            .iter()
+            .all(u8::is_ascii_alphanumeric)
+            .then(|| String::from_utf8_lossy(bytes).into_owned())
+    };
+    let mut tables = Vec::new();
+    for at in image.find(ANCHOR.as_bytes()) {
+        for field in image.find(&at.to_le_bytes()) {
+            if name_at(field).as_deref() != Some(ANCHOR) {
+                continue;
+            }
+            // The stride: the nearest record after it whose name sorts after.
+            let Some(stride) = (0x10..0x100).step_by(8).find(|&s| {
+                matches!((name_at(field + s), name_at(field + 2 * s)),
+                    (Some(a), Some(b)) if a.as_str() > ANCHOR && b > a)
+            }) else {
+                continue;
+            };
+            let mut first = field;
+            while name_at(first - stride).is_some() {
+                first -= stride;
+            }
+            let mut names = Vec::new();
+            let mut f = first;
+            while let Some(n) = name_at(f) {
+                names.push(n);
+                f += stride;
+            }
+            if names.len() > 100 && names.windows(2).all(|w| w[0] < w[1]) {
+                tables.push(names);
+            }
+        }
+    }
+    tables.dedup();
+    match tables.len() {
+        1 => Ok(tables.pop().unwrap_or_default()),
+        0 => bail!("no sorted icon table holds {ANCHOR}"),
+        n => bail!("{n} icon tables hold {ANCHOR}"),
+    }
+}
+
 fn strings(target: Target) -> Vec<String> {
     target
         .strings()
@@ -558,5 +730,13 @@ mod tests {
         assert_eq!(rva(Target::User), (0x4a16cc9, 0x49c2fc1));
         assert_eq!(rva(Target::Channel), (0x50c0910, 0x5021990));
         assert_eq!(rva(Target::Guild), (0x458fe71, 0x4571269));
+        assert_eq!((m.danger, m.id_icon, m.trash_icon), (2, 0x15b, 0x280));
+        let icons = icons(&image, &m).unwrap();
+        assert_eq!(icons.len(), CONTRACT_ICONS.len());
+        // The client's own Reply, Copy Text and Delete Message rows.
+        assert_eq!(
+            (icons["reply"], icons["copy"], icons["trash"]),
+            (0x16, 0x99, 0x280)
+        );
     }
 }
