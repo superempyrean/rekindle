@@ -10,6 +10,7 @@
 //! [`symbols::Symbols::resolve`] is the entry point; `rekindle-desktop check`
 //! runs it on a build and fails loudly when a shape changed.
 
+pub mod components;
 pub mod cursor;
 pub mod debug;
 pub mod div;
