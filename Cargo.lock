@@ -240,13 +240,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bookmarks"
-version = "0.1.0"
-dependencies = [
- "rekindle-sdk",
-]
-
-[[package]]
 name = "bumpalo"
 version = "3.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -286,13 +279,6 @@ name = "bytes"
 version = "1.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
-
-[[package]]
-name = "call-timer"
-version = "0.1.0"
-dependencies = [
- "rekindle-sdk",
-]
 
 [[package]]
 name = "calloop"
@@ -339,13 +325,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ced0551234e87afee12411d535648dd89d2e7f34c78b753395567aff3d447ff"
 dependencies = [
  "libc",
-]
-
-[[package]]
-name = "channel-notes"
-version = "0.1.0"
-dependencies = [
- "rekindle-sdk",
 ]
 
 [[package]]
@@ -1129,13 +1108,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
 
 [[package]]
-name = "focus-mode"
-version = "0.1.0"
-dependencies = [
- "rekindle-sdk",
-]
-
-[[package]]
 name = "foldhash"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1772,13 +1744,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "keyword-notify"
-version = "0.1.0"
-dependencies = [
- "rekindle-sdk",
-]
-
-[[package]]
 name = "khronos_api"
 version = "3.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1929,20 +1894,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "message-click-actions"
-version = "0.1.0"
-dependencies = [
- "rekindle-sdk",
-]
-
-[[package]]
-name = "message-link-embeds"
-version = "0.1.0"
-dependencies = [
- "rekindle-sdk",
-]
-
-[[package]]
 name = "message-logger"
 version = "0.1.0"
 dependencies = [
@@ -2048,13 +1999,6 @@ name = "nohash-hasher"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2bf50223579dc7cdcfb3bfcacf7069ff68243f8c363f62ffa99cf000a6b9c451"
-
-[[package]]
-name = "notification-router"
-version = "0.1.0"
-dependencies = [
- "rekindle-sdk",
-]
 
 [[package]]
 name = "nu-ansi-term"
@@ -3241,13 +3185,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "server-info"
-version = "0.1.0"
-dependencies = [
- "rekindle-sdk",
-]
-
-[[package]]
 name = "sha2"
 version = "0.10.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3455,15 +3392,6 @@ version = "0.1.0"
 dependencies = [
  "regex-lite",
  "rekindle-sdk",
-]
-
-[[package]]
-name = "theme-gallery"
-version = "0.1.0"
-dependencies = [
- "rekindle-sdk",
- "serde",
- "serde_json",
 ]
 
 [[package]]
