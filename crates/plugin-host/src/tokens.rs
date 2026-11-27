@@ -207,6 +207,11 @@ pub const DRAWN_AS: &[(&str, &[&str])] = &[
     // The composer. The client carries the contract's token but draws
     // nothing with it.
     ("channeltextarea-background", &["chat-background-default"]),
+    // The window behind the title bar, the server rail and the channel
+    // list.
+    ("app-frame-background", &["background-base-lowest"]),
+    // A modal's card, which also draws popouts and the message hover bar.
+    ("modal-background", &["background-surface-high"]),
 ];
 
 /// Contract tokens that rekindle's own surfaces draw with on every client:
