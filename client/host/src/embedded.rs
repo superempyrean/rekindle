@@ -360,12 +360,15 @@ fn up(o: &Options) -> anyhow::Result<Driver> {
         load_installed: true,
         memory_storage: false,
         allow_network: o.network,
-        wait_for_client: false,
+        // Started below, once the palettes are seeded, so a plugin's
+        // `get-color` at `activate` reads the client's colours.
+        wait_for_client: true,
         home: Some(o.home.clone()),
     };
     // SAFETY: the profile has no addresses, so the Driver installs nothing.
     let mut driver = unsafe { Driver::start(args, profile) }.map_err(|e| anyhow::anyhow!(e))?;
     driver.use_framework_theme(o.palettes.clone());
+    driver.rekindle().start_plugins();
     Ok(driver)
 }
 

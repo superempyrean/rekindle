@@ -26,6 +26,25 @@
 //! themes as the file has. Where the colours sit inside a theme is only
 //! known once the client has parsed the file, so [`Layout::find`] reads it
 //! from the live table by matching the file's values.
+//!
+//! The theme the client shows is a GPUI global, a value that holds a
+//! pointer to its theme in the family and one to that theme's colours. The
+//! client stores it with `cx.set_global` when it starts and whenever the
+//! user changes the theme, each time right after a call of `theme(id)`:
+//!
+//! ```text
+//! movups xmm0, [rip + type_id]    ; the global's TypeId
+//! ...
+//! mov r8d, size                   ; memcpy(&mut local, value, size)
+//! call memcpy
+//! mov ecx, size                   ; Box::new(value)
+//! mov edx, 8
+//! call alloc
+//! ```
+//!
+//! [`resolve`] finds that `set_global` among the functions `theme(id)`'s
+//! callers call, as the one most of them call that boxes a value of a fixed
+//! size.
 
 use std::collections::BTreeSet;
 
@@ -47,6 +66,11 @@ pub struct Palette {
     /// The token file.
     pub file: u64,
     pub file_len: u32,
+    /// `cx.set_global(value)` for the theme the client shows, `value` by
+    /// reference in the second argument.
+    pub set_shown: u64,
+    /// The size of that value.
+    pub shown_len: u32,
 }
 
 /// One theme of the token file.
@@ -279,6 +303,91 @@ fn reads_state(image: &Image<'_>, site: u64, state: u64) -> Option<u64> {
         .then_some(start)
 }
 
+/// The instructions of the function that starts at or contains `va`.
+fn function_code(image: &Image<'_>, va: u64) -> Option<Vec<iced_x86::Instruction>> {
+    let (start, end) = image.function(va)?;
+    let code = image.read(start, usize::try_from(end - start).ok()?)?;
+    Some(
+        Decoder::with_ip(64, code, start, DecoderOptions::NONE)
+            .into_iter()
+            .collect(),
+    )
+}
+
+/// The size of the value the function at `f` boxes: a `memcpy` of `size`
+/// bytes (`mov r8d, size`) and `mov ecx, size; mov edx, 8; call`, with a
+/// 16-byte constant loaded from data (a `TypeId`).
+fn boxes_value(image: &Image<'_>, f: u64) -> Option<u32> {
+    let insns = function_code(image, f)?;
+    let imm = |i: &iced_x86::Instruction, reg: Register| {
+        (i.mnemonic() == Mnemonic::Mov
+            && i.op0_kind() == OpKind::Register
+            && i.op0_register() == reg
+            && i.op1_kind() == OpKind::Immediate32)
+            .then(|| i.immediate32())
+    };
+    let type_id = insns.iter().any(|i| {
+        matches!(
+            i.mnemonic(),
+            Mnemonic::Movups | Mnemonic::Movaps | Mnemonic::Movdqu
+        ) && i.op1_kind() == OpKind::Memory
+            && i.memory_base() == Register::RIP
+            && image
+                .section(i.ip_rel_memory_address())
+                .is_some_and(|s| s != ".text")
+    });
+    let size = insns.windows(3).find_map(|w| {
+        let size = imm(&w[0], Register::ECX)?;
+        (imm(&w[1], Register::EDX) == Some(8) && w[2].mnemonic() == Mnemonic::Call).then_some(size)
+    })?;
+    let copies = insns.iter().any(|i| imm(i, Register::R8D) == Some(size));
+    (type_id && copies && size >= 0x20).then_some(size)
+}
+
+/// `set_global` for the theme the client shows: of the functions the
+/// callers of `get` call, the one most of them call that boxes a value
+/// ([`boxes_value`]), with that value's size.
+fn set_shown(image: &Image<'_>, get: u64) -> Result<(u64, u32)> {
+    let callers: BTreeSet<u64> = image
+        .calls_into(&[get])
+        .into_iter()
+        .filter_map(|(site, _)| image.function(site).map(|f| f.0))
+        .collect();
+    let mut counts: std::collections::BTreeMap<u64, usize> = std::collections::BTreeMap::new();
+    for &caller in &callers {
+        let Some(insns) = function_code(image, caller) else {
+            continue;
+        };
+        let callees: BTreeSet<u64> = insns
+            .iter()
+            .filter(|i| i.mnemonic() == Mnemonic::Call && i.op0_kind() == OpKind::NearBranch64)
+            .map(iced_x86::Instruction::near_branch64)
+            .filter(|&t| t != get)
+            .collect();
+        for c in callees {
+            *counts.entry(c).or_default() += 1;
+        }
+    }
+    let mut ranked: Vec<(usize, u64, u32)> = counts
+        .into_iter()
+        .filter(|&(_, n)| n >= 2)
+        .filter_map(|(c, n)| Some((n, c, boxes_value(image, c)?)))
+        .collect();
+    ranked.sort_unstable_by_key(|r| std::cmp::Reverse(r.0));
+    match ranked.as_slice() {
+        [] => bail!(
+            "set_global of the shown theme: none of the {} callers of theme(id) share a function that boxes a value",
+            callers.len()
+        ),
+        [one] => Ok((one.1, one.2)),
+        [first, second, ..] if first.0 > second.0 => Ok((first.1, first.2)),
+        many => bail!(
+            "set_global of the shown theme: {} functions as common: {many:x?}",
+            many.len()
+        ),
+    }
+}
+
 /// Find the token file and `theme(id)`.
 pub fn resolve(image: &Image<'_>) -> Result<(Palette, TokenFile)> {
     let (file, file_len, tokens) = token_file(image)?;
@@ -299,6 +408,7 @@ pub fn resolve(image: &Image<'_>) -> Result<(Palette, TokenFile)> {
         &format!("theme(id) over {count} themes of at least {words:#x} bytes"),
         &getters,
     )?;
+    let (set_shown, shown_len) = set_shown(image, get)?;
     Ok((
         Palette {
             get,
@@ -306,6 +416,8 @@ pub fn resolve(image: &Image<'_>) -> Result<(Palette, TokenFile)> {
             stride,
             file,
             file_len,
+            set_shown,
+            shown_len,
         },
         tokens,
     ))
@@ -392,6 +504,7 @@ trailing bytes"##;
         assert_eq!(rva(p.get), 0xb448f00);
         assert_eq!(rva(p.family), 0x17e81e30);
         assert_eq!(p.stride, 0xc20);
+        assert_eq!((rva(p.set_shown), p.shown_len), (0x93870e0, 0xc0));
         assert_eq!(
             file.themes
                 .iter()

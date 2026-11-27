@@ -177,8 +177,10 @@ impl Rekindle {
         self.waiting.is_none()
     }
 
-    /// Load the plugins `new` was given.
-    fn start_plugins(&mut self) {
+    /// Load the plugins `new` was given, now. A platform that made the
+    /// runtime with `wait_for_client` and has nothing to wait for calls it
+    /// once what plugins read at `activate` is in place.
+    pub fn start_plugins(&mut self) {
         let Some((load_installed, dev_paths)) = self.waiting.take() else {
             return;
         };

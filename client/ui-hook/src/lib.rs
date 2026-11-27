@@ -65,7 +65,9 @@ pub use registry::{
     Button, Command, MenuItem, MenuKind, MenuTargetRef, Modal, ProfileSectionItem, menu_rows,
     modal_panel, modal_plugin, set_menu_items, set_modal, set_profiles,
 };
-pub use theme::{ThemePalette, detected_theme, recolored_last_frame, set_theme_palettes};
+pub use theme::{
+    ThemePalette, detected_theme, recolored_last_frame, set_shown_theme, set_theme_palettes,
+};
 pub use toast::{
     LiveToast, MAX_TOASTS, ToastStyle, dismiss_toast, live_toasts, push_toast, push_toast_for,
     toast_cards, toast_texts,

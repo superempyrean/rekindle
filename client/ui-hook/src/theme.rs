@@ -26,8 +26,21 @@ pub fn set_theme_palettes(palettes: Vec<ThemePalette>) {
     *PALETTES.lock().unwrap() = palettes;
 }
 
-/// The client theme the framework layer detected, by palette name.
+/// The client theme the platform read off the client, by palette name. A
+/// platform that knows which theme is shown sets it, and plugins' token
+/// reads follow it. `None` goes back to the frame's colours.
+pub fn set_shown_theme(name: Option<String>) {
+    *SHOWN.lock().unwrap() = name;
+}
+
+static SHOWN: Mutex<Option<String>> = Mutex::new(None);
+
+/// The client theme shown, by palette name: the platform's, or the one the
+/// framework layer detected from the frame's colours.
 pub fn detected_theme() -> Option<String> {
+    if let Some(name) = SHOWN.lock().unwrap().clone() {
+        return Some(name);
+    }
     let i = DETECTED.load(Ordering::SeqCst);
     PALETTES
         .lock()
