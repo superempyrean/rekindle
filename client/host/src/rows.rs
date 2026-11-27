@@ -524,14 +524,18 @@ impl<'l> Builder<'l> {
         };
         cells.push(Cell::new(prop("value"), Value::Str(value.clone())));
         if !placeholder.is_empty() {
-            cells.push(Cell::new(prop("placeholder"), Value::Str(placeholder.into())));
+            cells.push(Cell::new(
+                prop("placeholder"),
+                Value::Str(placeholder.into()),
+            ));
         }
         cells.push(Cell::new(
             a11y::ID,
             Value::Str(format!("rekindle.{plugin}.{key}.input")),
         ));
         let edit = (element.clone(), UiInput::Text(value.clone()));
-        self.presses.insert((surface.into(), key.into()), press(edit));
+        self.presses
+            .insert((surface.into(), key.into()), press(edit));
         self.node(
             ElementKind::INPUT,
             cells,
@@ -1062,7 +1066,11 @@ mod tests {
         );
         let cell = |name| {
             let prop = PropId::from_name(name).unwrap();
-            field.cells.iter().find(|c| c.prop == prop).map(|c| c.value.clone())
+            field
+                .cells
+                .iter()
+                .find(|c| c.prop == prop)
+                .map(|c| c.value.clone())
         };
         assert_eq!(cell("value"), Some(Value::Str("Ann".into())));
         assert_eq!(cell("placeholder"), Some(Value::Str("Who".into())));

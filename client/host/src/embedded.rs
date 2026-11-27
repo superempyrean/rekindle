@@ -29,8 +29,8 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use rekindle_extension::theme::ThemeProfile;
 pub use rekindle_extension::LiveSelection;
+use rekindle_extension::theme::ThemeProfile;
 pub use rekindle_extension::tweaks;
 use rekindle_extension::{Driver, ExtArgs, RecoveredProfile};
 use rekindle_plugin_host::manager;

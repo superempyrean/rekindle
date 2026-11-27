@@ -391,7 +391,14 @@ impl Surfaces {
                 m.picker(),
                 m.elements,
             ),
-            None => (None, None, BTreeMap::new(), BTreeMap::new(), None, BTreeMap::new()),
+            None => (
+                None,
+                None,
+                BTreeMap::new(),
+                BTreeMap::new(),
+                None,
+                BTreeMap::new(),
+            ),
         };
         let developer_mode = home.developer_mode().unwrap_or(false);
         Surfaces {
@@ -822,7 +829,10 @@ fn up() -> anyhow::Result<(Driver, Home)> {
         surfaces: Vec::new(),
         slash_commands: true,
         wire_menus: true,
-        wire_picker_tabs: map.as_ref().and_then(crate::wire::WireMap::picker).is_some(),
+        wire_picker_tabs: map
+            .as_ref()
+            .and_then(crate::wire::WireMap::picker)
+            .is_some(),
         elements: map
             .map(|m| {
                 m.elements
