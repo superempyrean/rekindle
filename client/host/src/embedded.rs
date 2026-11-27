@@ -406,9 +406,15 @@ fn not_loaded_plugins(home: &rekindle_plugin_host::home::Home, loaded: &[String]
 
 /// What the Driver and the UI contributions hold now.
 fn take(driver: &mut Driver) -> Snapshot {
-    let plugins = driver
-        .rekindle()
-        .infos()
+    let infos = driver.rekindle().infos();
+    net::set_media_hosts(
+        infos
+            .iter()
+            .filter(|p| matches!(p.status, rekindle_plugin_host::runtime::Status::Active))
+            .flat_map(|p| p.network_allowlist.iter().cloned())
+            .collect(),
+    );
+    let plugins = infos
         .into_iter()
         .map(|p| Plugin {
             id: p.id,

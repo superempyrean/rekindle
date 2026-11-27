@@ -150,6 +150,26 @@ pub fn check_request(
     Ok(host)
 }
 
+/// The URL to fetch for a badge icon the client built as
+/// `<cdn>/badge-icons/<icon>.png`, when the plugin gave `icon` as an
+/// `https` URL on a host in `allowlist`: the icon with the template's
+/// `.png` and query taken off. `None` leaves the client's URL as it is.
+pub fn badge_icon_url(built: &str, allowlist: &BTreeSet<String>) -> Option<String> {
+    let (_, icon) = built.split_once("/badge-icons/")?;
+    let icon = icon.strip_prefix("https://")?;
+    let icon = &icon[..icon.rfind(".png")?];
+    let url = url::Url::parse(&format!("https://{icon}")).ok()?;
+    if !url.username().is_empty() || url.password().is_some() {
+        return None;
+    }
+    let Some(url::Host::Domain(host)) = url.host() else {
+        return None;
+    };
+    let host = host.to_ascii_lowercase();
+    let any = allowlist.contains(crate::manifest::ANY_HOST) && is_public_name(&host);
+    (any || allowlist.contains(&host)).then(|| url.to_string())
+}
+
 /// Whether `host` names a machine on the internet rather than on the user's
 /// own network: it has a dot and isn't under a name kept for local use.
 fn is_public_name(host: &str) -> bool {
@@ -286,6 +306,46 @@ mod tests {
             headers: vec![],
             body: None,
         }
+    }
+
+    #[test]
+    fn a_badge_icon_on_a_declared_host_is_fetched_as_given() {
+        let allow = BTreeSet::from(["badges.equicord.org".to_string()]);
+        let cdn = "https://cdn.discordapp.com/badge-icons/";
+        assert_eq!(
+            badge_icon_url(
+                &format!("{cdn}https://badges.equicord.org/a/b.png.png?size=64"),
+                &allow
+            )
+            .as_deref(),
+            Some("https://badges.equicord.org/a/b.png")
+        );
+        assert_eq!(
+            badge_icon_url(
+                &format!("{cdn}https://badges.equicord.org/x.webp.png"),
+                &allow
+            )
+            .as_deref(),
+            Some("https://badges.equicord.org/x.webp")
+        );
+        // A hash, another host, plain http, an address and credentials stay
+        // the client's.
+        for icon in [
+            "2ba85e8026a8614b640c2837bcdfe21b",
+            "https://evil.example.com/x.png",
+            "http://badges.equicord.org/x.png",
+            "https://127.0.0.1/x.png",
+            "https://u:p@badges.equicord.org/x.png",
+        ] {
+            assert_eq!(
+                badge_icon_url(&format!("{cdn}{icon}.png"), &allow),
+                None,
+                "{icon}"
+            );
+        }
+        let any = BTreeSet::from([crate::manifest::ANY_HOST.to_string()]);
+        assert!(badge_icon_url(&format!("{cdn}https://img.example.org/x.png.png"), &any).is_some());
+        assert!(badge_icon_url(&format!("{cdn}https://printer.local/x.png.png"), &any).is_none());
     }
 
     #[test]

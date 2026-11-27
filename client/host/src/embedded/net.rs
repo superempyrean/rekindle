@@ -15,7 +15,7 @@
 //! [`IN_FLIGHT`] of them; a request whose future the client drops never
 //! gets one.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeSet, VecDeque};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
@@ -119,6 +119,7 @@ pub(crate) fn close() {
         .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     INTERCEPTED.store(0, Ordering::Relaxed);
     HTTP_KINDS.store(0, Ordering::Relaxed);
+    set_media_hosts(BTreeSet::new());
 }
 
 fn send(r: Request) -> bool {
@@ -138,6 +139,28 @@ pub(crate) fn publish(rk: &rekindle_extension::Rekindle) {
     INTERCEPTED.store(bits(rk.intercepted_kinds()), Ordering::Relaxed);
     let http = ROUTED.into_iter().filter(|&k| rk.filters_http(k));
     HTTP_KINDS.store(bits(http), Ordering::Relaxed);
+}
+
+/// The hosts the active plugins may reach, from the last snapshot.
+static MEDIA_HOSTS: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
+
+pub(crate) fn set_media_hosts(hosts: BTreeSet<String>) {
+    *MEDIA_HOSTS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = hosts;
+}
+
+/// The URL to fetch instead of an image URL the client built: for a
+/// badge icon a plugin gave as an `https` URL on a host some active plugin
+/// declares, that URL
+/// ([`rekindle_plugin_host::net::badge_icon_url`]). `None` keeps the
+/// client's.
+#[must_use]
+pub fn media_url(url: &str) -> Option<String> {
+    let hosts = MEDIA_HOSTS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    rekindle_plugin_host::net::badge_icon_url(url, &hosts)
 }
 
 /// Whether the client runs dispatch `t` past [`filter`] before processing
