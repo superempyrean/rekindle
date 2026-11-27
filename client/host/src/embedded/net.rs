@@ -269,7 +269,11 @@ impl Pending {
             }
             Request::Rest { req, done } => {
                 if counted(&REQUESTS) {
-                    log(&format!("http: {} {} filtered", req.method, route(&req.path)));
+                    log(&format!(
+                        "http: {} {} filtered",
+                        req.method,
+                        route(&req.path)
+                    ));
                 }
                 let decision = match rk.http_request(&req) {
                     RequestOutcome::Drop => Decision::Drop,
