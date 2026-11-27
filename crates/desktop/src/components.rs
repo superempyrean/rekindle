@@ -472,22 +472,7 @@ pub fn kit(image: &Image<'_>, div_size: usize) -> Result<Kit> {
 }
 
 fn part(image: &Image<'_>, type_name: &[u8], div_size: usize) -> Result<Part> {
-    // `into_any_element` and the component's size.
-    let mut converts = Vec::new();
-    for (lea, _) in image.leas_into(&image.find(type_name)) {
-        let Some((start, end)) = image.function(lea) else {
-            continue;
-        };
-        if end - start > 0x100 {
-            continue;
-        }
-        if let Some(size) = return_size(&code_at(image, start, end - start)?) {
-            converts.push((start, size));
-        }
-    }
-    converts.sort_unstable();
-    converts.dedup();
-    let (into_any, size) = one_of("the component's into_any_element", &converts)?;
+    let (into_any, size) = into_any_of(image, type_name)?;
     // `Div::child::<T>`: callers of it that return a `Div`.
     let mut children: BTreeMap<u64, usize> = BTreeMap::new();
     for (site, _) in image.calls_into(&[into_any]) {
@@ -533,9 +518,237 @@ fn part(image: &Image<'_>, type_name: &[u8], div_size: usize) -> Result<Part> {
     Ok(Part { new, child, size })
 }
 
+/// `mana`'s modal: a dialog over the client's window, with its own card,
+/// scrim and close.
+///
+/// - `Modal::new(out, title: *const SharedString) -> out` fills a modal
+///   with its title and no content. The client also has a constructor
+///   without a title, `(out, 1, 0)`, copied into each codegen unit that
+///   uses it, which it calls far less.
+/// - `body` and `footer` are `Vec<AnyElement>`s: the client's builders push
+///   a child's element into `body` and a button's into `footer` with
+///   `push(vec, element)`.
+/// - `on_close` is an `Option<Rc<dyn Fn(&mut Window, &mut App)>>`, `None`
+///   in a fresh modal.
+/// - `into_any(out, modal: *mut Modal) -> out` moves it into an
+///   `AnyElement`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Modal {
+    pub new: u64,
+    pub into_any: u64,
+    pub size: usize,
+    pub body: usize,
+    pub footer: usize,
+    pub on_close: usize,
+    /// `Vec<AnyElement>::push(vec: *mut Vec, element: *const AnyElement)`.
+    pub push: u64,
+}
+
+const MODAL: &[u8] = b"mana_html::hosted::modal::Modal";
+/// The element id each copy of `Modal::new` loads.
+const MODAL_ID: &[u8] = b"mana-modal";
+/// The largest function taken for one of the modal's builders.
+const SETTER_SPAN: u64 = 0x100;
+
+/// `into_any_element` of the component whose type name is `type_name`: the
+/// small function that loads the name and copies the component, with the
+/// component's size.
+fn into_any_of(image: &Image<'_>, type_name: &[u8]) -> Result<(u64, usize)> {
+    let mut converts = Vec::new();
+    for (lea, _) in image.leas_into(&image.find(type_name)) {
+        let Some((start, end)) = image.function(lea) else {
+            continue;
+        };
+        if end - start > 0x100 {
+            continue;
+        }
+        if let Some(size) = return_size(&code_at(image, start, end - start)?) {
+            converts.push((start, size));
+        }
+    }
+    converts.sort_unstable();
+    converts.dedup();
+    one_of("the component's into_any_element", &converts)
+}
+
+/// What one of the modal's builders does with the modal it takes:
+/// `lea rcx, [r + at]`, the element into `rdx` and `call push`.
+fn pushes(body: &[Instruction]) -> Option<(usize, u64)> {
+    body.iter().enumerate().find_map(|(k, i)| {
+        if i.mnemonic() != Mnemonic::Lea
+            || i.op0_register() != Register::RCX
+            || i.memory_base() == Register::RIP
+            || i.memory_base() == Register::RSP
+            || i.memory_base() == Register::RBP
+            || i.memory_index() != Register::None
+        {
+            return None;
+        }
+        let next = &body[k + 1..body.len().min(k + 4)];
+        let at = next
+            .iter()
+            .position(|c| c.mnemonic() == Mnemonic::Call && c.op0_kind() == OpKind::NearBranch64)?;
+        // A push takes the element in `rdx`; a drop of the field doesn't.
+        if !next[..at].iter().any(|c| {
+            matches!(c.mnemonic(), Mnemonic::Lea | Mnemonic::Mov)
+                && c.op0_kind() == OpKind::Register
+                && c.op0_register() == Register::RDX
+        }) {
+            return None;
+        }
+        let call = &next[at];
+        Some((
+            usize::try_from(i.memory_displacement64()).ok()?,
+            call.near_branch_target(),
+        ))
+    })
+}
+
+/// The most frequent key of `counts`, if it is ahead of the next.
+fn most<K: Copy + Ord + std::fmt::Debug>(what: &str, counts: &BTreeMap<K, usize>) -> Result<K> {
+    let mut ranked: Vec<(usize, K)> = counts.iter().map(|(k, n)| (*n, *k)).collect();
+    ranked.sort_unstable_by(|a, b| b.cmp(a));
+    match ranked.first() {
+        Some(&(n, k)) if n > ranked.get(1).map_or(0, |r| r.0) => Ok(k),
+        _ => bail!("{what}: no clear choice in {ranked:x?}"),
+    }
+}
+
+/// Find `mana`'s modal in `image`.
+///
+/// `into_any_element` loads the modal's type name, as the heading's does.
+/// The functions that call it build modals. Of the calls each of them
+/// makes, `Modal::new` is the first to a function that loads the modal's
+/// id, and of those, the one most of them call. The modal's builders
+/// are the small functions that return a copy of the modal's size, and the
+/// ones those call. One that stores an `Rc` and its vtable gives
+/// `on_close`. The others that pass a field of the modal to a call (`lea
+/// rcx, [r + at]; call`) push an element into it. The function most of them
+/// call is `push`, the field most of them push into `body`, and the next
+/// `footer`, which only buttons go into: the client has one builder for
+/// each type of child, and few for buttons.
+pub fn modal(image: &Image<'_>) -> Result<Modal> {
+    let (into_any, size) = into_any_of(image, MODAL).context("Modal::into_any_element")?;
+    let id_loads: Vec<u64> = image
+        .leas_into(&image.find(MODAL_ID))
+        .iter()
+        .map(|l| l.0)
+        .collect();
+    let loads_id = |f: u64| -> bool {
+        image
+            .function(f)
+            .is_some_and(|(start, end)| id_loads.iter().any(|lea| (start..end).contains(lea)))
+    };
+    let mut news: BTreeMap<u64, usize> = BTreeMap::new();
+    let mut setters: std::collections::BTreeSet<u64> = std::collections::BTreeSet::new();
+    let mut builders = Vec::new();
+    for (site, _) in image.calls_into(&[into_any]) {
+        if let Some((start, _)) = image.function(site) {
+            builders.push(start);
+        }
+    }
+    builders.sort_unstable();
+    builders.dedup();
+    let small_copy = |f: u64| -> Option<Vec<Instruction>> {
+        let (start, end) = image.function(f)?;
+        if start != f || end - start > SETTER_SPAN {
+            return None;
+        }
+        let body = code_at(image, start, end - start).ok()?;
+        (return_size(&body) == Some(size)).then_some(body)
+    };
+    for builder in builders {
+        let Some((start, end)) = image.function(builder) else {
+            continue;
+        };
+        let body = code_at(image, start, end - start)?;
+        let targets: Vec<u64> = calls(&body).iter().map(|c| c.1).collect();
+        if let Some(&new) = targets.iter().find(|&&t| loads_id(t)) {
+            *news.entry(new).or_default() += 1;
+        }
+        for t in targets {
+            if t == into_any {
+                continue;
+            }
+            if let Some(body) = small_copy(t) {
+                setters.insert(t);
+                for (_, inner) in calls(&body) {
+                    if small_copy(inner).is_some() {
+                        setters.insert(inner);
+                    }
+                }
+            }
+        }
+    }
+    let new = most("Modal::new", &news)?;
+    // The builders that store an `Rc` store `on_close`; of the others, the
+    // ones that push an element into the modal call one function to push,
+    // into `body` for most of them and into `footer` for the next most.
+    let mut closes: BTreeMap<usize, usize> = BTreeMap::new();
+    let mut pushed: BTreeMap<(u64, usize), usize> = BTreeMap::new();
+    for &setter in &setters {
+        let Some(body) = small_copy(setter) else {
+            continue;
+        };
+        if let Some(at) = rc_field(&body) {
+            *closes.entry(at).or_default() += 1;
+        } else if let Some((at, push)) = pushes(&body) {
+            *pushed.entry((push, at)).or_default() += 1;
+        }
+    }
+    let mut by_push: BTreeMap<u64, usize> = BTreeMap::new();
+    for (&(push, _), &n) in &pushed {
+        *by_push.entry(push).or_default() += n;
+    }
+    let push = most("Vec<AnyElement>::push", &by_push).with_context(|| format!("{pushed:x?}"))?;
+    let mut fields: Vec<(usize, usize)> = pushed
+        .iter()
+        .filter(|((p, _), _)| *p == push)
+        .map(|((_, at), n)| (*n, *at))
+        .collect();
+    fields.sort_unstable_by(|a, b| b.cmp(a));
+    let [(nb, body), (nf, footer), ..] = fields[..] else {
+        bail!("the modal's builders push into {fields:x?}, want a body and a footer");
+    };
+    if nb <= nf {
+        bail!("the modal's body and footer are pushed alike: {fields:x?}");
+    }
+    let on_close = most("the modal's on_close", &closes)?;
+    if [body, footer, on_close].iter().any(|&f| f + 0x18 > size) {
+        bail!("a Modal field past its {size:#x} bytes");
+    }
+    Ok(Modal {
+        new,
+        into_any,
+        size,
+        body,
+        footer,
+        on_close,
+        push,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The modal of the client on disk, when it is there.
+    #[test]
+    fn finds_the_modal_on_disk() {
+        let Ok(path) = std::env::var("REKINDLE_DESKTOP_EXE") else {
+            eprintln!("REKINDLE_DESKTOP_EXE not set; skipped");
+            return;
+        };
+        let bytes = std::fs::read(path).unwrap();
+        let image = Image::parse(&bytes).unwrap();
+        let m = modal(&image).unwrap();
+        eprintln!("{m:#x?}");
+        let rva = |va: u64| va - image.base();
+        assert_eq!(rva(m.new), 0x9883b90);
+        assert_eq!((rva(m.into_any), m.size), (0x99724a0, 0x358));
+        assert_eq!((m.body, m.footer, m.on_close), (0x18, 0x30, 0x208));
+        assert_eq!(rva(m.push), 0xc428c);
+    }
 
     /// The heading and the divider of the client on disk, when it is there.
     #[test]
