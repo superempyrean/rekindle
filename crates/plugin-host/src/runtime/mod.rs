@@ -60,7 +60,7 @@ mod timefmt;
 pub use events::{INTERCEPTABLE, event_kind};
 pub use gestures::message_predicate;
 pub use host_state::redact;
-pub use http::{CALLS_PER_MINUTE, MAX_BODY, RequestOutcome, RestRequest, route_kind};
+pub use http::{CALLS_PER_MINUTE, MAX_BODY, RequestOutcome, RestRequest, api_path, route_kind};
 pub use inspect::{
     HOOKS, Inspection, engine, hook_capability, inspect, inspect_artifact, inspect_artifact_cached,
     inspect_cached, shutdown_engine, unloadable,

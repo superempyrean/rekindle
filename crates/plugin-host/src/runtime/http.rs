@@ -86,8 +86,29 @@ pub fn route_kind(path: &str) -> Option<api::EventKind> {
             _ => None,
         },
         ["users", "@me", "relationships", ..] => Some(K::Relationship),
+        ["users", u, "profile"] if id(u) => Some(K::Member),
         _ => None,
     }
+}
+
+/// The path below the API version, with the query, of a request to
+/// Discord's API: `/channels/1/messages?limit=50` for
+/// `https://discord.com/api/v9/channels/1/messages?limit=50`. `None` for a
+/// URL on another host, or outside `/api/v{n}`.
+#[must_use]
+pub fn api_path(url: &str) -> Option<&str> {
+    let rest = url.strip_prefix("https://")?;
+    let at = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let (host, path) = rest.split_at(at);
+    let host = host.rsplit_once('@').map_or(host, |(_, h)| h);
+    let host = host.split(':').next().unwrap_or(host).to_ascii_lowercase();
+    if host != "discord.com" && !host.ends_with(".discord.com") {
+        return None;
+    }
+    let below = path.strip_prefix("/api/v")?;
+    let digits = below.bytes().take_while(u8::is_ascii_digit).count();
+    let path = &below[digits..];
+    (digits > 0 && path.starts_with('/')).then_some(path)
 }
 
 /// A body a plugin may see: present, UTF-8 by construction, within
@@ -244,6 +265,33 @@ mod tests {
             route_kind("/users/@me/relationships/6"),
             Some(K::Relationship)
         );
+    }
+
+    #[test]
+    fn a_profile_is_about_a_member() {
+        assert_eq!(
+            route_kind("/users/80351110224678912/profile?with_mutual_guilds=true"),
+            Some(K::Member)
+        );
+        assert_eq!(route_kind("/users/@me/profile"), None);
+        assert_eq!(route_kind("/users/1"), None);
+    }
+
+    #[test]
+    fn api_paths_come_from_discord_urls_only() {
+        assert_eq!(
+            api_path("https://discord.com/api/v9/channels/1/messages?limit=50"),
+            Some("/channels/1/messages?limit=50")
+        );
+        assert_eq!(
+            api_path("https://canary.discord.com/api/v10/users/2/profile"),
+            Some("/users/2/profile")
+        );
+        assert_eq!(api_path("https://discord.com.evil.test/api/v9/x"), None);
+        assert_eq!(api_path("https://cdn.discordapp.com/api/v9/x"), None);
+        assert_eq!(api_path("http://discord.com/api/v9/channels/1"), None);
+        assert_eq!(api_path("https://discord.com/api/channels/1"), None);
+        assert_eq!(api_path("https://discord.com/app"), None);
     }
 
     #[test]

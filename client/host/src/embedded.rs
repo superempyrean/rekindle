@@ -42,6 +42,8 @@ use rekindle_plugin_host::manager;
 use rekindle_ui_hook::Widget;
 use serde::Serialize;
 
+pub mod net;
+
 /// How long the runtime sleeps between ticks.
 const TICK: Duration = Duration::from_millis(50);
 
@@ -66,6 +68,9 @@ pub struct Options {
     /// (`rekindle_ui_hook::menu_rows`) and reports their clicks as
     /// `Click::Menu`. Without it, the menu slots are unavailable.
     pub menus: bool,
+    /// Whether plugins' `http.fetch` reaches the network. Without it, every
+    /// fetch fails.
+    pub network: bool,
 }
 
 /// What the runtime last made of its plugins.
@@ -205,6 +210,12 @@ pub fn stop() {
 }
 
 fn run(o: &Options) {
+    let requests = net::open();
+    run_with(o, &requests);
+    net::close();
+}
+
+fn run_with(o: &Options, requests: &std::sync::mpsc::Receiver<net::Request>) {
     let started = Instant::now();
     let mut driver = match up(o) {
         Ok(d) => d,
@@ -226,8 +237,23 @@ fn run(o: &Options) {
     let mut not_loaded = Vec::new();
     // What the menu was last read for.
     let mut menu_for = None;
+    let mut pending = net::Pending::default();
+    let mut next_tick = Instant::now();
     while !STOP.load(Ordering::Relaxed) {
+        // The hooks' requests are answered as they come, between ticks.
+        let wait = next_tick.saturating_duration_since(Instant::now());
+        if !wait.is_zero()
+            && let Ok(r) = requests.recv_timeout(wait)
+        {
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_millis() as u64);
+            pending.serve(driver.rekindle(), r, now_ms, o.log);
+            continue;
+        }
+        next_tick = Instant::now() + TICK;
         driver.tick();
+        net::publish(driver.rekindle());
         let (records, next) = driver.rekindle().logs_since(logs);
         logs = next;
         for r in records {
@@ -292,7 +318,6 @@ fn run(o: &Options) {
         if moved {
             GENERATION.fetch_add(1, Ordering::Release);
         }
-        std::thread::sleep(TICK);
     }
 }
 
@@ -334,7 +359,7 @@ fn up(o: &Options) -> anyhow::Result<Driver> {
         dev_paths: Vec::new(),
         load_installed: true,
         memory_storage: false,
-        allow_network: false,
+        allow_network: o.network,
         wait_for_client: false,
         home: Some(o.home.clone()),
     };
@@ -450,6 +475,7 @@ mod tests {
             report: Some(report.clone()),
             selection: None,
             menus: false,
+            network: false,
         }));
         let deadline = Instant::now() + Duration::from_secs(30);
         let shot = loop {

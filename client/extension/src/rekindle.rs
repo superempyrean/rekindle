@@ -758,6 +758,38 @@ impl Rekindle {
         events.len()
     }
 
+    // ---- REST requests (`runtime::http`) ----
+
+    /// Whether some plugin's `http-filter` sees requests on routes of
+    /// `kind`.
+    pub fn filters_http(&self, kind: rekindle_plugin_host::api::EventKind) -> bool {
+        self.runtime.filters_http(kind)
+    }
+
+    /// Run a request past the plugins' `http-filter`s, before the client
+    /// sends it.
+    pub fn http_request(
+        &mut self,
+        req: &rekindle_plugin_host::runtime::RestRequest,
+    ) -> rekindle_plugin_host::runtime::RequestOutcome {
+        let out = self.runtime.filter_request(req);
+        self.check_faults();
+        out
+    }
+
+    /// Run the response to `req` past the plugins' `http-filter`s, before
+    /// the client reads it. Returns the body the client reads.
+    pub fn http_response(
+        &mut self,
+        req: &rekindle_plugin_host::runtime::RestRequest,
+        status: u16,
+        body: Option<String>,
+    ) -> Option<String> {
+        let out = self.runtime.filter_response(req, status, body);
+        self.check_faults();
+        out
+    }
+
     /// The user dismissed a plugin's modal: drop it from the client backend.
     pub(crate) fn close_modal(&mut self, plugin: &str) {
         self.backend.lock().unwrap().close_modal(plugin);
