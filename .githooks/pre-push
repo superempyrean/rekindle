@@ -1,0 +1,41 @@
+#!/bin/sh
+# Runs scripts/check.ps1, the checks CI runs, and refuses the push if they
+# fail. Enable it once per clone:
+#
+#   git config core.hooksPath .githooks
+#
+# git passes one line per pushed ref on stdin:
+#   <local ref> <local sha> <remote ref> <remote sha>
+# Changes are measured from the remote's commit when git knows it.
+
+zero=0000000000000000000000000000000000000000
+base=origin/main
+pushing=0
+while read -r local_ref local_sha remote_ref remote_sha; do
+    [ "$local_sha" = "$zero" ] && continue
+    pushing=1
+    if [ "$remote_sha" != "$zero" ] && git cat-file -e "$remote_sha^{commit}" 2>/dev/null; then
+        base=$remote_sha
+    fi
+done
+# Deleting a branch checks nothing.
+[ "$pushing" = 1 ] || exit 0
+
+root=$(git rev-parse --show-toplevel)
+if ! git diff --quiet HEAD -- || [ -n "$(git ls-files --others --exclude-standard)" ]; then
+    echo "pre-push: the working tree has changes that aren't committed; the checks include them." >&2
+fi
+
+if command -v pwsh >/dev/null 2>&1; then
+    ps=pwsh
+elif command -v powershell.exe >/dev/null 2>&1; then
+    ps=powershell.exe
+else
+    echo "pre-push: scripts/check.ps1 needs PowerShell (pwsh)." >&2
+    exit 1
+fi
+
+if ! "$ps" -NoProfile -ExecutionPolicy Bypass -File "$root/scripts/check.ps1" -Base "$base"; then
+    echo "pre-push: the checks failed, so nothing was pushed. Fix them and push again." >&2
+    exit 1
+fi

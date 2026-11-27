@@ -1,6 +1,10 @@
 # Text is stored in the repository with LF line endings, whatever a
 # contributor's git settings. Checkouts follow core.autocrlf.
 * text=auto
+# Shell scripts and git hooks run in sh and bash, which read a CR as part
+# of the line.
+*.sh text eol=lf
+.githooks/* text eol=lf
 
 *.ttf binary
 *.gif binary

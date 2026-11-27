@@ -43,13 +43,27 @@ maintainer runs the live self-test on changes there.
 
 Never test a client by moving the mouse, sending keys or taking focus.
 
+## Checks before a push
+
+`scripts/check.ps1` runs what CI runs, with the same commands, flags and
+toolchains: format, clippy with `-D warnings`, the tests, and the `client/`
+build. It checks the workspaces whose files differ from `origin/main`, and
+`-All` checks both. The root job runs on Linux in CI, so on Windows its
+Linux half runs in WSL (`scripts/check-linux.sh`). The `client/` job needs
+Windows.
+
+Once per clone, turn on the pre-push hook. It runs the script and refuses
+the push if a check fails:
+
+```sh
+git config core.hooksPath .githooks
+```
+
 ## Pull requests
 
 - Keep each pull request to one change: a plugin, a host function, a fix.
   Small and scoped is easier to review than one large change.
-- Run the tests and clippy for what you touched. CI lints both workspaces
-  with `-D warnings`. On a pull request it also builds `client/` on
-  Windows and tests the launcher and the hook crate there.
+- Run `scripts/check.ps1` before pushing. A pass there is a pass in CI.
 - Commits have one author, the person who made them. Don't add
   `Co-Authored-By` or "generated with" trailers for tools or AI assistants.
 - A contribution is licensed under the repository's license,
