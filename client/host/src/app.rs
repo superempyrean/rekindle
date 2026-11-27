@@ -226,7 +226,10 @@ pub fn host_call(buf: &[u8]) -> Call {
     if typing::drops(buf) {
         return Call::Drop;
     }
-    crate::http::on_call(buf)
+    match crate::http::on_call(buf) {
+        Call::Pass => crate::http::on_send(buf),
+        call => call,
+    }
 }
 
 /// The REPLY a host module gave to a call the guest made: the handle of

@@ -13,6 +13,11 @@
 //! `@http` answer with status 0 and an error in its place, from
 //! [`take_answers`], as for a request that failed before any connection.
 //!
+//! The guest sends a gateway frame with `WebSocket.sendText`, whose body is
+//! the frame. [`on_send`] runs it past the plugins' `outgoing` filters
+//! through [`embedded::net`] as desktop's socket hook does, and hands it
+//! on for its event. Identify and Resume are never read.
+//!
 //! The ids are the Android platform's (build 356207), which iOS shares.
 
 use std::collections::VecDeque;
@@ -27,6 +32,8 @@ use crate::embedded::net::{self, Decision};
 pub(crate) const NETWORKING_REQUEST: u16 = 168;
 /// `@http`, a request's answer.
 pub(crate) const HTTP_EVENT: u16 = 321;
+/// `WebSocket.sendText`.
+pub(crate) const WEBSOCKET_SEND_TEXT: u16 = 293;
 const ERROR: PropId = PropId(403);
 const ID: PropId = PropId(417);
 const METHOD: PropId = PropId(421);
@@ -121,6 +128,40 @@ fn on_call_with(
                 }
                 _ => Call::Pass,
             }
+        }
+    }
+}
+
+/// A gateway frame the guest sends, run past the plugins' `outgoing`
+/// filters. On the guest's thread.
+pub fn on_send(buf: &[u8]) -> Call {
+    on_send_with(buf, net::sending, net::sent)
+}
+
+fn on_send_with(
+    buf: &[u8],
+    sending: impl FnOnce(&str) -> Decision,
+    sent: impl FnOnce(&str),
+) -> Call {
+    let Ok(mut f) = Frame::from_bytes(buf) else {
+        return Call::Pass;
+    };
+    if f.kind != frame::CALL || f.method != WEBSOCKET_SEND_TEXT {
+        return Call::Pass;
+    }
+    let Ok(text) = std::str::from_utf8(&f.body) else {
+        return Call::Pass;
+    };
+    match sending(text) {
+        Decision::Drop => Call::Drop,
+        Decision::Replace(new) => {
+            sent(&new);
+            f.body = new.into_bytes();
+            Call::Replace(f.to_bytes())
+        }
+        Decision::Pass => {
+            sent(text);
+            Call::Pass
         }
     }
 }
@@ -286,6 +327,49 @@ mod tests {
         );
         // Answered once.
         assert_eq!(on_event_with(&ans, &mut |_, _, _| panic!("again")), None);
+    }
+
+    fn socket_frame(text: &str) -> Vec<u8> {
+        let mut f = Frame::call(
+            9,
+            WEBSOCKET_SEND_TEXT,
+            1,
+            &Value::Object(vec![(ID, Value::I32(3))]),
+        );
+        f.body = text.as_bytes().to_vec();
+        f.to_bytes()
+    }
+
+    #[test]
+    fn a_gateway_frame_goes_past_the_outgoing_filters() {
+        let presence = r#"{"op":3,"d":{"status":"online","afk":false}}"#;
+        let mut seen = String::new();
+        let call = on_send_with(
+            &socket_frame(presence),
+            |t| {
+                assert_eq!(t, presence);
+                Decision::Replace(r#"{"op":3,"d":{"status":"dnd","afk":false}}"#.into())
+            },
+            |t| seen = t.to_string(),
+        );
+        let Call::Replace(new) = call else {
+            panic!("{call:?}");
+        };
+        let f = Frame::from_bytes(&new).unwrap();
+        assert_eq!(f.body, br#"{"op":3,"d":{"status":"dnd","afk":false}}"#);
+        assert!(seen.contains("dnd"));
+
+        let voice = r#"{"op":4,"d":{}}"#;
+        assert_eq!(
+            on_send_with(&socket_frame(voice), |_| Decision::Drop, |_| panic!("sent")),
+            Call::Drop
+        );
+        // A request is not a frame.
+        let req = request(5, "GET", URL_, "");
+        assert_eq!(
+            on_send_with(&req, |_| panic!("read"), |_| panic!("sent")),
+            Call::Pass
+        );
     }
 
     #[test]

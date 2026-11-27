@@ -307,23 +307,7 @@ impl Pending {
                 }
             }
             Request::Sending { frame, done } => {
-                let decision = match rk.outgoing_filter(&frame) {
-                    None => Decision::Drop,
-                    Some(new) if new != frame => Decision::Replace(new),
-                    Some(_) => Decision::Pass,
-                };
-                if decision != Decision::Pass {
-                    let op = outgoing::opcode(&frame).unwrap_or_default();
-                    log(&format!(
-                        "gateway: sent op {op} {}",
-                        if decision == Decision::Drop {
-                            "dropped"
-                        } else {
-                            "replaced"
-                        }
-                    ));
-                }
-                let _ = done.send(decision);
+                let _ = done.send(sending_decision(rk, &frame, log));
             }
             Request::Sent { frame } => {
                 if rk.outgoing_events(&frame) > 0 && counted(&EVENTS) {
@@ -390,6 +374,26 @@ impl Pending {
             }
         }
     }
+}
+
+/// What the plugins' `outgoing` filters make of a frame, logged unless it
+/// passes.
+fn sending_decision(rk: &mut rekindle_extension::Rekindle, frame: &str, log: fn(&str)) -> Decision {
+    let decision = match rk.outgoing_filter(frame) {
+        None => Decision::Drop,
+        Some(new) if new != frame => Decision::Replace(new),
+        Some(_) => Decision::Pass,
+    };
+    if decision != Decision::Pass {
+        let op = outgoing::opcode(frame).unwrap_or_default();
+        let what = if decision == Decision::Drop {
+            "dropped"
+        } else {
+            "replaced"
+        };
+        log(&format!("gateway: sent op {op} {what}"));
+    }
+    decision
 }
 
 /// A path with its ids and query left out, for the log.
