@@ -23,7 +23,8 @@ use rekindle_ui_hook::{LiveToast, PanelItem, ToastStyle, UiInput, Widget};
 use rekindle_wire::a11y::{Role, ids as a11y};
 use rekindle_wire::{ElementKind, NodeId, PropId, Value};
 use rekindle_wire_inject::{Cell, Handler, Mount, MountNode, RESERVED, Selector, TEXT};
-use serde::Deserialize;
+
+pub(crate) use crate::look::Look;
 
 /// The handler surface of a row in rekindle's menu on the settings screen.
 pub(crate) const SECTION: &str = "settings";
@@ -57,115 +58,6 @@ const TOAST_SETS: u32 = 0x1_0000;
 /// The first node ids of rekindle's page: two blocks, so a page of another
 /// shape is created under new ids while the old one is taken out.
 const PAGE_IDS: [NodeId; 2] = [RESERVED + 0x0400_0000, RESERVED + 0x0480_0000];
-
-/// The cells each part of a row gets, and where the menu, pages and
-/// modals go. Read from the client's own rows, so a mount looks like them.
-#[derive(Clone, Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct Look {
-    /// The node the menu is mounted under.
-    pub(crate) under: Selector,
-    /// The child of that node the menu goes before, if not last.
-    #[serde(default)]
-    pub(crate) before: Option<Selector>,
-    /// The child of that node the menu goes after, if `before` finds none.
-    #[serde(default)]
-    pub(crate) after: Option<Selector>,
-    /// The node a page or modal is mounted under: one whose children are
-    /// drawn over each other, so the last is on top. Without one, pages and
-    /// modals aren't shown.
-    #[serde(default)]
-    pub(crate) modal_under: Option<Selector>,
-    /// The node a page is mounted under instead, when the client shows its
-    /// settings screen in a layer of its own that `modal_under` is behind,
-    /// as iOS shows a sheet. Pages open from the settings screen.
-    #[serde(default)]
-    pub(crate) page_under: Option<Selector>,
-    /// A group's header with the group under it.
-    pub(crate) section: Vec<Cell>,
-    /// A group's header text.
-    pub(crate) header: Vec<Cell>,
-    /// A group of rows.
-    pub(crate) group: Vec<Cell>,
-    /// A row, and what its group's first and last rows add.
-    pub(crate) row: Vec<Cell>,
-    #[serde(default)]
-    pub(crate) first: Vec<Cell>,
-    #[serde(default)]
-    pub(crate) last: Vec<Cell>,
-    /// The row's content: icon, the title column and what ends the row.
-    pub(crate) inner: Vec<Cell>,
-    pub(crate) icon: Vec<Cell>,
-    pub(crate) column: Vec<Cell>,
-    pub(crate) title: Vec<Cell>,
-    pub(crate) subtitle: Vec<Cell>,
-    /// A text field under the title. Without these it takes the title's
-    /// cells, and its placeholder the subtitle's colour.
-    #[serde(default)]
-    pub(crate) input: Vec<Cell>,
-    pub(crate) chevron_box: Vec<Cell>,
-    pub(crate) chevron: Vec<Cell>,
-    /// A switch: its box, its track and thumb, and what each adds when on
-    /// and when off.
-    pub(crate) switch_box: Vec<Cell>,
-    pub(crate) track: Vec<Cell>,
-    pub(crate) track_on: Vec<Cell>,
-    pub(crate) track_off: Vec<Cell>,
-    /// What a track adds when a press on it does something of its own.
-    #[serde(default)]
-    pub(crate) track_press: Vec<Cell>,
-    pub(crate) thumb: Vec<Cell>,
-    pub(crate) thumb_on: Vec<Cell>,
-    pub(crate) thumb_off: Vec<Cell>,
-    /// Between two rows: a box holding a rule.
-    pub(crate) divider: Vec<Cell>,
-    pub(crate) rule: Vec<Cell>,
-    /// A modal: the layer over the screen, which lays the card out, and the
-    /// card on it.
-    #[serde(default)]
-    pub(crate) scrim: Vec<Cell>,
-    #[serde(default)]
-    pub(crate) card: Vec<Cell>,
-    /// A page: the layer over the screen, its bar, the bar's back button
-    /// and its icon, the title, the scroll and the column in it.
-    #[serde(default)]
-    pub(crate) page: Vec<Cell>,
-    #[serde(default)]
-    pub(crate) page_bar: Vec<Cell>,
-    #[serde(default)]
-    pub(crate) page_back: Vec<Cell>,
-    #[serde(default)]
-    pub(crate) page_back_icon: Vec<Cell>,
-    #[serde(default)]
-    pub(crate) page_title: Vec<Cell>,
-    #[serde(default)]
-    pub(crate) page_scroll: Vec<Cell>,
-    #[serde(default)]
-    pub(crate) page_content: Vec<Cell>,
-    /// The toasts: the layer over the screen that lays them out, takes no
-    /// press and lets one through to the screen, a toast's card, its text,
-    /// and the bar at its start, by style (`info`, `success`, `warning`,
-    /// `error`). Without a layer, toasts aren't shown.
-    #[serde(default)]
-    pub(crate) toast_layer: Vec<Cell>,
-    #[serde(default)]
-    pub(crate) toast: Vec<Cell>,
-    #[serde(default)]
-    pub(crate) toast_text: Vec<Cell>,
-    #[serde(default)]
-    pub(crate) toast_bar: BTreeMap<String, Vec<Cell>>,
-    /// The `uri` of each row's icon, by the row's key: the key itself, then
-    /// `<verb>:*` for a key `<verb>:<id>`. In the menu, `*` is the icon of a
-    /// row with neither. A row with none has no icon.
-    #[serde(default)]
-    pub(crate) icons: BTreeMap<String, String>,
-}
-
-impl Look {
-    pub(crate) fn from_json(json: &str) -> anyhow::Result<Look> {
-        Ok(serde_json::from_str(json)?)
-    }
-}
 
 /// A mount, and what a press on each of its rows reports: by the handler's
 /// surface and element, the panel's element and its value.

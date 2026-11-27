@@ -42,6 +42,7 @@ mod image;
 mod install;
 mod layout;
 mod live;
+pub mod look;
 #[cfg(any(target_os = "android", target_os = "ios", test))]
 mod messages;
 #[cfg(any(target_os = "android", target_os = "ios", test))]
