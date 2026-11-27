@@ -22,7 +22,6 @@ pub mod net;
 pub mod settings;
 pub mod symbols;
 pub mod text;
-pub mod typing;
 
 pub use debug::StyleOffsets;
 pub use div::Div;

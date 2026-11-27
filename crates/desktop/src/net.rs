@@ -513,6 +513,18 @@ fn method_slots(
         .collect()
 }
 
+/// True if `path` is `…/channels/{id}/typing`, with or without a query.
+#[must_use]
+pub fn is_typing_path(path: &str) -> bool {
+    let path = path.split(['?', '#']).next().unwrap_or_default();
+    let mut seg = path.trim_end_matches('/').rsplit('/');
+    seg.next() == Some("typing")
+        && seg
+            .next()
+            .is_some_and(|c| !c.is_empty() && c.bytes().all(|b| b.is_ascii_digit()))
+        && seg.next() == Some("channels")
+}
+
 /// Find the REST transport.
 pub fn transport(image: &Image<'_>) -> Result<Transport> {
     let anchor = one_of("the transport's string", &image.find(TRANSPORT_ANCHOR))?;
@@ -776,6 +788,18 @@ mod tests {
                 .collect::<Vec<_>>(),
             [0x17381510]
         );
+    }
+
+    #[test]
+    fn typing_paths() {
+        assert!(is_typing_path("/channels/123456789012345678/typing"));
+        assert!(is_typing_path(
+            "https://discord.com/api/v9/channels/1/typing?x=1"
+        ));
+        assert!(!is_typing_path("/channels/1/messages"));
+        assert!(!is_typing_path("/channels/abc/typing"));
+        assert!(!is_typing_path("/users/1/typing"));
+        assert!(!is_typing_path("/channels//typing"));
     }
 
     #[test]
