@@ -140,11 +140,16 @@ pub(crate) fn publish(rk: &rekindle_extension::Rekindle) {
     HTTP_KINDS.store(bits(http), Ordering::Relaxed);
 }
 
-/// Whether some plugin's event filter sees the events dispatch `t` causes.
+/// Whether the client runs dispatch `t` past [`filter`] before processing
+/// it: some plugin's event filter sees the events it causes, or its events
+/// carry what the client held before, which is read there. An edit's
+/// event carries the message's earlier content, and a deletion's the
+/// deleted message.
 #[must_use]
 pub fn intercepts(t: &str) -> bool {
-    gateway::dispatch_kind(t)
-        .is_some_and(|k| INTERCEPTED.load(Ordering::Relaxed) & (1 << (k as u8)) != 0)
+    matches!(t, "MESSAGE_UPDATE" | "MESSAGE_DELETE")
+        || gateway::dispatch_kind(t)
+            .is_some_and(|k| INTERCEPTED.load(Ordering::Relaxed) & (1 << (k as u8)) != 0)
 }
 
 /// Whether some plugin's `http-filter` sees a request to `url`.

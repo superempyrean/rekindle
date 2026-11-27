@@ -62,6 +62,10 @@ impl Source {
     }
 }
 
+/// How many filtered dispatches wait for their delivery at most. A
+/// dispatch the client never reports processed is dropped after this many.
+const PENDING: usize = 64;
+
 /// The plugin runtime in the client, with rekindle's settings panel and
 /// updates.
 pub struct Rekindle {
@@ -86,6 +90,9 @@ pub struct Rekindle {
     waiting: Option<(bool, Vec<PathBuf>)>,
     /// Messages the client dispatched twice.
     echoes: Echoes,
+    /// The dispatches filtered and not yet delivered, oldest first, each
+    /// with what the client held before it.
+    pending: std::collections::VecDeque<Dispatch>,
 }
 
 impl Rekindle {
@@ -165,6 +172,7 @@ impl Rekindle {
             check_asked: false,
             waiting: Some((opts.load_installed, opts.dev_paths)),
             echoes: Echoes::default(),
+            pending: std::collections::VecDeque::new(),
         };
         if !opts.wait_for_client {
             p.start_plugins();
@@ -755,7 +763,13 @@ impl Rekindle {
         let before = d.clone();
         let dispatch = Dispatch::new(t, d, &self.reader).filter(&mut self.runtime, &self.reader);
         self.check_faults();
-        let after = dispatch.map(|x| x.d);
+        let after = dispatch.as_ref().map(|x| x.d.clone());
+        if let Some(x) = dispatch {
+            if self.pending.len() == PENDING {
+                self.pending.pop_front();
+            }
+            self.pending.push_back(x);
+        }
         self.echoes.filtered(t, &before, after.as_ref());
         after
     }
@@ -767,7 +781,26 @@ impl Rekindle {
         if !self.echoes.deliver(t, &d) {
             return 0;
         }
-        let events = Dispatch::new(t, d, &self.reader).events(&self.reader, now_ms);
+        // What the client held before comes from the filter's read, made
+        // before the client processed the dispatch.
+        let id = d.get("id").cloned();
+        let dispatch = match self
+            .pending
+            .iter()
+            .position(|p| p.t == t && p.d.get("id").cloned() == id)
+        {
+            Some(at) => {
+                let mut p = self
+                    .pending
+                    .drain(..=at)
+                    .next_back()
+                    .expect("the position found");
+                p.d = d;
+                p
+            }
+            None => Dispatch::new(t, d, &self.reader),
+        };
+        let events = dispatch.events(&self.reader, now_ms);
         if !events.is_empty() {
             self.runtime.dispatch_events(&events);
             self.check_faults();

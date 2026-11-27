@@ -432,8 +432,12 @@ impl Dispatch {
                 if !edit {
                     return None;
                 }
+                // A client whose store lags its own state still holds the
+                // message from before the edit; the dispatch's is newer.
                 let fresh = if after {
-                    client.message(m.channel_id, m.id)
+                    client
+                        .message(m.channel_id, m.id)
+                        .filter(|f| f.content == merged.content && f.edited_ms == merged.edited_ms)
                 } else {
                     None
                 };
