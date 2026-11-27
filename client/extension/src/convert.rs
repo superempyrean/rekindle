@@ -169,6 +169,57 @@ pub(crate) fn glyph(icon: Icon) -> &'static str {
     }
 }
 
+/// An icon's name in the contract, which a host maps to the client's own
+/// icon set.
+pub(crate) fn icon_name(icon: Icon) -> &'static str {
+    match icon {
+        Icon::Star => "star",
+        Icon::Bookmark => "bookmark",
+        Icon::Note => "note",
+        Icon::Palette => "palette",
+        Icon::Bolt => "bolt",
+        Icon::Heart => "heart",
+        Icon::Bell => "bell",
+        Icon::Gear => "gear",
+        Icon::Link => "link",
+        Icon::Search => "search",
+        Icon::Sparkle => "sparkle",
+        Icon::Eye => "eye",
+        Icon::Clock => "clock",
+        Icon::Pin => "pin",
+        Icon::Puzzle => "puzzle",
+        Icon::EyeOff => "eye-off",
+        Icon::Translate => "translate",
+        Icon::Microphone => "microphone",
+        Icon::Headphones => "headphones",
+        Icon::Camera => "camera",
+        Icon::Shield => "shield",
+        Icon::Lock => "lock",
+        Icon::User => "user",
+        Icon::Users => "users",
+        Icon::Chat => "chat",
+        Icon::Reply => "reply",
+        Icon::Copy => "copy",
+        Icon::Trash => "trash",
+        Icon::Edit => "edit",
+        Icon::Check => "check",
+        Icon::Cross => "cross",
+        Icon::Info => "info",
+        Icon::Warning => "warning",
+        Icon::Download => "download",
+        Icon::Upload => "upload",
+        Icon::Globe => "globe",
+        Icon::Code => "code",
+        Icon::Hash => "hash",
+        Icon::At => "at",
+        Icon::Smile => "smile",
+        Icon::Image => "image",
+        Icon::Music => "music",
+        Icon::Play => "play",
+        Icon::Pause => "pause",
+    }
+}
+
 /// What a renderer is told about a row the client drew.
 pub(crate) fn render_input(
     row: &rekindle_ui_hook::render::RenderRequest,

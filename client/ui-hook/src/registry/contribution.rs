@@ -66,6 +66,8 @@ pub struct MenuItem {
     pub kind: MenuKind,
     pub label: String,
     pub danger: bool,
+    /// The contract's icon, by its name in the contract (`eye-off`).
+    pub icon: Option<String>,
 }
 
 /// The target of a clicked menu row, read back from the client's value.

@@ -16,10 +16,10 @@ use rekindle_plugin_host::api;
 use rekindle_plugin_host::backend::ClientBackend;
 use rekindle_plugin_host::backend::cache::CacheStore;
 use rekindle_plugin_host::model::{
-    Action, ActionError, Element, OverlaySprite, Panel, SLOT_CHANNEL_MENU, SLOT_CHAT_BAR_BUTTON,
-    SLOT_EXPRESSION_PICKER_TAB, SLOT_GUILD_MENU, SLOT_MESSAGE_MENU, SLOT_PROFILE_SECTION,
-    SLOT_USER_MENU, SlotError, SlotItem, SurfaceStyle, ThemeValue, Tint, ToastKind, Tweak,
-    TweakError, UiError, UiOp,
+    Action, ActionError, Element, Icon, OverlaySprite, Panel, SLOT_CHANNEL_MENU,
+    SLOT_CHAT_BAR_BUTTON, SLOT_EXPRESSION_PICKER_TAB, SLOT_GUILD_MENU, SLOT_MESSAGE_MENU,
+    SLOT_PROFILE_SECTION, SLOT_USER_MENU, SlotError, SlotItem, SurfaceStyle, ThemeValue, Tint,
+    ToastKind, Tweak, TweakError, UiError, UiOp,
 };
 use rekindle_plugin_host::tokens::{self, ThemeError, TokenInfo};
 use rekindle_ui_hook::registry::Surfaces;
@@ -274,6 +274,7 @@ impl DetourBackend {
         id: &str,
         label: &str,
         danger: bool,
+        icon: Option<Icon>,
     ) -> Result<(), SlotError> {
         let kind = self.menu_kind(slot);
         let Some(menus) = &mut self.menus else {
@@ -284,6 +285,7 @@ impl DetourBackend {
             kind,
             label: label.to_string(),
             danger,
+            icon: icon.map(|i| crate::convert::icon_name(i).to_string()),
         };
         // One item can be in several menus, a row in each.
         menus.retain(|(_, r)| (&r.key, r.kind) != (&row.key, row.kind));
@@ -605,9 +607,13 @@ impl ClientBackend for DetourBackend {
             (
                 SLOT_MESSAGE_MENU | SLOT_USER_MENU | SLOT_CHANNEL_MENU | SLOT_GUILD_MENU,
                 SlotItem::MenuItem {
-                    id, label, danger, ..
+                    id,
+                    label,
+                    danger,
+                    icon,
+                    ..
                 },
-            ) => self.add_menu_row(plugin, slot, &id, &label, danger),
+            ) => self.add_menu_row(plugin, slot, &id, &label, danger, icon),
             (SLOT_EXPRESSION_PICKER_TAB, SlotItem::ListItem { id, title }) => {
                 let mut tabs = self.shared.picker_tabs.lock().unwrap();
                 let tabs = tabs.as_mut().ok_or(SlotError::Unavailable)?;
@@ -1067,6 +1073,25 @@ mod tests {
         assert_eq!(kinds(&b), [MenuKind::Message, MenuKind::User]);
         b.remove_slot_item("p", SLOT_USER_MENU, "view-raw");
         assert_eq!(kinds(&b), [MenuKind::Message]);
+    }
+
+    /// A row carries its item's icon by the contract's name for it.
+    #[test]
+    fn a_row_names_its_icon() {
+        let mut b = backend();
+        let item = SlotItem::MenuItem {
+            id: "hide".into(),
+            label: "Hide".into(),
+            icon: Some(Icon::EyeOff),
+            danger: true,
+            group: None,
+            checked: None,
+            when: Vec::new(),
+        };
+        b.add_slot_item("p", SLOT_MESSAGE_MENU, item).unwrap();
+        let rows = b.menus.as_ref().unwrap();
+        assert_eq!(rows[0].1.icon.as_deref(), Some("eye-off"));
+        assert!(rows[0].1.danger);
     }
 
     #[test]
