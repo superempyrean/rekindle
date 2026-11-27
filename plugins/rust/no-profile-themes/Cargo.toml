@@ -1,0 +1,22 @@
+[package]
+name = "no-profile-themes"
+version = "0.1.0"
+edition = "2024"
+description = "Profiles show without their theme colours, effects, avatar decorations and name styles."
+license = "GPL-3.0-or-later"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[package.metadata.rekindle]
+id = "dev.rekindle.no-profile-themes"
+name = "No Profile Themes"
+capabilities = ["read-users", "read-messages", "intercept-http"]
+
+[dependencies]
+rekindle-sdk = { path = "../../../crates/sdk" }
+serde_json = "1"
+
+[lints]
+workspace = true

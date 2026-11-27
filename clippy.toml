@@ -1,2 +1,2 @@
 # Names rustdoc prose uses as written, on top of clippy's defaults ("..").
-doc-valid-idents = ["AArch64", ".."]
+doc-valid-idents = ["AArch64", "DeArrow", "YouTube", ".."]

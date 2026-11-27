@@ -1,0 +1,36 @@
+[package]
+name = "dearrow"
+version = "0.1.0"
+edition = "2024"
+description = "YouTube embeds show the titles and thumbnails DeArrow's community chose instead of the uploader's."
+license = "GPL-3.0-or-later"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[package.metadata.rekindle]
+id = "dev.rekindle.dearrow"
+name = "DeArrow"
+capabilities = ["read-messages", "intercept-http", "network"]
+network = ["sponsor.ajay.app"]
+
+[[package.metadata.rekindle.settings]]
+key = "titles"
+type = "toggle"
+label = "Replace titles"
+default = true
+
+[[package.metadata.rekindle.settings]]
+key = "thumbnails"
+type = "toggle"
+label = "Replace thumbnails"
+default = true
+
+[dependencies]
+rekindle-sdk = { path = "../../../crates/sdk" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[lints]
+workspace = true

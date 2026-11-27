@@ -1,0 +1,31 @@
+[package]
+name = "global-badges"
+version = "0.1.0"
+edition = "2024"
+description = "Profiles show the badges other client mods give their users, from Equicord's badge API."
+license = "GPL-3.0-or-later"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[package.metadata.rekindle]
+id = "dev.rekindle.global-badges"
+name = "Global Badges"
+capabilities = ["read-users", "intercept-http", "network"]
+network = ["badges.equicord.org"]
+
+[[package.metadata.rekindle.settings]]
+key = "badgevault"
+type = "toggle"
+label = "BadgeVault badges"
+description = "Show the badges anyone can make for themselves on BadgeVault."
+default = false
+
+[dependencies]
+rekindle-sdk = { path = "../../../crates/sdk" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[lints]
+workspace = true

@@ -725,6 +725,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "dearrow"
+version = "0.1.0"
+dependencies = [
+ "rekindle-sdk",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "debugid"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1317,6 +1326,15 @@ dependencies = [
  "skrifa",
  "smallvec",
  "vello_common",
+]
+
+[[package]]
+name = "global-badges"
+version = "0.1.0"
+dependencies = [
+ "rekindle-sdk",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1985,6 +2003,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ee6cda3051665f1fb8d9e08fc35c96d5a244fb1be711a03b71118828afc9a873"
 dependencies = [
  "jni-sys 0.3.1",
+]
+
+[[package]]
+name = "no-profile-themes"
+version = "0.1.0"
+dependencies = [
+ "rekindle-sdk",
+ "serde_json",
 ]
 
 [[package]]
