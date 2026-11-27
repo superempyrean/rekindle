@@ -52,6 +52,11 @@ const ADOPT_ANCHOR: &[u8] = b"gateway connect adopted the early socket";
 const START_SEND_PANIC: &[u8] = b"assertion failed: this.state.is_none()";
 /// The event every build handles, which seeds the registry walk.
 const SEED: &[u8] = b"MESSAGE_CREATE";
+/// The dispatches the desktop crate handles itself, in a slice of its own
+/// outside the registry: libdiscord's own table holds `READY`, but the
+/// client never calls its handler, and `READY_SUPPLEMENTAL`, which follows
+/// every `READY`, is the first dispatch of a new session that it does call.
+const SESSION: [&[u8]; 2] = [b"READY_SUPPLEMENTAL", b"RESUMED"];
 
 /// The size of `http::HeaderMap`, at the start of the request and of the
 /// response.
@@ -513,7 +518,7 @@ fn method_slots(
         .collect()
 }
 
-/// True if `path` is `…/channels/{id}/typing`, with or without a query.
+/// True if `path` is `â€¦/channels/{id}/typing`, with or without a query.
 #[must_use]
 pub fn is_typing_path(path: &str) -> bool {
     let path = path.split(['?', '#']).next().unwrap_or_default();
@@ -711,6 +716,29 @@ pub fn gateway(image: &Image<'_>) -> Result<Gateway> {
             }
         }
     }
+    for name in SESSION {
+        let strings = image.find(name);
+        for slot in pointers_into(image, &strings)
+            .into_iter()
+            .map(|(s, _)| s)
+            .filter(|&s| image.qword(s + 8) == Some(name.len() as u64))
+        {
+            let Some((name, handler)) = entry(image, slot) else {
+                continue;
+            };
+            let h = by_name.entry(name.clone()).or_insert_with(|| Handler {
+                name: name.clone(),
+                handler,
+                slots: Vec::new(),
+            });
+            if h.handler != handler {
+                bail!("{name} has the handlers {:#x} and {handler:#x}", h.handler);
+            }
+            if !h.slots.contains(&(slot + 16)) {
+                h.slots.push(slot + 16);
+            }
+        }
+    }
     let (start_send, start_send_slots) = sink(image)?;
     Ok(Gateway {
         handlers: by_name.into_values().collect(),
@@ -768,7 +796,18 @@ mod tests {
         let image = Image::parse(&bytes).unwrap();
         let g = gateway(&image).unwrap();
         let rva = |va: u64| va - image.base();
-        assert_eq!(g.handlers.len(), 89);
+        assert_eq!(g.handlers.len(), 91);
+        for (name, want) in [
+            ("READY_SUPPLEMENTAL", (0xf33ffa0, vec![0x15f57e78])),
+            ("RESUMED", (0xf342ec0, vec![0x15f57e90])),
+        ] {
+            let h = g.handlers.iter().find(|h| h.name == name).unwrap();
+            eprintln!(
+                "{name} {:#x} {:#x?}",
+                rva(h.handler),
+                h.slots.iter().map(|&s| rva(s)).collect::<Vec<_>>()
+            );
+        }
         let create = g
             .handlers
             .iter()
@@ -779,7 +818,7 @@ mod tests {
             create.slots.iter().map(|&s| rva(s)).collect::<Vec<_>>(),
             [0x163451c8, 0x1688b618]
         );
-        assert!(g.handlers.iter().all(|h| h.slots.len() == 2));
+        assert!(g.handlers.iter().all(|h| !h.slots.is_empty()));
         assert_eq!(rva(g.start_send), 0xe6981d0);
         assert_eq!(
             g.start_send_slots
