@@ -23,6 +23,7 @@
 //! [`redact`](crate::runtime::redact).
 
 pub mod convert;
+pub mod echo;
 pub mod settings;
 pub mod wire;
 

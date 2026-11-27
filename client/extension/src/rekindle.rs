@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex, mpsc};
 use anyhow::{Context as _, Result, bail};
 use rekindle_plugin_host::api::{Target, UserRef};
 use rekindle_plugin_host::backend::gateway::Dispatch;
+use rekindle_plugin_host::backend::gateway::echo::Echoes;
 use rekindle_plugin_host::home::{Home, InstallState};
 use rekindle_plugin_host::manager::{self, DevPlugin, Effect, Manager, Synced};
 use rekindle_plugin_host::model::{LogLevel, LogRecord, Mods, ToastKind, UiEvent};
@@ -82,6 +83,8 @@ pub struct Rekindle {
     /// Plugins to start once the client is up ([`Rekindle::start_when_ready`]):
     /// whether to load the installed ones, and the dev paths.
     waiting: Option<(bool, Vec<PathBuf>)>,
+    /// Messages the client dispatched twice.
+    echoes: Echoes,
 }
 
 impl Rekindle {
@@ -160,6 +163,7 @@ impl Rekindle {
             announced: BTreeSet::new(),
             check_asked: false,
             waiting: Some((opts.load_installed, opts.dev_paths)),
+            echoes: Echoes::default(),
         };
         if !opts.wait_for_client {
             p.start_plugins();
@@ -744,14 +748,24 @@ impl Rekindle {
     /// processes it. `None`: a plugin dropped it. Otherwise its `d`, with a
     /// message's content as a filter replaced it.
     pub fn gateway_filter(&mut self, t: &str, d: serde_json::Value) -> Option<serde_json::Value> {
+        if let Some(verdict) = self.echoes.repeat(t, &d) {
+            return verdict;
+        }
+        let before = d.clone();
         let dispatch = Dispatch::new(t, d, &self.reader).filter(&mut self.runtime, &self.reader);
         self.check_faults();
-        dispatch.map(|x| x.d)
+        let after = dispatch.map(|x| x.d);
+        self.echoes.filtered(t, &before, after.as_ref());
+        after
     }
 
     /// Deliver the events dispatch `t` caused, once the client has
-    /// processed it. Returns how many there were.
+    /// processed it. Returns how many there were. A message the client
+    /// dispatched before ([`Echoes`]) causes none.
     pub fn gateway_events(&mut self, t: &str, d: serde_json::Value, now_ms: u64) -> usize {
+        if !self.echoes.deliver(t, &d) {
+            return 0;
+        }
         let events = Dispatch::new(t, d, &self.reader).events(&self.reader, now_ms);
         if !events.is_empty() {
             self.runtime.dispatch_events(&events);
