@@ -8,10 +8,9 @@
 //! |---|---|
 //! | `background` | `Option<Fill>` (72): fill tag 0 (`Solid`), colour space 0, `Hsla` at `+8` |
 //! | `border_color`, `text.color` | `Option<Hsla>` (20): `1`, `Hsla` at `+4` |
-//! | `opacity` | `Option<f32>` (8): `1`, `f32` |
-//! | `padding`, `gap`, `size` | `Length`/`DefiniteLength` (8): tag `0` px or `2` fraction, `f32` |
+//! | `opacity`, `flex_grow`, `flex_shrink` | `Option<f32>` (8): `1`, `f32` |
+//! | `padding`, `gap`, `size`, `min_size` | `Length`/`DefiniteLength` (8): tag `0` px or `2` fraction, `f32` |
 //! | `border_widths`, `corner_radii` | `AbsoluteLength` (8): tag `0` px (`Pixels`), `f32` |
-//! | `flex_grow`, `flex_shrink` | `f32` (8) |
 //!
 //! A field the build's `Debug` does not name is never written; the caller
 //! sees which ones were skipped in [`Written`].
@@ -31,7 +30,9 @@ pub struct Written {
     pub padding: bool,
     pub gap: bool,
     pub size: bool,
+    pub min_size: bool,
     pub opacity: bool,
+    pub flex_grow: bool,
     pub flex_shrink: bool,
     pub flex_direction: bool,
     pub skipped: Vec<String>,
@@ -124,21 +125,27 @@ pub fn write_style(offsets: &StyleOffsets, buffer: &mut [u8], style: &GpuiStyle)
             written.skipped.push("size".into());
         }
     }
-    if let Some(opacity) = style.opacity {
-        if let Some(off) = at("opacity", 8) {
-            buffer[off..off + 4].copy_from_slice(&1u32.to_le_bytes());
-            buffer[off + 4..off + 8].copy_from_slice(&opacity.to_le_bytes());
-            written.opacity = true;
+    if let Some(size) = style.min_size {
+        if let Some(off) = at("min_size", 16) {
+            for (i, length) in size.iter().enumerate() {
+                write_length(&mut buffer[off + i * 8..off + i * 8 + 8], *length);
+            }
+            written.min_size = true;
         } else {
-            written.skipped.push("opacity".into());
+            written.skipped.push("min_size".into());
         }
     }
-    if let Some(shrink) = style.flex_shrink {
-        if let Some(off) = at("flex_shrink", 8) {
-            buffer[off..off + 4].copy_from_slice(&shrink.to_le_bytes());
-            written.flex_shrink = true;
+    for (name, value, done) in [
+        ("opacity", style.opacity, &mut written.opacity),
+        ("flex_grow", style.flex_grow, &mut written.flex_grow),
+        ("flex_shrink", style.flex_shrink, &mut written.flex_shrink),
+    ] {
+        let Some(value) = value else { continue };
+        if let Some(off) = at(name, 8) {
+            write_f32_option(&mut buffer[off..off + 8], value);
+            *done = true;
         } else {
-            written.skipped.push("flex_shrink".into());
+            written.skipped.push(name.into());
         }
     }
     if style.flex_direction == GpuiAxis::Column
@@ -172,6 +179,12 @@ fn write_hsla_option(out: &mut [u8], color: Color) {
     out[8..12].copy_from_slice(&s.to_le_bytes());
     out[12..16].copy_from_slice(&l.to_le_bytes());
     out[16..20].copy_from_slice(&(f32::from(color.a) / 255.0).to_le_bytes());
+}
+
+/// `Option<f32>`: tag 1, then the value.
+fn write_f32_option(out: &mut [u8], value: f32) {
+    out[0..4].copy_from_slice(&1u32.to_le_bytes());
+    out[4..8].copy_from_slice(&value.to_le_bytes());
 }
 
 /// `Length` / `DefiniteLength`: tag 0 px, 2 fraction, `u32::MAX` auto.
@@ -239,6 +252,7 @@ mod tests {
             ("min_size", 504),
             ("max_size", 520),
             ("border_color", 592),
+            ("flex_grow", 240),
             ("flex_shrink", 248),
             ("flex_direction", 632),
         ] {
@@ -257,7 +271,9 @@ mod tests {
             padding: Some([GpuiLen::Px(4.0); 4]),
             gap: Some([GpuiLen::Px(6.0); 2]),
             size: Some([GpuiLen::Fraction(1.0), GpuiLen::Auto]),
+            min_size: Some([GpuiLen::Px(0.0), GpuiLen::Auto]),
             opacity: Some(0.5),
+            flex_grow: Some(1.0),
             flex_shrink: Some(0.0),
             flex_direction: GpuiAxis::Column,
             ..GpuiStyle::default()
@@ -306,6 +322,22 @@ mod tests {
         );
         assert_eq!(u32::from_le_bytes(buffer[592..596].try_into().unwrap()), 1);
         assert_eq!(u32::from_le_bytes(buffer[304..308].try_into().unwrap()), 0);
+    }
+
+    #[test]
+    fn flex_factors_are_options() {
+        let mut buffer = vec![0u8; 640];
+        let written = write_style(&offsets(), &mut buffer, &style());
+        assert!(written.flex_grow && written.flex_shrink && written.min_size);
+        assert_eq!(u32::from_le_bytes(buffer[240..244].try_into().unwrap()), 1);
+        assert!((f32::from_le_bytes(buffer[244..248].try_into().unwrap()) - 1.0).abs() < f32::EPSILON);
+        assert_eq!(u32::from_le_bytes(buffer[248..252].try_into().unwrap()), 1);
+        assert!(f32::from_le_bytes(buffer[252..256].try_into().unwrap()).abs() < f32::EPSILON);
+        assert_eq!(u32::from_le_bytes(buffer[504..508].try_into().unwrap()), 0);
+        assert_eq!(
+            u32::from_le_bytes(buffer[512..516].try_into().unwrap()),
+            u32::MAX
+        );
     }
 
     #[test]
