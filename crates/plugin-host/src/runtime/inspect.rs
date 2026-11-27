@@ -3,6 +3,7 @@
 //! process's wasmtime engine, which compiles it.
 
 use std::collections::BTreeSet;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{Context, Result, bail};
 use serde::Serialize;
@@ -63,15 +64,45 @@ impl Inspection {
     }
 }
 
+/// The process's wasmtime engine and the thread that advances its epoch.
+struct Shared {
+    engine: Engine,
+    ticker: std::thread::JoinHandle<()>,
+}
+
+static ENGINE: std::sync::Mutex<Option<Shared>> = std::sync::Mutex::new(None);
+static UNLOADABLE: AtomicBool = AtomicBool::new(false);
+static STOP_TICKER: AtomicBool = AtomicBool::new(false);
+
+/// Build the engine without wasmtime's process-wide trap handler and
+/// without its compiler's thread pool, whose threads never end, so that the
+/// library it is linked into can be unloaded. Out-of-bounds accesses and
+/// stack overflows are then checked in the compiled code, and a component
+/// compiles on one thread. It applies to an engine built after the call.
+pub fn unloadable() {
+    UNLOADABLE.store(true, Ordering::Relaxed);
+}
+
+/// Stop the epoch thread and drop the process's engine. A runtime still
+/// holding the engine keeps it alive, and runs without its epoch advancing.
+/// The next [`engine`] builds a new one.
+pub fn shutdown_engine() {
+    let Some(shared) = ENGINE.lock().unwrap().take() else {
+        return;
+    };
+    STOP_TICKER.store(true, Ordering::Relaxed);
+    let _ = shared.ticker.join();
+    STOP_TICKER.store(false, Ordering::Relaxed);
+}
+
 /// The process's wasmtime engine, shared by every runtime: a compiled
 /// component belongs to the engine that compiled it, so one engine lets any
 /// runtime use what another compiled. Fails if the engine can't be built or
 /// the thread that advances its epoch can't start.
 pub fn engine() -> Result<Engine> {
-    static ENGINE: std::sync::Mutex<Option<Engine>> = std::sync::Mutex::new(None);
     let mut slot = ENGINE.lock().unwrap();
-    if let Some(e) = &*slot {
-        return Ok(e.clone());
+    if let Some(s) = &*slot {
+        return Ok(s.engine.clone());
     }
     let mut config = wasmtime::Config::new();
     config.wasm_component_model(true);
@@ -79,6 +110,12 @@ pub fn engine() -> Result<Engine> {
     // Running wasm checks the engine's epoch, which a thread advances every
     // EPOCH_TICK, so a call's wall-clock limit is enforced to about a tick.
     config.epoch_interruption(true);
+    // Without the trap handler and the compiler's thread pool, nothing of
+    // the engine's outlives it.
+    if UNLOADABLE.load(Ordering::Relaxed) {
+        config.signals_based_traps(false);
+        config.parallel_compilation(false);
+    }
     // Android and iOS run plugins on Pulley, wasmtime's interpreter. Its
     // code is bytecode in data pages, so the app never maps memory
     // executable, which SELinux may refuse an app and iOS refuses any app
@@ -101,16 +138,19 @@ pub fn engine() -> Result<Engine> {
     }
     let engine = Engine::new(&config)?;
     let ticker = engine.clone();
-    std::thread::Builder::new()
+    let ticker = std::thread::Builder::new()
         .name("rekindle-epoch".into())
         .spawn(move || {
-            loop {
+            while !STOP_TICKER.load(Ordering::Relaxed) {
                 std::thread::sleep(EPOCH_TICK);
                 ticker.increment_epoch();
             }
         })
         .context("starting the epoch thread")?;
-    *slot = Some(engine.clone());
+    *slot = Some(Shared {
+        engine: engine.clone(),
+        ticker,
+    });
     Ok(engine)
 }
 

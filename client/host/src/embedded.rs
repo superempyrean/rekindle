@@ -21,12 +21,17 @@
 //!
 //! A tweak named in `Options::tweaks` is one the platform carries out
 //! itself. Its hooks read the value with [`tweaks::on`].
+//!
+//! [`stop`] ends the runtime: its thread returns, the plugins are dropped
+//! and the process's wasmtime engine with them. A platform that unloads the
+//! library holding the runtime calls [`unloadable`] before [`start`], and
+//! [`stop`] before the library goes.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 pub use rekindle_extension::LiveSelection;
@@ -106,6 +111,8 @@ pub struct ChatBarButton {
 static SNAPSHOT: Mutex<Option<Snapshot>> = Mutex::new(None);
 static MENU: Mutex<Vec<Widget>> = Mutex::new(Vec::new());
 static GENERATION: AtomicU64 = AtomicU64::new(0);
+static STOP: AtomicBool = AtomicBool::new(false);
+static THREAD: Mutex<Option<std::thread::JoinHandle<()>>> = Mutex::new(None);
 
 /// The snapshot the runtime published last, or `None` before it is up.
 pub fn snapshot() -> Option<Snapshot> {
@@ -144,15 +151,53 @@ pub fn read_palette(path: &Path) -> Vec<(String, Vec<(String, u32)>)> {
 /// Start the runtime's thread. False if the thread didn't start; whether
 /// the runtime came up is logged.
 pub fn start(options: Options) -> bool {
-    std::thread::Builder::new()
+    STOP.store(false, Ordering::Relaxed);
+    let thread = std::thread::Builder::new()
         .name("rekindle-runtime".into())
         .spawn(move || {
             let log = options.log;
             if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(&options))).is_err() {
                 log("runtime: panicked");
             }
-        })
-        .is_ok()
+        });
+    match thread {
+        Ok(t) => {
+            *THREAD
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(t);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+/// Build the wasmtime engine without its process-wide trap handler, so the
+/// library holding the runtime can be unloaded once [`stop`] returns. Call
+/// it before [`start`].
+pub fn unloadable() {
+    rekindle_plugin_host::runtime::unloadable();
+}
+
+/// End the runtime started last: its thread finishes the tick it is in and
+/// returns, its plugins are dropped, and so is the process's wasmtime
+/// engine. The snapshot and the menu are cleared.
+pub fn stop() {
+    STOP.store(true, Ordering::Relaxed);
+    let thread = THREAD
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .take();
+    if let Some(t) = thread {
+        let _ = t.join();
+    }
+    rekindle_plugin_host::runtime::shutdown_engine();
+    *SNAPSHOT
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+    MENU.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clear();
+    GENERATION.fetch_add(1, Ordering::Release);
 }
 
 fn run(o: &Options) {
@@ -177,7 +222,7 @@ fn run(o: &Options) {
     let mut not_loaded = Vec::new();
     // What the menu was last read for.
     let mut menu_for = None;
-    loop {
+    while !STOP.load(Ordering::Relaxed) {
         driver.tick();
         let (records, next) = driver.rekindle().logs_since(logs);
         logs = next;
@@ -435,6 +480,11 @@ mod tests {
         let written: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&report).unwrap()).unwrap();
         assert_eq!(written["plugins"], serde_json::json!([]));
+        let before = generation();
+        stop();
+        assert!(snapshot().is_none());
+        assert!(menu().is_empty());
+        assert!(generation() > before);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

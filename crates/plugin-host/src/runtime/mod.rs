@@ -63,7 +63,7 @@ pub use host_state::redact;
 pub use http::{CALLS_PER_MINUTE, MAX_BODY, RequestOutcome, RestRequest, route_kind};
 pub use inspect::{
     HOOKS, Inspection, engine, hook_capability, inspect, inspect_artifact, inspect_artifact_cached,
-    inspect_cached,
+    inspect_cached, shutdown_engine, unloadable,
 };
 pub use isolate::Rendered;
 pub use load::LoadTimes;
