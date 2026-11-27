@@ -44,6 +44,7 @@ use rekindle_plugin_host::model::{
     SLOT_CHANNEL_MENU, SLOT_CHAT_BAR_BUTTON, SLOT_EXPRESSION_PICKER_TAB, SLOT_GUILD_MENU,
     SLOT_MESSAGE_MENU, SLOT_USER_MENU,
 };
+use rekindle_ui_hook::panel::rows as model;
 use rekindle_ui_hook::{Click, UiInput, Widget};
 use rekindle_wire_inject::{Handler, Mount, PluginPress, PluginText, Recolor, Write};
 
@@ -1001,31 +1002,33 @@ fn publish(driver: &mut Driver, surfaces: &mut Surfaces) -> State {
             .find(|p| p.plugin == manager::OWNER)
             .map(|p| p.widgets.clone())
             .unwrap_or_default();
-        let menu = rows::section(look, &rows::menu_items(&surfaces.menu));
-        // Any view but the grid is a page, and a plugin's page shows the
-        // plugin's own panels under the Manager's rows.
-        let page = (!rows::is_grid(&widgets)).then(|| {
-            let shown = driver.rekindle().detail_of();
-            // A tab's body in the emoji picker isn't one of the plugin's
-            // panels on its page.
-            let tabs = driver.picker_tabs();
-            let own: Vec<_> = panels
-                .iter()
-                .filter(|p| shown.as_deref() == Some(p.plugin.as_str()))
-                .filter(|p| !tabs.iter().any(|t| t.plugin == p.plugin && t.id == p.id))
-                .cloned()
-                .collect();
-            let mut page = rows::page(look, &widgets, &own, surfaces.block);
-            // A page of another shape goes under the other block of ids,
-            // so the old one is taken out before the new one is made.
-            if let (Some(old), Some(new)) = (&surfaces.page, page.mounts.first())
-                && !old.same_shape(new)
-            {
-                surfaces.block ^= 1;
-                page = rows::page(look, &widgets, &own, surfaces.block);
+        let menu = rows::section(look, &model::menu_items(&surfaces.menu));
+        let shown = driver.rekindle().detail_of();
+        // A tab's body in the emoji picker isn't one of the plugin's
+        // panels on its page.
+        let tabs = driver.picker_tabs();
+        let own: Vec<_> = panels
+            .iter()
+            .filter(|p| shown.as_deref() == Some(p.plugin.as_str()))
+            .filter(|p| !tabs.iter().any(|t| t.plugin == p.plugin && t.id == p.id))
+            .cloned()
+            .collect();
+        // The menu stays on the settings screen, and a page goes over it.
+        let page = match model::shown(&surfaces.menu, &widgets, &own) {
+            model::Shown::Menu(_) => None,
+            model::Shown::Page(p) => {
+                let mut page = rows::page(look, &p, surfaces.block);
+                // A page of another shape goes under the other block of ids,
+                // so the old one is taken out before the new one is made.
+                if let (Some(old), Some(new)) = (&surfaces.page, page.mounts.first())
+                    && !old.same_shape(new)
+                {
+                    surfaces.block ^= 1;
+                    page = rows::page(look, &p, surfaces.block);
+                }
+                Some(page)
             }
-            page
-        });
+        };
         surfaces.page = page.as_ref().and_then(|p| p.mounts.first().cloned());
         let modal = rekindle_ui_hook::modal_plugin().zip(rekindle_ui_hook::modal_panel());
         back = match (&modal, &surfaces.page) {

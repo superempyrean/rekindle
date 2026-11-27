@@ -8,18 +8,18 @@
 //! every cell a node gets beyond its text, its accessibility cells and its
 //! state is in the look.
 //!
-//! The settings screen gets the Manager's menu ([`menu_items`]): a row for
-//! the plugins, one for the themes, and the developer-mode switch. Every
-//! other view of the Manager's panel is a page over the screen ([`page`]): a
-//! bar with a back button and the page's title, and the page's rows in a
-//! scroll under it. A plugin's page also shows the plugin's own panels. A
-//! press on a row comes back as the [`Click`](rekindle_ui_hook::Click) the
-//! panel's own control reports, from [`Rendered::presses`].
+//! The rows are `rekindle_ui_hook::panel::rows`. The settings screen gets
+//! the Manager's menu ([`section`]), and every other view of the Manager's
+//! panel is a page over the screen ([`page`]): a bar with a back button and
+//! the page's title, and the page's rows in a scroll under it. A press on a
+//! row comes back as the [`Click`](rekindle_ui_hook::Click) the panel's own
+//! control reports, from [`Rendered::presses`].
 
 use std::collections::BTreeMap;
 
 use rekindle_plugin_host::manager;
-use rekindle_ui_hook::{CardItem, LiveToast, PanelItem, ToastStyle, UiInput, Widget};
+use rekindle_ui_hook::panel::rows::{End, Item, Page, widget_items};
+use rekindle_ui_hook::{LiveToast, PanelItem, ToastStyle, UiInput, Widget};
 use rekindle_wire::a11y::{Role, ids as a11y};
 use rekindle_wire::{ElementKind, NodeId, PropId, Value};
 use rekindle_wire_inject::{Cell, Handler, Mount, MountNode, RESERVED, Selector, TEXT};
@@ -167,58 +167,6 @@ impl Look {
     }
 }
 
-/// One line of a panel, as rows show it.
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) enum Item {
-    /// The start of a group under a header.
-    Header(String),
-    /// The start of a group without one.
-    Break,
-    /// A line of text in a row of its own.
-    Text(String),
-    Row(Row),
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct Row {
-    /// The row's id among its panel's rows, and its handler's element.
-    pub(crate) key: String,
-    pub(crate) title: String,
-    pub(crate) subtitle: Option<String>,
-    pub(crate) end: End,
-    /// What a press on the row reports: the panel's element and its value.
-    /// `None` for a row a press does nothing on.
-    pub(crate) press: Option<(String, UiInput)>,
-    /// A switch a press on does something of its own: the track's key and
-    /// what the press reports. A press on the rest of the row is `press`.
-    pub(crate) track: Option<(String, (String, UiInput))>,
-    /// A text field under the title: the panel's element, its text and
-    /// its placeholder. An edit reports `UiInput::Text` for the element.
-    pub(crate) input: Option<Box<(String, String, String)>>,
-}
-
-impl Row {
-    fn new(key: &str, title: &str, end: End, press: Option<(String, UiInput)>) -> Row {
-        Row {
-            key: key.into(),
-            title: title.into(),
-            subtitle: None,
-            end,
-            press,
-            track: None,
-            input: None,
-        }
-    }
-}
-
-/// What a row ends in.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum End {
-    Nothing,
-    Chevron,
-    Switch(bool),
-}
-
 /// A mount, and what a press on each of its rows reports: by the handler's
 /// surface and element, the panel's element and its value.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -248,210 +196,6 @@ impl Rendered {
     }
 }
 
-/// The rows of rekindle's menu on the settings screen, from the widgets of
-/// `Manager::menu`.
-pub(crate) fn menu_items(menu: &[Widget]) -> Vec<Item> {
-    let mut items = vec![Item::Header("rekindle".into())];
-    items.extend(widget_items(menu));
-    items
-}
-
-/// Whether the Manager's panel shows its grid, which the menu stands in
-/// for. Any other view is a page.
-pub(crate) fn is_grid(widgets: &[Widget]) -> bool {
-    widgets.iter().any(|w| matches!(w, Widget::Tabs { .. }))
-}
-
-/// A card as a row. One of the Manager's plugin cards (`open:<plugin>`)
-/// opens the plugin's page, and ends in a switch of its own when the card
-/// can turn the plugin on or off. Any other card opens what its id says.
-fn card_row(c: &CardItem) -> Item {
-    let subtitle = [c.meta.as_str(), c.state.as_str()]
-        .into_iter()
-        .filter(|s| !s.is_empty())
-        .collect::<Vec<_>>()
-        .join(" · ");
-    let mut row = Row::new(
-        &c.id,
-        &c.title,
-        End::Chevron,
-        Some((c.id.clone(), UiInput::Clicked)),
-    );
-    row.subtitle = (!subtitle.is_empty()).then_some(subtitle);
-    let on = match c.action.as_ref().and_then(|(id, _)| id.split_once(':')) {
-        Some(("disable", _)) => Some(true),
-        Some(("enable", _)) => Some(false),
-        _ => None,
-    };
-    if let (Some(on), Some((action, _)), Some(plugin)) = (on, &c.action, c.id.strip_prefix("open:"))
-    {
-        // The track keeps the key `on:<plugin>` as it flips, so its node
-        // stays, while its press is the card's own action.
-        row.end = End::Switch(on);
-        row.track = Some((format!("on:{plugin}"), (action.clone(), UiInput::Clicked)));
-    }
-    Item::Row(row)
-}
-
-/// A panel's widgets as rows. A select is a row that steps to the next
-/// option on a press. Text fields, sliders and colours show their value
-/// and can't be changed here yet.
-pub(crate) fn widget_items(widgets: &[Widget]) -> Vec<Item> {
-    let mut items = Vec::new();
-    for w in widgets {
-        match w {
-            Widget::Heading(t) => items.push(Item::Header(t.clone())),
-            Widget::Text(t) => items.push(Item::Text(t.clone())),
-            Widget::Separator => items.push(Item::Break),
-            Widget::Toggle { id, label, value } => items.push(Item::Row(Row::new(
-                id,
-                label,
-                End::Switch(*value),
-                Some((id.clone(), UiInput::Toggled(!value))),
-            ))),
-            Widget::Button { id, label } => items.push(Item::Row(Row::new(
-                id,
-                label,
-                End::Chevron,
-                Some((id.clone(), UiInput::Clicked)),
-            ))),
-            Widget::Header {
-                back,
-                title,
-                meta,
-                toggle,
-                action,
-            } => {
-                let mut head = Row::new(
-                    toggle.as_ref().map_or("header", |(id, _, _)| id),
-                    title,
-                    toggle
-                        .as_ref()
-                        .map_or(End::Nothing, |(_, _, on)| End::Switch(*on)),
-                    toggle
-                        .as_ref()
-                        .map(|(id, _, on)| (id.clone(), UiInput::Toggled(!on))),
-                );
-                head.subtitle = (!meta.is_empty()).then(|| meta.clone());
-                items.push(Item::Row(head));
-                if let Some((id, label)) = action {
-                    items.push(Item::Row(Row::new(
-                        id,
-                        label,
-                        End::Chevron,
-                        Some((id.clone(), UiInput::Clicked)),
-                    )));
-                }
-                items.push(Item::Row(Row::new(
-                    back,
-                    "Back",
-                    End::Chevron,
-                    Some((back.clone(), UiInput::Clicked)),
-                )));
-            }
-            Widget::Cards(cards) => items.extend(cards.iter().map(card_row)),
-            Widget::Select {
-                id,
-                label,
-                options,
-                selected,
-            } => {
-                let mut row = Row::new(
-                    id,
-                    label,
-                    End::Chevron,
-                    (!options.is_empty()).then(|| {
-                        let next = (*selected as usize + 1) % options.len();
-                        (id.clone(), UiInput::Selected(next as u32))
-                    }),
-                );
-                row.subtitle = options.get(*selected as usize).cloned();
-                items.push(Item::Row(row));
-            }
-            Widget::TextInput {
-                id,
-                label,
-                value,
-                placeholder,
-            } => {
-                let mut row = Row::new(id, label, End::Nothing, None);
-                row.input = Some(Box::new((id.clone(), value.clone(), placeholder.clone())));
-                items.push(Item::Row(row));
-            }
-            Widget::Slider {
-                id, label, value, ..
-            } => {
-                let mut row = Row::new(id, label, End::Nothing, None);
-                row.subtitle = Some(format!("{value}"));
-                items.push(Item::Row(row));
-            }
-            Widget::Color { id, label, hex } => {
-                let mut row = Row::new(id, label, End::Nothing, None);
-                row.subtitle = Some(hex.clone());
-                items.push(Item::Row(row));
-            }
-            Widget::Tabs { .. } => {}
-        }
-    }
-    items
-}
-
-/// A view of the Manager's panel as a page: its title, the element its back
-/// button reports, and its rows. The panel's header gives the title and the
-/// back; its switch and line stay as the page's first row. A view without a
-/// header takes its title from its first heading, and goes back by its
-/// Cancel button if it has one.
-pub(crate) fn page_items(widgets: &[Widget]) -> (String, String, Vec<Item>) {
-    let mut title = None;
-    let mut back = None;
-    let mut rest = Vec::new();
-    for w in widgets {
-        match w {
-            Widget::Header {
-                back: b,
-                title: t,
-                meta,
-                toggle,
-                action,
-            } if title.is_none() => {
-                title = Some(t.clone());
-                back = Some(b.clone());
-                match toggle {
-                    Some((id, _, on)) => {
-                        let mut row = Row::new(
-                            id,
-                            t,
-                            End::Switch(*on),
-                            Some((id.clone(), UiInput::Toggled(!on))),
-                        );
-                        row.subtitle = (!meta.is_empty()).then(|| meta.clone());
-                        rest.push(Item::Row(row));
-                    }
-                    None if !meta.is_empty() => rest.push(Item::Header(meta.clone())),
-                    None => {}
-                }
-                if let Some((id, label)) = action {
-                    rest.push(Item::Row(Row::new(
-                        id,
-                        label,
-                        End::Chevron,
-                        Some((id.clone(), UiInput::Clicked)),
-                    )));
-                }
-            }
-            Widget::Heading(t) if title.is_none() => title = Some(t.clone()),
-            w => rest.extend(widget_items(std::slice::from_ref(w))),
-        }
-    }
-    let back = back.unwrap_or_else(|| {
-        let cancel = widgets
-            .iter()
-            .any(|w| matches!(w, Widget::Button { id, .. } if id == "cancel"));
-        if cancel { "cancel" } else { "back" }.to_string()
-    });
-    (title.unwrap_or_else(|| "rekindle".into()), back, rest)
-}
-
 /// rekindle's menu as a mount on the settings screen, from its rows.
 pub(crate) fn section(look: &Look, items: &[Item]) -> Rendered {
     let mut b = Builder::new(look, SECTION_IDS);
@@ -478,37 +222,27 @@ fn owner_press((element, value): (String, UiInput)) -> Press {
     }
 }
 
-/// A view of the Manager's panel as a page over the screen: a bar with a
-/// back button and the title, then the page's rows, then `panels`, the
-/// panels of the plugin whose page it is. `block` (0 or 1) picks the page's
-/// node ids. Nothing without a place for pages in the look.
-pub(crate) fn page(
-    look: &Look,
-    widgets: &[Widget],
-    panels: &[PanelItem],
-    block: usize,
-) -> Rendered {
+/// A page over the screen: a bar with a back button and the title, then the
+/// page's rows, then the panels of the plugin whose page it is. `block` (0
+/// or 1) picks the page's node ids. Nothing without a place for pages in
+/// the look.
+pub(crate) fn page(look: &Look, page: &Page, block: usize) -> Rendered {
     let Some(under) = look.page_under.as_ref().or(look.modal_under.as_ref()) else {
         return Rendered::default();
     };
-    let (title, back, items) = page_items(widgets);
+    let Page {
+        title,
+        back,
+        items,
+        panels,
+    } = page;
     let mut b = Builder::new(look, PAGE_IDS[block % 2]);
     b.fallback_icon = false;
-    let mut sections = b.content(&items, manager::OWNER, PAGE, &owner_press);
+    let mut sections = b.content(items, manager::OWNER, PAGE, &owner_press);
     for p in panels {
-        let mut items = vec![Item::Header(p.title.clone())];
-        // A panel's element ids are its own, so its rows' keys say which
-        // panel they are in.
-        items.extend(widget_items(&p.widgets).into_iter().map(|i| match i {
-            Item::Row(mut r) => {
-                r.key = format!("{}/{}", p.id, r.key);
-                Item::Row(r)
-            }
-            other => other,
-        }));
-        let (plugin, panel) = (p.plugin.clone(), p.id.clone());
+        let (plugin, panel) = (p.plugin.clone(), p.panel.clone());
         sections.extend(
-            b.content(&items, &p.plugin, PAGE_PANEL, &|(element, value)| {
+            b.content(&p.items, &p.plugin, PAGE_PANEL, &|(element, value)| {
                 Press::Ui {
                     plugin: plugin.clone(),
                     panel: panel.clone(),
@@ -541,9 +275,9 @@ pub(crate) fn page(
     let back_button = b.node(ElementKind::VIEW, back_cells, vec![icon], Some(page_back()));
     b.presses.insert(
         (PAGE.into(), PAGE_BACK.into()),
-        owner_press((back, UiInput::Clicked)),
+        owner_press((back.clone(), UiInput::Clicked)),
     );
-    let title = b.text(&look.page_title.clone(), &title);
+    let title = b.text(&look.page_title.clone(), title);
     let bar = b.node(
         ElementKind::VIEW,
         look.page_bar.clone(),
@@ -1027,6 +761,8 @@ pub(crate) fn test_look() -> Look {
 
 #[cfg(test)]
 mod tests {
+    use rekindle_ui_hook::CardItem;
+    use rekindle_ui_hook::panel::rows::{menu_items, page as page_of};
     use rekindle_wire_inject::Work;
 
     use super::*;
@@ -1108,16 +844,6 @@ mod tests {
         ]
     }
 
-    fn row(items: &[Item], key: &str) -> Row {
-        items
-            .iter()
-            .find_map(|i| match i {
-                Item::Row(r) if r.key == key => Some(r.clone()),
-                _ => None,
-            })
-            .unwrap()
-    }
-
     fn node<'m>(r: &'m Rendered, id: &str) -> &'m MountNode {
         r.mounts
             .iter()
@@ -1146,21 +872,6 @@ mod tests {
     #[test]
     fn the_menu_is_a_row_per_list_and_the_developer_mode_switch() {
         let items = menu_items(&menu());
-        assert_eq!(items[0], Item::Header("rekindle".into()));
-        let plugins = row(&items, "list:plugins");
-        assert_eq!(plugins.end, End::Chevron);
-        assert_eq!(
-            plugins.press,
-            Some(("list:plugins".into(), UiInput::Clicked))
-        );
-        assert_eq!(plugins.subtitle.as_deref(), Some("3 installed, 1 on"));
-        let dev = row(&items, "developer-mode");
-        assert_eq!(dev.end, End::Switch(false));
-        assert_eq!(
-            dev.press,
-            Some(("developer-mode".into(), UiInput::Toggled(true)))
-        );
-
         let look = look();
         let r = section(&look, &items);
         Work {
@@ -1187,28 +898,8 @@ mod tests {
 
     #[test]
     fn a_list_is_a_page_whose_rows_open_and_whose_switches_flip() {
-        assert!(!is_grid(&list()));
-        let (title, back, items) = page_items(&list());
-        assert_eq!((title.as_str(), back.as_str()), ("Plugins", "back"));
-        assert_eq!(items[0], Item::Header("3 installed, 1 on".into()));
-        // The row opens the plugin's page, and its switch is the card's
-        // own action.
-        let a = row(&items, "open:dev.a");
-        assert_eq!(a.press, Some(("open:dev.a".into(), UiInput::Clicked)));
-        assert_eq!(a.end, End::Switch(true));
-        assert_eq!(
-            a.track,
-            Some((
-                "on:dev.a".into(),
-                ("disable:dev.a".into(), UiInput::Clicked)
-            ))
-        );
-        // One that can't be turned on here only opens.
-        let c = row(&items, "open:dev.c");
-        assert_eq!((c.end, c.track), (End::Chevron, None));
-
         let look = look();
-        let r = page(&look, &list(), &[], 0);
+        let r = page(&look, &page_of(&list(), &[]), 0);
         Work {
             mounts: r.mounts.clone(),
             ..Work::default()
@@ -1221,7 +912,7 @@ mod tests {
         // leaves modals where they were.
         let mut sheet = look.clone();
         sheet.page_under = Some(Selector::cell(a11y::ID, "settings-phone"));
-        let r2 = page(&sheet, &list(), &[], 0);
+        let r2 = page(&sheet, &page_of(&list(), &[]), 0);
         assert_eq!(r2.mounts[0].under, sheet.page_under.clone().unwrap());
         let track = node(&r, "rekindle.rekindle.on:dev.a");
         assert_eq!(
@@ -1259,7 +950,7 @@ mod tests {
         assert!(!uris.contains(&&Value::Str("res://plugin".into())));
 
         // The other block, for a page of another shape.
-        let other = page(&look, &list(), &[], 1);
+        let other = page(&look, &page_of(&list(), &[]), 1);
         assert!(other.mounts[0].root >= PAGE_IDS[1]);
 
         // A flipped switch keeps every node and changes only cells.
@@ -1268,7 +959,7 @@ mod tests {
             c[0].action = Some(("enable:dev.a".into(), "Turn on".into()));
             c[0].state = "Off".into();
         }
-        let again = page(&look, &flipped, &[], 0);
+        let again = page(&look, &page_of(&flipped, &[]), 0);
         assert!(again.mounts[0].same_shape(&r.mounts[0]));
         assert_eq!(
             cell(node(&again, "rekindle.rekindle.open:dev.a"), a11y::CHECKED),
@@ -1277,7 +968,7 @@ mod tests {
     }
 
     #[test]
-    fn a_plugins_page_has_its_switch_and_its_own_panels() {
+    fn a_plugins_own_panels_report_to_the_plugin() {
         let detail = vec![
             Widget::Header {
                 back: "back".into(),
@@ -1306,19 +997,7 @@ mod tests {
                 },
             ],
         };
-        let (title, back, items) = page_items(&detail);
-        assert_eq!((title.as_str(), back.as_str()), ("A 0.1.0", "back"));
-        assert_eq!(
-            row(&items, "on:dev.a").press,
-            Some(("on:dev.a".into(), UiInput::Toggled(false)))
-        );
-        assert!(
-            items
-                .iter()
-                .all(|i| !matches!(i, Item::Row(r) if r.title == "Back"))
-        );
-
-        let r = page(&look(), &detail, &[panel], 0);
+        let r = page(&look(), &page_of(&detail, &[panel]), 0);
         Work {
             mounts: r.mounts.clone(),
             ..Work::default()
@@ -1364,7 +1043,11 @@ mod tests {
                 placeholder: "Who".into(),
             }],
         };
-        let r = page(&look(), &[Widget::Heading("A".into())], &[panel], 0);
+        let r = page(
+            &look(),
+            &page_of(&[Widget::Heading("A".into())], &[panel]),
+            0,
+        );
         Work {
             mounts: r.mounts.clone(),
             ..Work::default()
@@ -1395,7 +1078,7 @@ mod tests {
     }
 
     #[test]
-    fn a_page_without_a_header_takes_its_heading_and_goes_back_by_cancel() {
+    fn without_a_place_for_pages_there_is_no_page() {
         let page_widgets = vec![
             Widget::Heading("Turn on developer mode?".into()),
             Widget::Text("Plugins from outside rekindle can do anything.".into()),
@@ -1404,14 +1087,12 @@ mod tests {
                 label: "Cancel".into(),
             },
         ];
-        let (title, back, items) = page_items(&page_widgets);
-        assert_eq!(title, "Turn on developer mode?");
-        assert_eq!(back, "cancel");
-        assert!(matches!(&items[0], Item::Text(_)));
-        // No place for pages, no page.
         let mut no = look();
         no.modal_under = None;
-        assert_eq!(page(&no, &page_widgets, &[], 0), Rendered::default());
+        assert_eq!(
+            page(&no, &page_of(&page_widgets, &[]), 0),
+            Rendered::default()
+        );
     }
 
     #[test]

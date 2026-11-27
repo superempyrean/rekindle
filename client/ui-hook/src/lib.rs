@@ -32,7 +32,7 @@ mod insert;
 mod inspect_link;
 pub mod inspector;
 mod overlay;
-mod panel;
+pub mod panel;
 mod picker;
 mod provenance;
 pub mod registry;

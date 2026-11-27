@@ -10,7 +10,8 @@
 //! loaded and the installed ones that aren't, their chat-bar buttons, the toasts up, their panels, the theme
 //! overrides and their slash commands. [`snapshot`] returns the latest one,
 //! and `Options::report` names a file it is written to as JSON whenever it
-//! changes, and [`generation`] counts the snapshots published. The
+//! changes. [`menu`] returns the Manager's menu, and [`generation`] counts
+//! the times either changed. The
 //! platform's hooks draw from it, and hand a click on one of them back with
 //! `rekindle_ui_hook::queue_click`, which the next tick runs.
 //!
@@ -32,6 +33,8 @@ use rekindle_extension::theme::ThemeProfile;
 pub use rekindle_extension::LiveSelection;
 pub use rekindle_extension::tweaks;
 use rekindle_extension::{Driver, ExtArgs, RecoveredProfile};
+use rekindle_plugin_host::manager;
+use rekindle_ui_hook::Widget;
 use serde::Serialize;
 
 /// How long the runtime sleeps between ticks.
@@ -101,6 +104,7 @@ pub struct ChatBarButton {
 }
 
 static SNAPSHOT: Mutex<Option<Snapshot>> = Mutex::new(None);
+static MENU: Mutex<Vec<Widget>> = Mutex::new(Vec::new());
 static GENERATION: AtomicU64 = AtomicU64::new(0);
 
 /// The snapshot the runtime published last, or `None` before it is up.
@@ -111,9 +115,23 @@ pub fn snapshot() -> Option<Snapshot> {
         .clone()
 }
 
-/// How many snapshots the runtime has published, 0 before the first. A
-/// platform that polls compares it with the last one it drew from and
-/// calls [`snapshot`] only when it has moved.
+/// The Manager's menu (`Manager::menu`): a card for each list, with how
+/// many of its plugins are installed and on, and the developer-mode switch.
+/// It is read when the runtime starts, and again when the Manager's panel,
+/// developer mode or the installed plugins change, since reading it reads
+/// every installed plugin. Empty before the runtime is up.
+///
+/// A platform that draws rekindle's settings as rows passes it to
+/// `rekindle_ui_hook::panel::rows::shown` with the Manager's panel.
+pub fn menu() -> Vec<Widget> {
+    MENU.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone()
+}
+
+/// How many times the runtime has published a snapshot or a new menu, 0
+/// before the first. A platform that polls compares it with the last one
+/// it drew from and calls [`snapshot`] and [`menu`] only when it has moved.
 pub fn generation() -> u64 {
     GENERATION.load(Ordering::Acquire)
 }
@@ -157,6 +175,8 @@ fn run(o: &Options) {
     // only when the loaded set changes.
     let mut loaded_ids = None;
     let mut not_loaded = Vec::new();
+    // What the menu was last read for.
+    let mut menu_for = None;
     loop {
         driver.tick();
         let (records, next) = driver.rekindle().logs_since(logs);
@@ -181,6 +201,21 @@ fn run(o: &Options) {
             loaded_ids = Some(ids);
         }
         now.plugins.extend(not_loaded.iter().cloned());
+        let manager_panel = rekindle_ui_hook::panels()
+            .into_iter()
+            .find(|p| p.plugin == manager::OWNER)
+            .map(|p| p.widgets);
+        let menu_now = (manager_panel, now.developer_mode, now.plugins.clone());
+        let mut moved = false;
+        if menu_for.as_ref() != Some(&menu_now) {
+            let read = driver.rekindle().menu();
+            let mut menu = MENU
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            moved = *menu != read;
+            *menu = read;
+            menu_for = Some(menu_now);
+        }
         if last.as_ref() != Some(&now) {
             if last.is_none() {
                 (o.log)(&format!(
@@ -202,8 +237,11 @@ fn run(o: &Options) {
             *SNAPSHOT
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(now.clone());
-            GENERATION.fetch_add(1, Ordering::Release);
             last = Some(now);
+            moved = true;
+        }
+        if moved {
+            GENERATION.fetch_add(1, Ordering::Release);
         }
         std::thread::sleep(TICK);
     }
@@ -352,7 +390,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn publishes_a_snapshot_for_an_empty_home() {
+    fn publishes_a_snapshot_and_the_menu_for_an_empty_home() {
         let dir = std::env::temp_dir().join(format!("rekindle-embedded-{}", std::process::id()));
         let report = dir.join("runtime.json");
         assert!(start(Options {
@@ -375,6 +413,25 @@ mod tests {
         assert!(shot.plugins.is_empty());
         assert!(!shot.developer_mode);
         assert!(shot.theme.is_empty());
+        // The menu is read before the first snapshot is published.
+        let lists: Vec<(String, String)> = match menu().first() {
+            Some(Widget::Cards(cards)) => cards
+                .iter()
+                .map(|c| (c.id.clone(), c.meta.clone()))
+                .collect(),
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(
+            lists,
+            [
+                ("list:plugins".to_string(), "0 installed, 0 on".to_string()),
+                ("list:themes".to_string(), "0 installed, 0 on".to_string()),
+            ]
+        );
+        assert!(matches!(
+            menu().get(1),
+            Some(Widget::Toggle { id, value: false, .. }) if id == "developer-mode"
+        ));
         let written: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&report).unwrap()).unwrap();
         assert_eq!(written["plugins"], serde_json::json!([]));

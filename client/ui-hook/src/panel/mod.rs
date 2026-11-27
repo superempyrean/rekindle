@@ -7,6 +7,7 @@
 
 mod color;
 mod field;
+pub mod rows;
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
