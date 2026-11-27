@@ -190,6 +190,61 @@ impl<'a> Image<'a> {
         out
     }
 
+    /// Every `lea r64, [rip + disp]` whose target is one of `targets`, as
+    /// `(lea, target)`, from one pass over the code.
+    #[must_use]
+    pub fn leas_into(&self, targets: &[u64]) -> Vec<(u64, u64)> {
+        const MODRM: [u8; 8] = [0x05, 0x0d, 0x15, 0x1d, 0x25, 0x2d, 0x35, 0x3d];
+        let mut sorted = targets.to_vec();
+        sorted.sort_unstable();
+        sorted.dedup();
+        let mut out = Vec::new();
+        for (start, end) in self.text() {
+            let Some(code) = self.read(start, (end - start) as usize) else {
+                continue;
+            };
+            for at in 0..code.len().saturating_sub(6) {
+                if (code[at] == 0x48 || code[at] == 0x4c)
+                    && code[at + 1] == 0x8d
+                    && MODRM.contains(&code[at + 2])
+                {
+                    let disp = i32::from_le_bytes(code[at + 3..at + 7].try_into().unwrap());
+                    let target = (start + at as u64 + 7).wrapping_add_signed(i64::from(disp));
+                    if sorted.binary_search(&target).is_ok() {
+                        out.push((start + at as u64, target));
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Every direct `call rel32` to one of `targets`, as `(site, target)`,
+    /// from one pass over the code.
+    #[must_use]
+    pub fn calls_into(&self, targets: &[u64]) -> Vec<(u64, u64)> {
+        let mut sorted = targets.to_vec();
+        sorted.sort_unstable();
+        sorted.dedup();
+        let mut out = Vec::new();
+        for (start, end) in self.text() {
+            let Some(code) = self.read(start, (end - start) as usize) else {
+                continue;
+            };
+            for at in 0..code.len().saturating_sub(4) {
+                if code[at] != 0xe8 {
+                    continue;
+                }
+                let rel = i32::from_le_bytes(code[at + 1..at + 5].try_into().unwrap());
+                let target = (start + at as u64 + 5).wrapping_add_signed(i64::from(rel));
+                if sorted.binary_search(&target).is_ok() {
+                    out.push((start + at as u64, target));
+                }
+            }
+        }
+        out
+    }
+
     /// A qword at `va`.
     #[must_use]
     pub fn qword(&self, va: u64) -> Option<u64> {

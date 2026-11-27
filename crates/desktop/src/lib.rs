@@ -16,6 +16,7 @@ pub mod div;
 pub mod image;
 pub mod menu;
 pub mod native;
+pub mod settings;
 pub mod symbols;
 pub mod text;
 pub mod typing;
