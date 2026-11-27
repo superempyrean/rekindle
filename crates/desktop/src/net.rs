@@ -109,6 +109,9 @@ pub struct Transport {
     /// `__rust_alloc(size, align)` and `__rust_dealloc(ptr, size, align)`.
     pub alloc: u64,
     pub dealloc: u64,
+    /// `bytes`' `STATIC_VTABLE`, which `Bytes::from_static` gives a
+    /// `Bytes`: its drop does nothing and its clone copies the pointer.
+    pub static_bytes: u64,
 }
 
 /// One gateway event's handler and the slices' slots that hold it.
@@ -559,6 +562,7 @@ pub fn transport(image: &Image<'_>) -> Result<Transport> {
     poll_slots.sort_unstable();
     let alloc = allocator(image, boxer)?;
     let dealloc = deallocator(image, alloc)?;
+    let static_bytes = static_bytes(image)?;
     Ok(Transport {
         send,
         request,
@@ -567,7 +571,39 @@ pub fn transport(image: &Image<'_>) -> Result<Transport> {
         response,
         alloc,
         dealloc,
+        static_bytes,
     })
+}
+
+/// `bytes`' `STATIC_VTABLE`: five methods whose `is_unique` is `xor eax,
+/// eax; ret`, whose `drop` is a bare `ret`, and whose `clone`, a leaf
+/// without unwind data, writes a vtable with the same five methods into
+/// the `Bytes` it returns. The vtable is a `const`, so the image holds
+/// several copies; the one `clone` writes is returned.
+fn static_bytes(image: &Image<'_>) -> Result<u64> {
+    let code_is = |va: u64, want: &[u8]| image.read(va, want.len()) == Some(want);
+    let methods =
+        |at: u64| -> Option<Vec<u64>> { (0..5).map(|k| image.qword(at + 8 * k)).collect() };
+    let mut found = BTreeSet::new();
+    for (start, end) in image.data() {
+        let mut at = start;
+        while at + 40 <= end {
+            if let Some(w) = methods(at)
+                && code_is(w[3], &[0x31, 0xc0, 0xc3])
+                && code_is(w[4], &[0xc3])
+                && let Some(code) = image.read(w[0], 0x20)
+            {
+                for (_, t) in rip_leas(&decode(code, w[0])) {
+                    if methods(t).as_ref() == Some(&w) {
+                        found.insert(t);
+                    }
+                }
+            }
+            at += 8;
+        }
+    }
+    let found: Vec<u64> = found.into_iter().collect();
+    one_of("bytes' STATIC_VTABLE", &found)
 }
 
 /// A registry entry at `slot`: an upper-case name of 1 to 64 bytes and a
@@ -788,6 +824,7 @@ mod tests {
             }
         );
         assert_eq!((rva(t.alloc), rva(t.dealloc)), (0x456d100, 0x456d150));
+        assert_eq!(rva(t.static_bytes), 0x16cbd6d0);
     }
 
     #[test]
@@ -802,11 +839,8 @@ mod tests {
             ("RESUMED", (0xf342ec0, vec![0x15f57e90])),
         ] {
             let h = g.handlers.iter().find(|h| h.name == name).unwrap();
-            eprintln!(
-                "{name} {:#x} {:#x?}",
-                rva(h.handler),
-                h.slots.iter().map(|&s| rva(s)).collect::<Vec<_>>()
-            );
+            let at: Vec<u64> = h.slots.iter().map(|&s| rva(s)).collect();
+            assert_eq!((rva(h.handler), at), want);
         }
         let create = g
             .handlers
