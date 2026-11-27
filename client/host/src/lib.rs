@@ -33,6 +33,8 @@ mod android;
 pub mod app;
 mod debug;
 #[cfg(any(target_os = "android", target_os = "ios", test))]
+mod decor;
+#[cfg(any(target_os = "android", target_os = "ios", test))]
 mod elements;
 pub mod embedded;
 #[cfg(any(target_os = "android", target_os = "ios", test))]

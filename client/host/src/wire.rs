@@ -126,6 +126,11 @@ pub(crate) struct WireMap {
     #[cfg(any(target_os = "android", target_os = "ios"))]
     #[serde(default)]
     pub(crate) messages: Option<crate::messages::MessageMap>,
+    /// By decoration kind (`channel-list.trailing`): where the nodes its
+    /// keys name are, for the plugins' decorations.
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    #[serde(default)]
+    pub(crate) decorations: crate::decor::DecorMap,
     /// By menu slot (`message.context-menu`): where the guest draws that
     /// menu.
     #[cfg(any(target_os = "android", target_os = "ios"))]

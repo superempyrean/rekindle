@@ -339,6 +339,8 @@ struct Surfaces {
     values: crate::wire::ValueMap,
     /// The client's emoji picker, when the wire map says where it is.
     picker: Option<crate::picker::PickerMap>,
+    /// Where each decoration kind's nodes are, from the wire map.
+    decorations: crate::decor::DecorMap,
     /// The client's elements by name, from the wire map, and the ids of the
     /// plugins' inserts next to them.
     elements: BTreeMap<String, rekindle_wire_inject::Selector>,
@@ -400,13 +402,14 @@ impl Surfaces {
         } else {
             None
         };
-        let (chat_bar, messages, menus, values, picker, elements) = match map {
+        let (chat_bar, messages, menus, values, picker, decorations, elements) = match map {
             Some(mut m) => (
                 m.slots.remove(SLOT_CHAT_BAR_BUTTON),
                 m.messages.take(),
                 std::mem::take(&mut m.menus),
                 std::mem::take(&mut m.values),
                 m.picker(),
+                std::mem::take(&mut m.decorations),
                 m.elements,
             ),
             None => (
@@ -415,6 +418,7 @@ impl Surfaces {
                 BTreeMap::new(),
                 BTreeMap::new(),
                 None,
+                BTreeMap::new(),
                 BTreeMap::new(),
             ),
         };
@@ -426,6 +430,7 @@ impl Surfaces {
             menus,
             values,
             picker,
+            decorations,
             elements,
             insert_slots: crate::elements::Slots::default(),
             raw_slots: crate::elements::RawSlots::default(),
@@ -839,6 +844,11 @@ fn up() -> anyhow::Result<(Driver, Home)> {
     // to detour, only the names count: they are the tokens plugins can set.
     let tokens: Vec<&String> = names.iter().collect();
     let map = wire_map();
+    // The decorations and accessories the map has places for, before the
+    // plugins start and ask.
+    if let Some(m) = &map {
+        crate::decor::offer(&m.decorations, m.messages.is_some());
+    }
     let profile = RecoveredProfile {
         theme: ThemeProfile {
             addr: None,
@@ -1118,6 +1128,15 @@ fn publish(driver: &mut Driver, surfaces: &mut Surfaces) -> State {
     );
     mounts.extend(named.mounts);
     surfaces.presses.extend(named.clicks);
+    mounts.extend(crate::decor::mounts(
+        &surfaces.decorations,
+        surfaces
+            .messages
+            .as_ref()
+            .map(|m| m.content_prefix.as_str()),
+        &rekindle_ui_hook::decor::decorations(),
+        &rekindle_ui_hook::decor::accessories(),
+    ));
     let rows = driver.menu_items();
     for (nth, (slot, map)) in (0u32..).zip(&surfaces.menus) {
         let kind = match slot.as_str() {
