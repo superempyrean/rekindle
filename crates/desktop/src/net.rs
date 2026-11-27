@@ -112,6 +112,10 @@ pub struct Transport {
     /// `bytes`' `STATIC_VTABLE`, which `Bytes::from_static` gives a
     /// `Bytes`: its drop does nothing and its clone copies the pointer.
     pub static_bytes: u64,
+    /// `bytes`' `PROMOTABLE_EVEN_VTABLE` and `PROMOTABLE_ODD_VTABLE`, for
+    /// a `Bytes` that owns a buffer from the client's allocator.
+    pub even_bytes: u64,
+    pub odd_bytes: u64,
 }
 
 /// One gateway event's handler and the slices' slots that hold it.
@@ -521,7 +525,7 @@ fn method_slots(
         .collect()
 }
 
-/// True if `path` is `â€¦/channels/{id}/typing`, with or without a query.
+/// True if `path` is `Ã¢â‚¬Â¦/channels/{id}/typing`, with or without a query.
 #[must_use]
 pub fn is_typing_path(path: &str) -> bool {
     let path = path.split(['?', '#']).next().unwrap_or_default();
@@ -563,6 +567,7 @@ pub fn transport(image: &Image<'_>) -> Result<Transport> {
     let alloc = allocator(image, boxer)?;
     let dealloc = deallocator(image, alloc)?;
     let static_bytes = static_bytes(image)?;
+    let (even_bytes, odd_bytes) = promotable_bytes(image, dealloc)?;
     Ok(Transport {
         send,
         request,
@@ -572,6 +577,8 @@ pub fn transport(image: &Image<'_>) -> Result<Transport> {
         alloc,
         dealloc,
         static_bytes,
+        even_bytes,
+        odd_bytes,
     })
 }
 
@@ -604,6 +611,143 @@ fn static_bytes(image: &Image<'_>) -> Result<u64> {
     }
     let found: Vec<u64> = found.into_iter().collect();
     one_of("bytes' STATIC_VTABLE", &found)
+}
+
+/// Five code pointers at `at`, as a `bytes` vtable holds.
+fn bytes_vtable(image: &Image<'_>, text: &[(u64, u64)], at: u64) -> Option<[u64; 5]> {
+    let mut w = [0u64; 5];
+    for (k, slot) in w.iter_mut().enumerate() {
+        let p = image.qword(at + 8 * k as u64)?;
+        if !text.iter().any(|&(s, e)| (s..e).contains(&p)) {
+            return None;
+        }
+        *slot = p;
+    }
+    Some(w)
+}
+
+/// The instructions at `va` up to the first `ret`, `int3` or unconditional
+/// `jmp`, at most `max`.
+fn straight(image: &Image<'_>, va: u64, max: usize) -> Vec<Instruction> {
+    let mut out = Vec::new();
+    for i in decode(image.read(va, 16 * max).unwrap_or(&[]), va) {
+        let end = matches!(i.mnemonic(), Mnemonic::Ret | Mnemonic::Int3 | Mnemonic::Jmp);
+        if i.mnemonic() != Mnemonic::Int3 {
+            out.push(i);
+        }
+        if end || out.len() >= max {
+            break;
+        }
+    }
+    out
+}
+
+/// `promotable_is_unique(data: &AtomicPtr)`: it loads the data word, gives
+/// true when its bit 0 is set (`KIND_VEC`), and otherwise compares the
+/// `Shared`'s reference count with 1.
+fn is_promotable_is_unique(image: &Image<'_>, va: u64) -> bool {
+    let code = straight(image, va, 12);
+    let loads_data = code.first().is_some_and(|i| {
+        i.mnemonic() == Mnemonic::Mov
+            && i.op1_kind() == OpKind::Memory
+            && i.memory_base() == Register::RCX
+            && i.memory_displacement64() == 0
+    });
+    let tests_bit_0 = code.iter().any(|i| {
+        i.mnemonic() == Mnemonic::Test && i.op1_kind() == OpKind::Immediate8 && i.immediate8() == 1
+    });
+    loads_data
+        && tests_bit_0
+        && code.iter().any(|i| i.mnemonic() == Mnemonic::Sete)
+        && code.last().is_some_and(|i| i.mnemonic() == Mnemonic::Ret)
+}
+
+/// Whether some branch of the drop at `drop` reaches `free_boxed_slice`, a
+/// function that passes alignment 1 (`mov r8d, 1`) to `dealloc`.
+fn frees_with(image: &Image<'_>, drop: u64, dealloc: u64) -> bool {
+    let mut code = Vec::new();
+    for i in decode(image.read(drop, 0x40).unwrap_or(&[]), drop) {
+        if i.mnemonic() == Mnemonic::Int3 {
+            break;
+        }
+        code.push(i);
+    }
+    code.iter()
+        .filter(|i| i.op0_kind() == OpKind::NearBranch64)
+        .any(|b| {
+            let free = straight(image, b.near_branch64(), 12);
+            let align_1 = free
+                .iter()
+                .any(|i| imm(i, 1) == Some(1) && i.op0_register() == Register::R8D);
+            align_1
+                && free.iter().any(|i| {
+                    matches!(i.mnemonic(), Mnemonic::Jmp | Mnemonic::Call)
+                        && i.op0_kind() == OpKind::NearBranch64
+                        && i.near_branch64() == dealloc
+                })
+        })
+}
+
+/// `bytes`' `PROMOTABLE_EVEN_VTABLE` and `PROMOTABLE_ODD_VTABLE`, which
+/// `Bytes::from(Vec<u8>)` gives a `Bytes` that owns its buffer: the even
+/// one for a buffer at an even address, with the data word the address
+/// with bit 0 set, the odd one for an odd address, with the data word the
+/// address. Their `drop` frees the buffer with `dealloc`, or drops a
+/// reference once a clone shared it.
+///
+/// They are the two vtables of five code pointers that share their
+/// `is_unique` ([`is_promotable_is_unique`]) and differ in every other
+/// method, and whose `drop` reaches `free_boxed_slice` ([`frees_with`]).
+/// The even one's `drop` clears bit 0 (`and r, -2`) before it frees. In
+/// this build each `drop` takes the data word itself, not a reference to
+/// it. Each vtable is a `const`, so the image may hold copies; the lowest
+/// one the code loads with `lea` is returned.
+fn promotable_bytes(image: &Image<'_>, dealloc: u64) -> Result<(u64, u64)> {
+    let text = image.text();
+    let mut unique: BTreeMap<u64, bool> = BTreeMap::new();
+    let mut copies: BTreeMap<[u64; 5], Vec<u64>> = BTreeMap::new();
+    for (start, end) in image.data() {
+        let mut at = start;
+        while at + 40 <= end {
+            if let Some(w) = bytes_vtable(image, &text, at)
+                && *unique
+                    .entry(w[3])
+                    .or_insert_with(|| is_promotable_is_unique(image, w[3]))
+                && frees_with(image, w[4], dealloc)
+            {
+                copies.entry(w).or_default().push(at);
+            }
+            at += 8;
+        }
+    }
+    let tables: Vec<[u64; 5]> = copies.keys().copied().collect();
+    let pair: Vec<([u64; 5], [u64; 5])> = tables
+        .iter()
+        .enumerate()
+        .flat_map(|(k, a)| tables[k + 1..].iter().map(move |b| (*a, *b)))
+        .filter(|(a, b)| a[3] == b[3] && [0, 1, 2, 4].iter().all(|&s| a[s] != b[s]))
+        .collect();
+    let (a, b) = one_of("bytes' two promotable vtables", &pair)?;
+    let clears_bit_0 = |w: &[u64; 5]| {
+        decode(image.read(w[4], 0x20).unwrap_or(&[]), w[4])
+            .iter()
+            .take_while(|i| i.mnemonic() != Mnemonic::Int3)
+            .any(|i| i.mnemonic() == Mnemonic::And && imm(i, 1) == Some(u64::MAX - 1))
+    };
+    let (even, odd) = match (clears_bit_0(&a), clears_bit_0(&b)) {
+        (true, false) => (a, b),
+        (false, true) => (b, a),
+        _ => bail!("can't tell bytes' even promotable vtable from its odd one"),
+    };
+    let loaded = |w: &[u64; 5]| -> Result<u64> {
+        let at = &copies[w];
+        let mut used: Vec<u64> = image.leas_into(at).into_iter().map(|(_, t)| t).collect();
+        used.sort_unstable();
+        used.first()
+            .copied()
+            .with_context(|| format!("no code loads the vtable at {:#x}", at[0]))
+    };
+    Ok((loaded(&even)?, loaded(&odd)?))
 }
 
 /// A registry entry at `slot`: an upper-case name of 1 to 64 bytes and a
@@ -825,6 +969,10 @@ mod tests {
         );
         assert_eq!((rva(t.alloc), rva(t.dealloc)), (0x456d100, 0x456d150));
         assert_eq!(rva(t.static_bytes), 0x16cbd6d0);
+        assert_eq!(
+            (rva(t.even_bytes), rva(t.odd_bytes)),
+            (0x16cbd888, 0x16cbd860)
+        );
     }
 
     #[test]
