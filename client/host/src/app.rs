@@ -62,6 +62,7 @@ mod theme;
 mod typing;
 
 use crate::gateway;
+pub use crate::http::Call;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
@@ -202,11 +203,12 @@ pub fn turn(ops: &[u8]) -> Option<Vec<u8>> {
 
 /// A host call the guest made. If it names a palette, the plugins' theme is
 /// recoloured for it from the guest's next turn. An open or close of the
-/// guest's store is noted for [`database`]. Returns true if the platform
-/// should return without making the call, as for none. On the guest's
-/// thread.
+/// guest's store is noted for [`database`]. A REST request goes past the
+/// plugins' `http-filter`s ([`crate::http`]). Returns what the platform
+/// does with the call: make it, return without making it, as for none, or
+/// make another. On the guest's thread.
 #[must_use]
-pub fn host_call(buf: &[u8]) -> bool {
+pub fn host_call(buf: &[u8]) -> Call {
     let n = CALLS.fetch_add(1, Ordering::Relaxed);
     if n < 8 {
         log(&format!(
@@ -221,7 +223,10 @@ pub fn host_call(buf: &[u8]) -> bool {
     database::on_call(buf);
     // A panic can't unwind into the guest's frame.
     let _ = std::panic::catch_unwind(database::serve);
-    typing::drops(buf)
+    if typing::drops(buf) {
+        return Call::Drop;
+    }
+    crate::http::on_call(buf)
 }
 
 /// The REPLY a host module gave to a call the guest made: the handle of
@@ -249,10 +254,18 @@ pub fn dispatch<R>(buf: &[u8], mut original: impl FnMut(Option<&[u8]>) -> R) -> 
     }
     // The answers to typing requests rekindle dropped go straight to the
     // guest, as the platform's would.
-    for answer in typing::take_answers() {
+    for answer in typing::take_answers()
+        .into_iter()
+        .chain(crate::http::take_answers())
+    {
         let _ = original(Some(&answer));
     }
     typing::on_event(buf);
+    // The answer to a request a plugin filters, as the plugins read it.
+    let answered = std::panic::catch_unwind(|| crate::http::on_event(buf))
+        .ok()
+        .flatten();
+    let buf = answered.as_deref().unwrap_or(buf);
     let r = deliver(buf, &mut original);
     // What the runtime changed outside a turn, after the guest's own turns
     // for this event. A panic can't unwind into the host's frame.

@@ -136,6 +136,9 @@ enum Request {
         text: String,
         done: mpsc::SyncSender<CommandReply>,
     },
+    /// A REST request or response for the plugins' `http-filter`s, from
+    /// [`crate::http`] by the path desktop's hooks take.
+    Net(crate::embedded::net::Request),
 }
 
 /// The event kinds some plugin's event filter sees, as bits by
@@ -152,7 +155,22 @@ pub(crate) fn wanted() -> bool {
 /// Start the runtime's thread. It reports to logcat once it's up.
 pub(crate) fn start() {
     let (tx, rx) = mpsc::channel();
-    *requests() = Some(tx);
+    *requests() = Some(tx.clone());
+    // The REST requests reach the runtime's loop as its own requests, so a
+    // request wakes it as a press does.
+    let net = crate::embedded::net::open();
+    let forwarded = std::thread::Builder::new()
+        .name("rekindle-net".into())
+        .spawn(move || {
+            while let Ok(r) = net.recv() {
+                if tx.send(Request::Net(r)).is_err() {
+                    return;
+                }
+            }
+        });
+    if let Err(e) = forwarded {
+        log(&format!("runtime: no thread for REST requests: {e}"));
+    }
     let spawned = std::thread::Builder::new()
         .name("rekindle-runtime".into())
         .spawn(move || {
@@ -550,6 +568,7 @@ fn run(rx: &mpsc::Receiver<Request>) {
     surfaces.menu = driver.rekindle().menu();
     publish(&mut driver, &mut surfaces);
     let mut received = 0u64;
+    let mut net = crate::embedded::net::Pending::default();
     loop {
         match rx.recv_timeout(TICK) {
             Ok(Request::Text { typed, done }) => {
@@ -569,6 +588,12 @@ fn run(rx: &mpsc::Receiver<Request>) {
                 let _ = done.send(driver.rekindle().gateway_filter(&t, d));
             }
             Ok(Request::Events(passed)) => deliver_events(&mut driver, passed, &mut received),
+            Ok(Request::Net(r)) => {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| d.as_millis() as u64);
+                net.serve(driver.rekindle(), r, now, log);
+            }
             Ok(Request::Slash { text, done }) => {
                 // The command may have stopped waiting.
                 let _ = done.send(run_slash(&mut driver, &text));
@@ -577,6 +602,7 @@ fn run(rx: &mpsc::Receiver<Request>) {
             Err(mpsc::RecvTimeoutError::Disconnected) => return,
         }
         driver.tick();
+        crate::embedded::net::publish(driver.rekindle());
         let kinds = driver.rekindle().intercepted_kinds();
         let bits = kinds.iter().fold(0u64, |bits, k| bits | (1 << (*k as u8)));
         if INTERCEPTED.swap(bits, Ordering::Relaxed) != bits {

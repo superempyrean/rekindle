@@ -38,6 +38,8 @@ pub mod embedded;
 #[cfg(any(target_os = "android", target_os = "ios", test))]
 mod gateway;
 mod hooks;
+#[cfg(any(target_os = "android", target_os = "ios", test))]
+pub mod http;
 mod image;
 mod install;
 mod layout;

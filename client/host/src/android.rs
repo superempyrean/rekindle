@@ -537,11 +537,15 @@ unsafe extern "C" fn hooked_emit(
     let buf = unsafe { std::slice::from_raw_parts(bytes, len) };
     let Some(ops) = op_stream(buf) else {
         // A panic can't unwind into the guest's frame.
-        if std::panic::catch_unwind(|| app::host_call(buf)).unwrap_or(false) {
-            return EmitResult::NONE;
-        }
-        // SAFETY: the guest's own arguments.
-        let result = unsafe { original(transport, bytes, len) };
+        let call = std::panic::catch_unwind(|| app::host_call(buf)).unwrap_or(app::Call::Pass);
+        let result = match call {
+            app::Call::Drop => return EmitResult::NONE,
+            // SAFETY: the guest's transport, with a call the host reads
+            // within the call.
+            app::Call::Replace(new) => unsafe { original(transport, new.as_ptr(), new.len()) },
+            // SAFETY: the guest's own arguments.
+            app::Call::Pass => unsafe { original(transport, bytes, len) },
+        };
         if let Some(reply) = result.reply() {
             let _ = std::panic::catch_unwind(|| app::host_reply(reply));
         }
