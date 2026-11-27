@@ -115,6 +115,21 @@ fn run() -> Result<()> {
                 println!("{}", serde_json::to_string_pretty(&menu)?);
             } else {
                 print_menu(&menu, image.base());
+                for t in [
+                    rekindle_desktop::Target::User,
+                    rekindle_desktop::Target::Channel,
+                    rekindle_desktop::Target::Guild,
+                ] {
+                    match rekindle_desktop::Builder::resolve(&image, t, menu.item_size) {
+                        Ok(b) => println!(
+                            "{t:?} menu {:#x} (RVA {:#x}), push {:#x}",
+                            b.build_fn,
+                            b.build_fn - image.base(),
+                            b.vec_push
+                        ),
+                        Err(e) => println!("{t:?} menu: {e:#}"),
+                    }
+                }
             }
             Ok(())
         }

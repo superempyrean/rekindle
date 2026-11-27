@@ -398,6 +398,141 @@ fn ids(image: &Image<'_>, build_fn: u64) -> Result<(usize, usize)> {
     }
 }
 
+/// What a context menu is opened on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub enum Target {
+    User,
+    Channel,
+    Guild,
+}
+
+impl Target {
+    /// Strings only that menu's builder loads, all of them: type names for
+    /// the user menu, which every user menu variant shares, and i18n keys of
+    /// its rows for the others.
+    fn strings(self) -> &'static [&'static [u8]] {
+        match self {
+            Target::User => &[b"ThreadUserContextMenu", b"GroupDMUserContextMenu"],
+            Target::Channel => &[b"COLLAPSE_CATEGORY", b"COPY_ID_CHANNEL", b"MARK_AS_READ"],
+            Target::Guild => &[b"LEAVE_SERVER", b"INVITE_TO_SERVER", b"CREATE_CATEGORY"],
+        }
+    }
+}
+
+/// The builder of the user, channel or server menu. Like
+/// `MessageContextMenu`'s, it returns the rows as a `Vec<MenuItem>` in its
+/// first argument. Unlike it, it takes the id of what the menu is opened on
+/// by value in its second.
+#[derive(Clone, Debug, Serialize)]
+pub struct Builder {
+    pub target: Target,
+    pub build_fn: u64,
+    /// The `Vec<MenuItem>::push` it calls most.
+    pub vec_push: u64,
+}
+
+impl Builder {
+    /// The builder for `target` in `image`, whose `MenuItem` is `item_size`
+    /// bytes, as [`Menu::resolve`] found it.
+    ///
+    /// It is the one function with eight pushes in its prologue that loads
+    /// each of [`Target::strings`]. It keeps its second argument from its
+    /// first instructions (`mov reg, rdx`), and its pushes copy items of
+    /// `item_size` bytes.
+    pub fn resolve(image: &Image<'_>, target: Target, item_size: usize) -> Result<Self> {
+        let wanted = target.strings();
+        let mut string_of = std::collections::BTreeMap::new();
+        for (i, s) in wanted.iter().enumerate() {
+            for at in image.find(s) {
+                string_of.insert(at, i);
+            }
+        }
+        let targets: Vec<u64> = string_of.keys().copied().collect();
+        let mut sets = vec![std::collections::BTreeSet::new(); wanted.len()];
+        for (lea, to) in image.leas_into(&targets) {
+            if let Some((start, _)) = image.function(lea)
+                && image
+                    .read(start, ROW_PROLOGUE.len())
+                    .is_some_and(|p| p == ROW_PROLOGUE)
+            {
+                sets[string_of[&to]].insert(start);
+            }
+        }
+        let mut found = sets.pop().unwrap_or_default();
+        for s in &sets {
+            found.retain(|f| s.contains(f));
+        }
+        let build_fn = match found.iter().copied().collect::<Vec<_>>()[..] {
+            [one] => one,
+            [] => bail!("no {target:?} menu builder loads {:?}", strings(target)),
+            ref many => bail!("{} {target:?} menu builders: {many:x?}", many.len()),
+        };
+        if !keeps_rdx(image, build_fn) {
+            bail!("the {target:?} menu builder {build_fn:#x} doesn't keep its second argument");
+        }
+        let vec_push = most_called_push(image, build_fn, item_size)?;
+        Ok(Self {
+            target,
+            build_fn,
+            vec_push,
+        })
+    }
+}
+
+fn strings(target: Target) -> Vec<String> {
+    target
+        .strings()
+        .iter()
+        .map(|s| String::from_utf8_lossy(s).into_owned())
+        .collect()
+}
+
+/// Whether a `mov reg, rdx` is among the first 24 instructions at `start`,
+/// before anything else writes `rdx`.
+fn keeps_rdx(image: &Image<'_>, start: u64) -> bool {
+    let Some(code) = image.read(start, 0x80) else {
+        return false;
+    };
+    for insn in Decoder::with_ip(64, code, start, DecoderOptions::NONE)
+        .into_iter()
+        .take(24)
+    {
+        if insn.mnemonic() == Mnemonic::Mov
+            && insn.op0_kind() == OpKind::Register
+            && insn.op1_kind() == OpKind::Register
+            && insn.op1_register() == Register::RDX
+        {
+            return true;
+        }
+        if insn.op0_kind() == OpKind::Register && insn.op0_register() == Register::RDX {
+            return false;
+        }
+    }
+    false
+}
+
+/// The callee of the function at `start` called most often whose stride is
+/// `item_size`: its `Vec<MenuItem>::push`.
+fn most_called_push(image: &Image<'_>, start: u64, item_size: usize) -> Result<u64> {
+    let (start, end) = image.function_named("a menu builder", start)?;
+    let mut counts: std::collections::BTreeMap<u64, usize> = std::collections::BTreeMap::new();
+    for target in calls_after(image, start, usize::try_from(end - start)?) {
+        *counts.entry(target).or_default() += 1;
+    }
+    let mut by_count: Vec<(u64, usize)> = counts.into_iter().collect();
+    by_count.sort_by_key(|&(t, n)| (std::cmp::Reverse(n), t));
+    by_count
+        .into_iter()
+        .map(|(t, _)| t)
+        .find(|&t| {
+            image
+                .function(t)
+                .is_some_and(|(s, e)| e - s < 0x80 && s == t)
+                && push_stride(image, t).is_ok_and(|s| s == item_size)
+        })
+        .with_context(|| format!("no push of {item_size:#x}-byte items in {start:#x}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -416,5 +551,12 @@ mod tests {
         assert_eq!((m.item_size, m.props, m.action_tag), (0x1f8, 0x20, 2));
         assert_eq!((m.on_click_tag, m.on_click), (0x8, 0x10));
         assert_eq!((m.message_id, m.channel_id), (0x88, 0x80));
+        let rva = |t| {
+            let b = Builder::resolve(&image, t, m.item_size).unwrap();
+            (b.build_fn - image.base(), b.vec_push - image.base())
+        };
+        assert_eq!(rva(Target::User), (0x4a16cc9, 0x49c2fc1));
+        assert_eq!(rva(Target::Channel), (0x50c0910, 0x5021990));
+        assert_eq!(rva(Target::Guild), (0x458fe71, 0x4571269));
     }
 }

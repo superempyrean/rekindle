@@ -27,7 +27,7 @@ pub mod text;
 pub use debug::StyleOffsets;
 pub use div::Div;
 pub use image::Image;
-pub use menu::{Label, Menu};
+pub use menu::{Builder, Label, Menu, Target};
 pub use native::{Written, write_style};
 pub use symbols::{Report, Symbols};
 pub use text::Text;
