@@ -801,11 +801,49 @@ impl ClientBackend for DetourBackend {
                 }
                 Ok(())
             }
+            UiOp::SetDecoration {
+                kind,
+                key,
+                decoration,
+            } => {
+                decoration_kind(&kind)?;
+                let item = decoration.map(|d| decoration_item(plugin, &kind, key, d));
+                rekindle_ui_hook::decor::put_decoration(plugin, &kind, key, item);
+                Ok(())
+            }
+            UiOp::SetDecorations { kind, items } => {
+                decoration_kind(&kind)?;
+                rekindle_ui_hook::decor::clear_decorations(plugin, &kind);
+                for (key, d) in items {
+                    let item = decoration_item(plugin, &kind, key, d);
+                    rekindle_ui_hook::decor::put_decoration(plugin, &kind, key, Some(item));
+                }
+                Ok(())
+            }
+            UiOp::ClearDecorations { kind } => {
+                decoration_kind(&kind)?;
+                rekindle_ui_hook::decor::clear_decorations(plugin, &kind);
+                Ok(())
+            }
+            UiOp::SetMessageAccessory { message, elements } => {
+                if !rekindle_ui_hook::decor::accessories_drawn() {
+                    return Err(UiError::Unavailable);
+                }
+                let item = elements.map(|e| rekindle_ui_hook::decor::AccessoryItem {
+                    plugin: plugin.to_string(),
+                    message: message.id,
+                    channel: message.channel,
+                    lines: lines_of(&e),
+                });
+                rekindle_ui_hook::decor::put_accessory(plugin, message.id, item);
+                Ok(())
+            }
             op => self.shared.surfaces.lock().unwrap().update(plugin, op),
         }
     }
 
     fn plugin_unloaded(&mut self, plugin: &str) {
+        rekindle_ui_hook::decor::plugin_unloaded(plugin);
         self.shared.surfaces.lock().unwrap().plugin_unloaded(plugin);
         self.shared.elements.lock().unwrap().plugin_unloaded(plugin);
         if let Some(list) = self.shared.slash.lock().unwrap().as_mut() {
@@ -837,6 +875,10 @@ impl ClientBackend for DetourBackend {
         }
     }
 
+    fn available_decorations(&self) -> Vec<String> {
+        rekindle_ui_hook::decor::decoration_kinds()
+    }
+
     fn tweaks(&self) -> Vec<Tweak> {
         crate::tweaks::all()
     }
@@ -851,6 +893,39 @@ impl ClientBackend for DetourBackend {
 }
 
 use rekindle_ui_hook::client;
+
+/// Fail unless the host draws decorations of `kind`.
+fn decoration_kind(kind: &str) -> Result<(), UiError> {
+    if rekindle_ui_hook::decor::decoration_kinds()
+        .iter()
+        .any(|k| k == kind)
+    {
+        Ok(())
+    } else {
+        Err(UiError::Unavailable)
+    }
+}
+
+/// A plugin's decoration as the host draws it: its text, or its tooltip
+/// when it has none, in its colour.
+fn decoration_item(
+    plugin: &str,
+    kind: &str,
+    key: u64,
+    d: rekindle_plugin_host::model::Decoration,
+) -> rekindle_ui_hook::decor::DecorationItem {
+    let tooltip = d.tooltip.unwrap_or_default();
+    rekindle_ui_hook::decor::DecorationItem {
+        plugin: plugin.to_string(),
+        kind: kind.to_string(),
+        key,
+        text: d.text.unwrap_or_else(|| tooltip.clone()),
+        tooltip,
+        color: d
+            .color
+            .map_or(0, |c| u32::from_be_bytes([c.r, c.g, c.b, c.a])),
+    }
+}
 
 /// Discord's Administrator bit.
 const ADMINISTRATOR: u64 = 1 << 3;

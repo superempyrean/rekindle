@@ -24,6 +24,7 @@ mod chat_bar;
 pub mod client;
 mod clipboard;
 mod compose;
+pub mod decor;
 mod discovery;
 /// Test harness: drive rekindle's UI in a live client from inside.
 pub mod drive;
