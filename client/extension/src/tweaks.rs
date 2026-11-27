@@ -38,7 +38,9 @@ struct State {
 static STATE: Mutex<Option<State>> = Mutex::new(None);
 
 fn with<T>(f: impl FnOnce(&mut State) -> T) -> T {
-    let mut s = STATE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut s = STATE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     f(s.get_or_insert_with(State::default))
 }
 
@@ -142,11 +144,17 @@ mod tests {
         let _ = std::fs::remove_file(&file);
         load(file.clone());
         offer(&[]);
-        assert_eq!(set("a", SILENT_TYPING, "true"), Err(TweakError::Unavailable));
+        assert_eq!(
+            set("a", SILENT_TYPING, "true"),
+            Err(TweakError::Unavailable)
+        );
         assert_eq!(set("a", "nope", "true"), Err(TweakError::Unknown));
         offer(&[SILENT_TYPING.to_string(), "nope".to_string()]);
         assert!(all().iter().all(|t| t.id != "nope"));
-        assert_eq!(set("a", SILENT_TYPING, "yes"), Err(TweakError::InvalidValue));
+        assert_eq!(
+            set("a", SILENT_TYPING, "yes"),
+            Err(TweakError::InvalidValue)
+        );
         assert!(!on(SILENT_TYPING));
         set("a", SILENT_TYPING, "true").unwrap();
         assert!(on(SILENT_TYPING));

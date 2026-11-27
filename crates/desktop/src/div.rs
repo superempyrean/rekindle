@@ -256,7 +256,9 @@ fn into_any_function(image: &Image<'_>, vtable: u64) -> Result<u64> {
     functions.dedup();
     let mut live = Vec::new();
     for start in functions {
-        let (_, end) = image.function(start).context("into_any is outside .pdata")?;
+        let (_, end) = image
+            .function(start)
+            .context("into_any is outside .pdata")?;
         let len = usize::try_from(end - start)?;
         let code = image.read(start, len).context("into_any is unmapped")?;
         if code.windows(3).any(|w| w == [0x31, 0xC9, 0xE8])

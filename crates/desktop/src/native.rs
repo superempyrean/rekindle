@@ -330,7 +330,9 @@ mod tests {
         let written = write_style(&offsets(), &mut buffer, &style());
         assert!(written.flex_grow && written.flex_shrink && written.min_size);
         assert_eq!(u32::from_le_bytes(buffer[240..244].try_into().unwrap()), 1);
-        assert!((f32::from_le_bytes(buffer[244..248].try_into().unwrap()) - 1.0).abs() < f32::EPSILON);
+        assert!(
+            (f32::from_le_bytes(buffer[244..248].try_into().unwrap()) - 1.0).abs() < f32::EPSILON
+        );
         assert_eq!(u32::from_le_bytes(buffer[248..252].try_into().unwrap()), 1);
         assert!(f32::from_le_bytes(buffer[252..256].try_into().unwrap()).abs() < f32::EPSILON);
         assert_eq!(u32::from_le_bytes(buffer[504..508].try_into().unwrap()), 0);

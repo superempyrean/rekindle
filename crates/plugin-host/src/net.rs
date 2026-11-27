@@ -326,7 +326,11 @@ mod tests {
     fn any_host_reaches_public_names_only() {
         let any = BTreeSet::from(["*".to_string()]);
         let l = NetLimits::default();
-        for ok in ["https://evil.example/", "https://API.Example.com/x", "https://discord.com/api"] {
+        for ok in [
+            "https://evil.example/",
+            "https://API.Example.com/x",
+            "https://discord.com/api",
+        ] {
             assert!(check_request(&req(ok), &any, &l).is_ok(), "{ok}");
         }
         for refused in [
@@ -340,7 +344,10 @@ mod tests {
             "https://[::1]/",
         ] {
             assert!(
-                matches!(check_request(&req(refused), &any, &l), Err(HttpError::HostNotAllowed(_))),
+                matches!(
+                    check_request(&req(refused), &any, &l),
+                    Err(HttpError::HostNotAllowed(_))
+                ),
                 "{refused}"
             );
         }

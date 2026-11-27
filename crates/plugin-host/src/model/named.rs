@@ -154,7 +154,9 @@ impl NamedElements {
     }
 
     fn has(&self, name: &str) -> bool {
-        self.available.binary_search_by(|n| n.as_str().cmp(name)).is_ok()
+        self.available
+            .binary_search_by(|n| n.as_str().cmp(name))
+            .is_ok()
     }
 
     /// Apply `plugin`'s `op`. A name this build doesn't have is
@@ -248,7 +250,10 @@ mod tests {
             mode: PressMode::Retarget(to.into()),
         };
         assert_eq!(s.apply("p", retarget("nope")), Err(UiError::Unavailable));
-        assert_eq!(s.apply("p", retarget("composer.gift")), Err(UiError::Invalid));
+        assert_eq!(
+            s.apply("p", retarget("composer.gift")),
+            Err(UiError::Invalid)
+        );
         assert_eq!(s.apply("p", retarget("guild-search")), Ok(()));
         assert_eq!(
             NamedElements::default().apply("p", hide("composer.gift")),
@@ -288,12 +293,7 @@ mod tests {
                 id: id.into(),
                 name: "guild-search".into(),
                 place: Place::After,
-                elements: vec![
-                    Element::Text {
-                        text: "x".into()
-                    };
-                    n
-                ],
+                elements: vec![Element::Text { text: "x".into() }; n],
             })
         };
         s.apply("p", insert("a", 1)).unwrap();

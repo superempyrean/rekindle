@@ -362,7 +362,10 @@ fn tab_mount(map: &PickerMap, colors: &Colors, tab: &Tab, i: u32, on: bool) -> M
     let mut text = vec![Cell::new(TEXT, Value::Str(tab.title.clone()))];
     push_cells(&mut text, &map.look.tab_text);
     if let Some(c) = if on { &colors.on } else { &colors.off } {
-        push_cells(&mut text, &[Cell::new(rekindle_wire::ids::COLOR, c.clone())]);
+        push_cells(
+            &mut text,
+            &[Cell::new(rekindle_wire::ids::COLOR, c.clone())],
+        );
     }
     Mount {
         under: map.tab.clone().parent_of(),
@@ -501,7 +504,11 @@ impl Body<'_> {
         }
         self.grid(&mut buttons, &mut column);
         let inner = self.node(ElementKind::VIEW, self.map.look.column.clone(), column);
-        children.push(self.node(ElementKind::SCROLL, self.map.look.scroll.clone(), vec![inner]));
+        children.push(self.node(
+            ElementKind::SCROLL,
+            self.map.look.scroll.clone(),
+            vec![inner],
+        ));
         let mut cells = vec![Cell::new(
             a11y::ID,
             Value::Str(format!(
@@ -778,10 +785,7 @@ mod tests {
         // a press on one takes the plugin's tab down.
         assert_eq!(d.rows.len(), 4);
         assert!(matches!(d.rows[0].action, RowAction::Drop));
-        assert_eq!(
-            d.presses[0].action,
-            guest_tab_press("dev.k")
-        );
+        assert_eq!(d.presses[0].action, guest_tab_press("dev.k"));
         // Two chips and three buttons report as the panel's own controls.
         assert_eq!(d.clicks.len(), 5);
         assert_eq!(

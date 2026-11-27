@@ -2384,7 +2384,10 @@ fn nth_counts_matches_in_tree_order() {
         json,
         serde_json::json!({ "nth": { "of": { "cell": { "prop": "accessibilityId", "value": { "str": "guild-search" } } }, "n": 1 } })
     );
-    assert_eq!(serde_json::from_value::<Selector>(json.clone()).unwrap(), Selector::cell(a11y::ID, "guild-search").nth(1));
+    assert_eq!(
+        serde_json::from_value::<Selector>(json.clone()).unwrap(),
+        Selector::cell(a11y::ID, "guild-search").nth(1)
+    );
 }
 
 #[test]
@@ -2427,7 +2430,10 @@ fn a_hidden_copy_is_one_rule() {
 fn a_flush_repaints_the_guests_cells_for_a_new_recolour() {
     let (mut e, mut host) = engine(recolours());
     send(&mut e, &mut host, &first());
-    assert_eq!(host.props().get(PAGE, ids::BACKGROUND), Some(&rgba(0x0b0d_12ff)));
+    assert_eq!(
+        host.props().get(PAGE, ids::BACKGROUND),
+        Some(&rgba(0x0b0d_12ff))
+    );
     e.set_work(Work {
         recolors: vec![Recolor::new(0x31_3338, 0x2233_44ff)],
         ..Work::default()
@@ -2435,7 +2441,10 @@ fn a_flush_repaints_the_guests_cells_for_a_new_recolour() {
     .unwrap();
     let flushed = Turn::from_bytes(&e.flush().expect("a flush")).unwrap();
     host.apply(&flushed);
-    assert_eq!(host.props().get(PAGE, ids::BACKGROUND), Some(&rgba(0x2233_44ff)));
+    assert_eq!(
+        host.props().get(PAGE, ids::BACKGROUND),
+        Some(&rgba(0x2233_44ff))
+    );
     // The recolour the new work dropped goes back to the guest's colour.
     assert_eq!(
         host.props().get(RULE, ids::COLOR).and_then(Value::as_color),
@@ -2444,7 +2453,10 @@ fn a_flush_repaints_the_guests_cells_for_a_new_recolour() {
     // Back to no recolour at all.
     e.set_work(Work::default()).unwrap();
     host.apply(&Turn::from_bytes(&e.flush().expect("a flush")).unwrap());
-    assert_eq!(host.props().get(PAGE, ids::BACKGROUND), Some(&rgba(0x31_3338ff)));
+    assert_eq!(
+        host.props().get(PAGE, ids::BACKGROUND),
+        Some(&rgba(0x31_3338ff))
+    );
 }
 
 #[test]

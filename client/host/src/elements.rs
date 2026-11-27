@@ -282,7 +282,10 @@ mod tests {
 
     fn map() -> BTreeMap<String, Selector> {
         BTreeMap::from([
-            ("composer.gift".into(), Selector::cell(a11y::ID, "composer.gift")),
+            (
+                "composer.gift".into(),
+                Selector::cell(a11y::ID, "composer.gift"),
+            ),
             (
                 "guild.search".into(),
                 Selector::cell(a11y::ID, "guild-search").nth(0),
@@ -301,13 +304,23 @@ mod tests {
     #[test]
     fn hide_style_and_presses_become_rules() {
         let s = state(vec![
-            ("p", ElementOp::Hide { name: "composer.gift".into() }),
+            (
+                "p",
+                ElementOp::Hide {
+                    name: "composer.gift".into(),
+                },
+            ),
             (
                 "p",
                 ElementOp::Style {
                     name: "guild.search".into(),
                     style: ElementStyle {
-                        foreground: Some(Color { r: 255, g: 0, b: 0, a: 255 }),
+                        foreground: Some(Color {
+                            r: 255,
+                            g: 0,
+                            b: 0,
+                            a: 255,
+                        }),
                         opacity: Some(0.5),
                         ..ElementStyle::default()
                     },
@@ -370,21 +383,29 @@ mod tests {
         assert_eq!(w.mounts.len(), 2);
         assert_eq!(w.mounts[0].root, RAW_BLOCKS);
         assert_eq!(w.mounts[0].nodes[0].children, [RAW_BLOCKS + 1]);
-        assert_eq!(w.mounts[1].root, RAW_BLOCKS + rekindle_plugin_host::model::RAW_IDS);
+        assert_eq!(
+            w.mounts[1].root,
+            RAW_BLOCKS + rekindle_plugin_host::model::RAW_IDS
+        );
         assert!(w.check().is_ok());
         // `a` unloading leaves `b` where it was.
         s.plugin_unloaded("a");
         let w = raw(&s, &mut slots);
-        assert_eq!(w.mounts[0].root, RAW_BLOCKS + rekindle_plugin_host::model::RAW_IDS);
+        assert_eq!(
+            w.mounts[0].root,
+            RAW_BLOCKS + rekindle_plugin_host::model::RAW_IDS
+        );
     }
 
     #[test]
     fn click_is_on_the_elements_surface() {
-        let rekindle_ui_hook::Click::Ui { panel, element, .. } = click("p", "composer.gift")
-        else {
+        let rekindle_ui_hook::Click::Ui { panel, element, .. } = click("p", "composer.gift") else {
             panic!()
         };
-        assert_eq!((panel.as_str(), element.as_str()), ("element:composer.gift", "composer.gift"));
+        assert_eq!(
+            (panel.as_str(), element.as_str()),
+            ("element:composer.gift", "composer.gift")
+        );
         let rekindle_ui_hook::Click::Ui { panel, element, .. } = raw_click("p", "go") else {
             panic!()
         };
@@ -429,8 +450,9 @@ mod tests {
         assert_eq!(m.under, map()["guild.search"].clone().parent_of());
         assert_eq!(m.after, Some(map()["guild.search"].clone()));
         assert_eq!(m.root, INSERT_IDS + m.nodes.len() as u32 - 1);
-        let Some(Press::Ui { panel, element, .. }) =
-            d.clicks.get(&(rows::INSERT.to_string(), "p/note/go".to_string()))
+        let Some(Press::Ui { panel, element, .. }) = d
+            .clicks
+            .get(&(rows::INSERT.to_string(), "p/note/go".to_string()))
         else {
             panic!("{:?}", d.clicks);
         };
@@ -441,7 +463,16 @@ mod tests {
         assert_eq!(again.mounts[0].root, m.root);
         let s = state(vec![insert(vec![button("go"), button("stop")])]);
         let two = draw(&s, &map(), Some(&look), widgets, &mut slots);
-        assert!(two.mounts[0].nodes.iter().all(|n| n.id >= INSERT_IDS + BLOCK));
-        assert!(draw(&s, &map(), None, widgets, &mut slots).mounts.is_empty());
+        assert!(
+            two.mounts[0]
+                .nodes
+                .iter()
+                .all(|n| n.id >= INSERT_IDS + BLOCK)
+        );
+        assert!(
+            draw(&s, &map(), None, widgets, &mut slots)
+                .mounts
+                .is_empty()
+        );
     }
 }

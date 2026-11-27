@@ -762,7 +762,13 @@ impl ClientBackend for DetourBackend {
     }
 
     fn element_selector(&self, name: &str) -> Option<String> {
-        self.shared.elements.lock().unwrap().selectors.get(name).cloned()
+        self.shared
+            .elements
+            .lock()
+            .unwrap()
+            .selectors
+            .get(name)
+            .cloned()
     }
 
     fn set_raw_work(

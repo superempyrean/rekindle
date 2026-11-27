@@ -131,7 +131,10 @@ pub fn resolve(image: &Image<'_>) -> Result<Text> {
         let Some(vtable) = stored_vtable(&instructions) else {
             continue;
         };
-        let Some(size) = image.qword(vtable + 8).and_then(|s| usize::try_from(s).ok()) else {
+        let Some(size) = image
+            .qword(vtable + 8)
+            .and_then(|s| usize::try_from(s).ok())
+        else {
             continue;
         };
         let Some(inner) = image.qword(vtable + 0x18) else {
@@ -164,7 +167,10 @@ pub fn resolve(image: &Image<'_>) -> Result<Text> {
 pub fn inline(text: &str) -> Result<[u8; SHARED_STRING]> {
     let bytes = text.as_bytes();
     if bytes.len() >= SHARED_STRING {
-        bail!("{} bytes is too long for an inline SharedString", bytes.len());
+        bail!(
+            "{} bytes is too long for an inline SharedString",
+            bytes.len()
+        );
     }
     let mut out = [0u8; SHARED_STRING];
     out[0] = bytes.len() as u8;

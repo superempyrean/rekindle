@@ -103,8 +103,8 @@ pub use pick::{Basis, Candidate, Pick};
 pub use select::{Selector, TEXT};
 pub use switches::{NodeCells, Switch, SwitchState, Switches};
 pub use work::{
-    Cell, ColorRole, Handler, LabelRule, Mount, MountNode, PluginPress, PluginText, PressAction, PressRule,
-    PropRecolor, Recolor, RowAction, RowRule, Work, WorkError, Write,
+    Cell, ColorRole, Handler, LabelRule, Mount, MountNode, PluginPress, PluginText, PressAction,
+    PressRule, PropRecolor, Recolor, RowAction, RowRule, Work, WorkError, Write,
 };
 
 /// The first of the node ids rekindle takes for its own nodes.
@@ -999,7 +999,11 @@ impl Engine {
                     let mut props = self.cells.get(&n.id).cloned().unwrap_or_default();
                     if n.on_press.is_some() {
                         // A field reports its edits, anything else its presses.
-                        let on = if n.kind == ElementKind::INPUT { "changeText" } else { "press" };
+                        let on = if n.kind == ElementKind::INPUT {
+                            "changeText"
+                        } else {
+                            "press"
+                        };
                         props.push((ON, Value::Array(vec![Value::Str(on.into())])));
                     }
                     NodeOp::Create {

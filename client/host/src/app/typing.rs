@@ -66,7 +66,10 @@ pub(super) fn drops(buf: &[u8]) -> bool {
     lock(&ANSWERS).push(answer(id));
     let n = DROPPED.fetch_add(1, Ordering::Relaxed);
     if n < 4 || n.is_multiple_of(64) {
-        super::log(&format!("silent-typing: typing request #{id} dropped ({} so far)", n + 1));
+        super::log(&format!(
+            "silent-typing: typing request #{id} dropped ({} so far)",
+            n + 1
+        ));
     }
     true
 }
@@ -187,9 +190,18 @@ mod tests {
         assert!(is_typing("POST", u));
         assert!(is_typing("post", &format!("{u}?x=1")));
         assert!(!is_typing("GET", u));
-        assert!(!is_typing("POST", "https://discord.com/api/v9/channels/1/messages"));
-        assert!(!is_typing("POST", "https://discord.com/api/v9/channels/abc/typing"));
-        assert!(!is_typing("POST", "https://discord.com/api/v9/users/1/typing"));
+        assert!(!is_typing(
+            "POST",
+            "https://discord.com/api/v9/channels/1/messages"
+        ));
+        assert!(!is_typing(
+            "POST",
+            "https://discord.com/api/v9/channels/abc/typing"
+        ));
+        assert!(!is_typing(
+            "POST",
+            "https://discord.com/api/v9/users/1/typing"
+        ));
     }
 
     #[test]

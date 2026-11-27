@@ -127,8 +127,7 @@ fn run() -> Result<()> {
             let text = rekindle_desktop::text::resolve(&image)?;
             let report = symbols.report();
             if json {
-                let out =
-                    serde_json::json!({ "symbols": report, "menu": menu, "div": div, "text": text });
+                let out = serde_json::json!({ "symbols": report, "menu": menu, "div": div, "text": text });
                 println!("{}", serde_json::to_string_pretty(&out)?);
             } else {
                 print(&symbols, false);
@@ -186,10 +185,7 @@ fn print_div(div: &rekindle_desktop::Div, base: u64) {
     );
     println!(
         "children SmallVec at +{:#x}, {:#x}-byte elements, {:#x} inline, length/capacity at +{:#x}",
-        div.children.at,
-        div.children.element,
-        div.children.inline,
-        div.children.capacity_at
+        div.children.at, div.children.element, div.children.inline, div.children.capacity_at
     );
 }
 

@@ -115,7 +115,9 @@ pub struct ExtArgs {
 
 /// `elements` as the rows of a panel show them: what the host draws for a
 /// plugin's insert next to one of the client's elements.
-pub fn widgets_of(elements: &[rekindle_plugin_host::model::Element]) -> Vec<rekindle_ui_hook::Widget> {
+pub fn widgets_of(
+    elements: &[rekindle_plugin_host::model::Element],
+) -> Vec<rekindle_ui_hook::Widget> {
     convert::widgets_of(elements)
 }
 
@@ -183,15 +185,11 @@ impl Driver {
                 ..backend::SurfaceStyles::default()
             })),
             slash: Arc::new(Mutex::new(profile.slash_commands.then(Vec::new))),
-            elements: Arc::new(Mutex::new(
-                if profile.elements.is_empty() {
-                    rekindle_plugin_host::model::NamedElements::default()
-                } else {
-                    rekindle_plugin_host::model::NamedElements::with_selectors(
-                        profile.elements.clone(),
-                    )
-                },
-            )),
+            elements: Arc::new(Mutex::new(if profile.elements.is_empty() {
+                rekindle_plugin_host::model::NamedElements::default()
+            } else {
+                rekindle_plugin_host::model::NamedElements::with_selectors(profile.elements.clone())
+            })),
         };
         let surfaces = profile
             .registry

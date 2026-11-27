@@ -115,7 +115,11 @@ mod tests {
             r#"{{"mounts": [{{"under": {{"kind": "view"}}, "root": {id}, "nodes": [{{"id": {id}, "kind": "view"}}]}}]}}"#,
             id = RESERVED + RAW_IDS
         );
-        assert!(raw_work("p", &far).unwrap_err().contains("past the plugin's ids"));
+        assert!(
+            raw_work("p", &far)
+                .unwrap_err()
+                .contains("past the plugin's ids")
+        );
         assert!(raw_work("p", "{\"rows\": 3}").is_err());
         assert!(raw_work("p", &" ".repeat(MAX_RAW_BYTES + 1)).is_err());
         assert_eq!(raw_work("p", "{}").unwrap(), Work::default());

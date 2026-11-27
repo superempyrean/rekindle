@@ -113,8 +113,9 @@ pub(crate) fn image_path() -> anyhow::Result<std::path::PathBuf> {
     // from the APK and has no extracted file, so copy it out of the APK once.
     // The anchors resolve against it; the loaded library is still found by
     // name through `dl_iterate_phdr`.
-    crate::android::apk::extract_library(DEFAULT_IMAGE, &p)
-        .map_err(|e| anyhow::anyhow!("{IMAGE_ENV} is not set and {} is missing: {e}", p.display()))?;
+    crate::android::apk::extract_library(DEFAULT_IMAGE, &p).map_err(|e| {
+        anyhow::anyhow!("{IMAGE_ENV} is not set and {} is missing: {e}", p.display())
+    })?;
     Ok(p)
 }
 

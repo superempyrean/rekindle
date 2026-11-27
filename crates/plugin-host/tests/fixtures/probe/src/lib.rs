@@ -60,17 +60,12 @@ impl Plugin for Probe {
             }
             "raw-bad" => info!(
                 "raw-bad: {:?}",
-                rekindle_sdk::wire_raw::set_work(r#"{"back": {"plugin": {"plugin": "p", "surface": "s", "element": "e"}}}"#)
+                rekindle_sdk::wire_raw::set_work(
+                    r#"{"back": {"plugin": {"plugin": "p", "surface": "s", "element": "e"}}}"#
+                )
             ),
             "raw-clear" => rekindle_sdk::wire_raw::clear(),
-            "elements" => {
-                use rekindle_sdk::elements::{self, Place, PressMode};
-                info!("names: {:?}", elements::names());
-                info!("press: {:?}", elements::on_press("composer.gift", &PressMode::Consume));
-                info!("retarget self: {:?}", elements::on_press("composer.gift", &PressMode::Retarget("composer.gift".into())));
-                info!("insert: {:?}", elements::insert("hint", "composer.gift", Place::After, &Vec::new().button("go", "Go")));
-                info!("missing: {:?}", elements::hide("nope"));
-            }
+            "elements" => log_elements(),
             "invite" => info!("invite: {:?}", actions::create_invite(GENERAL, 0, 0)),
             "timeout" => info!(
                 "timeout: {:?}",
@@ -193,6 +188,32 @@ impl Plugin for Probe {
             _ => events::ResponseVerdict::Pass,
         }
     }
+}
+
+fn log_elements() {
+    use rekindle_sdk::elements::{self, Place, PressMode};
+    info!("names: {:?}", elements::names());
+    info!(
+        "press: {:?}",
+        elements::on_press("composer.gift", &PressMode::Consume)
+    );
+    info!(
+        "retarget self: {:?}",
+        elements::on_press(
+            "composer.gift",
+            &PressMode::Retarget("composer.gift".into())
+        )
+    );
+    info!(
+        "insert: {:?}",
+        elements::insert(
+            "hint",
+            "composer.gift",
+            Place::After,
+            &Vec::new().button("go", "Go")
+        )
+    );
+    info!("missing: {:?}", elements::hide("nope"));
 }
 
 rekindle_sdk::plugin!(Probe);

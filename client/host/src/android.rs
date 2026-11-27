@@ -126,7 +126,9 @@ fn resolve_config_dir() -> PathBuf {
 /// off-device or when the package can't be read.
 pub(crate) fn app_config_dir() -> Option<PathBuf> {
     let package = package()?;
-    Some(PathBuf::from(format!("{APP_FILES}/{package}/files/rekindle")))
+    Some(PathBuf::from(format!(
+        "{APP_FILES}/{package}/files/rekindle"
+    )))
 }
 
 /// The plugin home: the app's own `files/rekindle`, the dir the config

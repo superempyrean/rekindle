@@ -252,7 +252,11 @@ impl Spec {
             );
         }
         if let Some(b) = &div_boxed {
-            fits("the Div's Interactivity box", div_size, &[(b.offset + b.ptr, 8)])?;
+            fits(
+                "the Div's Interactivity box",
+                div_size,
+                &[(b.offset + b.ptr, 8)],
+            )?;
             if b.style_default.len() != style_size {
                 bail!(
                     "the style default is {} bytes, not {style_size}",
@@ -1094,7 +1098,9 @@ pub(crate) mod tests {
         s.templates
             .insert("gpui_style_default".into(), vec![0u8; 640]);
         let r = s.resolve().unwrap();
-        let b = r.div_boxed.expect("the layout says the Interactivity is boxed");
+        let b = r
+            .div_boxed
+            .expect("the layout says the Interactivity is boxed");
         assert_eq!((b.offset, b.ptr, b.size, b.heap_tag), (0, 8, 1248, 0));
         assert_eq!((r.div_size, r.children, r.base_style), (120, 64, 1040));
         // The default must be the whole allocation; a short one is refused.
@@ -1105,7 +1111,8 @@ pub(crate) mod tests {
         s.offsets.insert("gpui_div_interactivity_ptr".into(), 8);
         s.sizes.insert("gpui_interactivity".into(), 1248);
         s.tags.insert("gpui_div_interactivity_heap".into(), 0);
-        s.templates.insert("gpui_interactivity_default".into(), vec![0u8; 1]);
+        s.templates
+            .insert("gpui_interactivity_default".into(), vec![0u8; 1]);
         s.templates
             .insert("gpui_style_default".into(), vec![0u8; 640]);
         assert!(s.resolve().is_err());

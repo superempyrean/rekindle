@@ -175,7 +175,10 @@ pub fn pick(tree: &Tree, node: NodeId) -> Option<Pick> {
 /// scores less than `best`, since a guest that draws one more copy ahead
 /// of it moves the count.
 fn nth(view: &View<'_>, node: NodeId, best: &Candidate) -> Option<Candidate> {
-    let n = view.select_in_order(&best.selector).iter().position(|m| *m == node)?;
+    let n = view
+        .select_in_order(&best.selector)
+        .iter()
+        .position(|m| *m == node)?;
     Some(Candidate {
         selector: best.selector.clone().nth(n),
         basis: Basis::Nth,

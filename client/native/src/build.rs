@@ -150,10 +150,10 @@ pub(crate) unsafe fn new_div(r: &Resolved) -> Result<Bytes> {
         // `Interactivity::new`, writing a Div's first bytes into `div`,
         // which holds a whole Div.
         unsafe {
-            let f =
-                std::mem::transmute::<usize, unsafe fn(*mut u8, *const Location<'static>) -> *mut u8>(
-                    r.fns.interactivity_new,
-                );
+            let f = std::mem::transmute::<
+                usize,
+                unsafe fn(*mut u8, *const Location<'static>) -> *mut u8,
+            >(r.fns.interactivity_new);
             f(div.as_mut_ptr(), Location::caller());
         }
     }

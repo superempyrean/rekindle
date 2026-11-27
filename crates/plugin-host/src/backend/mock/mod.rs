@@ -238,7 +238,12 @@ impl MockBackend {
         self.elements = crate::model::NamedElements::with_selectors(
             names
                 .iter()
-                .map(|n| ((*n).to_string(), serde_json::json!({ "label": n }).to_string()))
+                .map(|n| {
+                    (
+                        (*n).to_string(),
+                        serde_json::json!({ "label": n }).to_string(),
+                    )
+                })
                 .collect(),
         );
     }
