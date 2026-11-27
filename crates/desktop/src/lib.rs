@@ -19,6 +19,7 @@ pub mod image;
 pub mod menu;
 pub mod native;
 pub mod net;
+pub mod palette;
 pub mod settings;
 pub mod symbols;
 pub mod text;
