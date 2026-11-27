@@ -208,6 +208,6 @@ mod tests {
         assert_eq!(look.icon("developer-mode", false), Some("res://warning"));
         assert_eq!(look.icon("open:x", false), Some("res://card"));
         assert_eq!(look.icon("b", false), None);
-        assert_eq!(look.icon("b", true), Some("res://any"));
+        assert_eq!(look.icon("b", true), Some("res://plugin"));
     }
 }
