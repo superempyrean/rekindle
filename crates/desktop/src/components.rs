@@ -161,7 +161,7 @@ fn shared_string_field(insns: &[Instruction]) -> Option<usize> {
 
 /// Where a builder stores an `Rc` and its vtable:
 /// `mov [r + at], rax; lea rax, [rip + vtable]; mov [r + at + 8], rax`.
-fn rc_field(insns: &[Instruction]) -> Option<usize> {
+pub(crate) fn rc_field(insns: &[Instruction]) -> Option<usize> {
     insns.windows(3).find_map(|w| {
         let store = |i: &Instruction| {
             (i.mnemonic() == Mnemonic::Mov

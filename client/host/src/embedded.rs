@@ -62,6 +62,10 @@ pub struct Options {
     /// `get-selection`, and `get-channel` and `get-guild` of the selection.
     /// Without it, the selection is empty.
     pub selection: Option<fn() -> LiveSelection>,
+    /// The platform draws plugins' context-menu rows
+    /// (`rekindle_ui_hook::menu_rows`) and reports their clicks as
+    /// `Click::Menu`. Without it, the menu slots are unavailable.
+    pub menus: bool,
 }
 
 /// What the runtime last made of its plugins.
@@ -320,7 +324,7 @@ fn up(o: &Options) -> anyhow::Result<Driver> {
         framework: None,
         surfaces: Vec::new(),
         slash_commands: true,
-        wire_menus: false,
+        wire_menus: o.menus,
         wire_picker_tabs: false,
         elements: BTreeMap::new(),
         wire_values: false,
@@ -445,6 +449,7 @@ mod tests {
             log: |_| {},
             report: Some(report.clone()),
             selection: None,
+            menus: false,
         }));
         let deadline = Instant::now() + Duration::from_secs(30);
         let shot = loop {

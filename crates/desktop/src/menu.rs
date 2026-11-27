@@ -45,6 +45,14 @@ pub struct Menu {
     pub action_tag: u64,
     /// The tag observed on separator entries in the builder's own list.
     pub separator_tag: u64,
+    /// An action's click handler, `Rc<dyn Fn(&ClickEvent, &mut Window,
+    /// &mut App)>`, and the word before it the core constructor zeroes.
+    pub on_click: usize,
+    pub on_click_tag: usize,
+    /// The message's id and its channel's in the builder's input, the
+    /// second argument.
+    pub message_id: usize,
+    pub channel_id: usize,
 }
 
 /// A `SharedString`'s fields, relative to the item.
@@ -93,6 +101,8 @@ impl Menu {
             }
         }
         let action_tag = action_tag(image, core)?;
+        let (on_click_tag, on_click) = handler(image, core)?;
+        let (message_id, channel_id) = ids(image, build_fn)?;
         let with_color = with_color(image, copy_lea)?;
         Ok(Self {
             build_fn,
@@ -107,6 +117,10 @@ impl Menu {
             label,
             action_tag,
             separator_tag: 4,
+            on_click,
+            on_click_tag,
+            message_id,
+            channel_id,
         })
     }
 }
@@ -326,4 +340,81 @@ fn action_tag(image: &Image<'_>, core: u64) -> Result<u64> {
         }
     }
     bail!("MenuItem action tag not found")
+}
+
+/// The core constructor's handler fields: it clears the word before the
+/// handler (`and qword [r + tag], 0`) and stores the `Rc` and its vtable.
+fn handler(image: &Image<'_>, core: u64) -> Result<(usize, usize)> {
+    let (start, end) = image.function_named("MenuItem core ctor", core)?;
+    let code = image
+        .read(start, usize::try_from(end - start)?)
+        .context("core ctor is unmapped")?;
+    let insns: Vec<Instruction> = Decoder::with_ip(64, code, start, DecoderOptions::NONE)
+        .into_iter()
+        .collect();
+    let rc = crate::components::rc_field(&insns).context("no handler store in the core ctor")?;
+    let tag = insns
+        .iter()
+        .find(|i| {
+            i.mnemonic() == Mnemonic::And
+                && i.op0_kind() == OpKind::Memory
+                && i.memory_size().size() == 8
+                && matches!(
+                    i.op1_kind(),
+                    OpKind::Immediate8to64 | OpKind::Immediate32to64
+                )
+                && i.immediate(1) == 0
+        })
+        .map(|i| i.memory_displacement64() as usize)
+        .context("no cleared word before the handler")?;
+    if tag + 8 != rc {
+        bail!("the cleared word +{tag:#x} isn't before the handler +{rc:#x}");
+    }
+    Ok((tag, rc))
+}
+
+/// The message's id and its channel's in the builder's input: the first
+/// two loads from the input, `mov r, [input + at]`, once the builder has
+/// kept it in `rax`. The copy-id row passes the first to its action.
+fn ids(image: &Image<'_>, build_fn: u64) -> Result<(usize, usize)> {
+    let code = image
+        .read(build_fn, 0x100)
+        .context("MessageContextMenu's head is unmapped")?;
+    let loads: Vec<usize> = Decoder::with_ip(64, code, build_fn, DecoderOptions::NONE)
+        .into_iter()
+        .filter(|i| {
+            i.mnemonic() == Mnemonic::Mov
+                && i.op0_kind() == OpKind::Register
+                && i.op0_register() != Register::RAX
+                && i.op1_kind() == OpKind::Memory
+                && i.memory_base() == Register::RAX
+                && (0x20..0x200).contains(&i.memory_displacement64())
+        })
+        .map(|i| i.memory_displacement64() as usize)
+        .collect();
+    match loads[..] {
+        [id, channel, ..] if id.abs_diff(channel) == 8 => Ok((id, channel)),
+        _ => bail!("MessageContextMenu's input loads {loads:x?}, not two ids side by side"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Against the client on disk, when it is there.
+    #[test]
+    fn resolves_a_build_on_disk() {
+        let Ok(path) = std::env::var("REKINDLE_DESKTOP_EXE") else {
+            eprintln!("REKINDLE_DESKTOP_EXE not set; skipped");
+            return;
+        };
+        let bytes = std::fs::read(path).unwrap();
+        let image = Image::parse(&bytes).unwrap();
+        let m = Menu::resolve(&image).unwrap();
+        assert_eq!(m.build_fn - image.base(), 0x2816d4c);
+        assert_eq!((m.item_size, m.props, m.action_tag), (0x1f8, 0x20, 2));
+        assert_eq!((m.on_click_tag, m.on_click), (0x8, 0x10));
+        assert_eq!((m.message_id, m.channel_id), (0x88, 0x80));
+    }
 }

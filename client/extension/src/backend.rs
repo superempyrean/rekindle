@@ -257,6 +257,16 @@ impl DetourBackend {
         b.push((plugin.to_string(), button));
     }
 
+    /// The menu a slot's rows go in.
+    fn menu_kind(&self, slot: &str) -> MenuKind {
+        match slot {
+            SLOT_MESSAGE_MENU => MenuKind::Message,
+            SLOT_USER_MENU => MenuKind::User,
+            SLOT_GUILD_MENU if self.wire_menus => MenuKind::Guild,
+            _ => MenuKind::Channel,
+        }
+    }
+
     fn add_menu_row(
         &mut self,
         plugin: &str,
@@ -265,14 +275,9 @@ impl DetourBackend {
         label: &str,
         danger: bool,
     ) -> Result<(), SlotError> {
+        let kind = self.menu_kind(slot);
         let Some(menus) = &mut self.menus else {
             return Err(SlotError::Unavailable);
-        };
-        let kind = match slot {
-            SLOT_MESSAGE_MENU => MenuKind::Message,
-            SLOT_USER_MENU => MenuKind::User,
-            SLOT_GUILD_MENU if self.wire_menus => MenuKind::Guild,
-            _ => MenuKind::Channel,
         };
         let row = MenuItem {
             key: key(plugin, id),
@@ -280,7 +285,8 @@ impl DetourBackend {
             label: label.to_string(),
             danger,
         };
-        menus.retain(|(_, r)| r.key != row.key);
+        // One item can be in several menus, a row in each.
+        menus.retain(|(_, r)| (&r.key, r.kind) != (&row.key, row.kind));
         menus.push((plugin.to_string(), row));
         self.publish_menus();
         Ok(())
@@ -646,8 +652,9 @@ impl ClientBackend for DetourBackend {
             .lock()
             .unwrap()
             .retain(|(_, b)| b.key != key);
+        let kind = self.menu_kind(slot);
         if let Some(menus) = &mut self.menus {
-            menus.retain(|(_, r)| r.key != key);
+            menus.retain(|(_, r)| (&r.key, r.kind) != (&key, kind));
             self.publish_menus();
         }
     }
@@ -937,6 +944,54 @@ mod tests {
             channel_name: Some("general".into()),
             guild_name: Some("test".into()),
         }
+    }
+
+    fn backend() -> DetourBackend {
+        let shared = Shared {
+            theme: Arc::new(Mutex::new(ThemeState::new(crate::theme::ThemeProfile {
+                addr: None,
+                return_size: 0,
+                offsets: BTreeMap::new(),
+            }))),
+            commands: Arc::default(),
+            buttons: Arc::default(),
+            picker_tabs: Arc::default(),
+            overlay: Arc::default(),
+            surfaces: Arc::default(),
+            slash: Arc::default(),
+            elements: Arc::default(),
+        };
+        DetourBackend::new(shared, Surfaces::default(), true)
+    }
+
+    /// An item a plugin adds to several menus is a row in each, and taking
+    /// it out of one leaves the others.
+    #[test]
+    fn an_item_in_two_menus_is_a_row_in_each() {
+        let mut b = backend();
+        let item = || SlotItem::MenuItem {
+            id: "view-raw".into(),
+            label: "View raw".into(),
+            icon: None,
+            danger: false,
+            group: None,
+            checked: None,
+            when: Vec::new(),
+        };
+        for slot in [SLOT_MESSAGE_MENU, SLOT_USER_MENU] {
+            b.add_slot_item("p", slot, item()).unwrap();
+        }
+        let kinds = |b: &DetourBackend| -> Vec<MenuKind> {
+            b.menus
+                .as_ref()
+                .unwrap()
+                .iter()
+                .map(|(_, r)| r.kind)
+                .collect()
+        };
+        assert_eq!(kinds(&b), [MenuKind::Message, MenuKind::User]);
+        b.remove_slot_item("p", SLOT_USER_MENU, "view-raw");
+        assert_eq!(kinds(&b), [MenuKind::Message]);
     }
 
     #[test]
