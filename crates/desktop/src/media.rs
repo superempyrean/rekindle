@@ -1,10 +1,12 @@
 //! The client's image fetch, found by its `tracing` span.
 //!
 //! Images the client draws from a URL, such as a profile's badge icons, are
-//! fetched by `libdiscord_media::fetch(this, url: &str, max_bytes) ->
+//! fetched by `libdiscord_media::fetch(this, url: &str, max_bytes, a, b) ->
 //! Pin<Box<dyn Future>>`, which builds a request of its own outside the
 //! REST transport. The URL is in `rdx` and `r8`, and the future borrows it
-//! until it is done.
+//! until it is done. `a` and `b` are on the stack; the client's one call
+//! passes `8` and `0` on build 2208. The box comes back in `rax` and its
+//! vtable in `rdx`.
 //!
 //! The function opens a `tracing` span named `media_fetch` with the target
 //! `libdiscord_media::fetch`. The two names sit next to each other in the
