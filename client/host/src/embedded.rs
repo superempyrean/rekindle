@@ -35,9 +35,13 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 pub use rekindle_extension::LiveSelection;
+/// A platform that reaches the client's cache store hands it to the
+/// plugins' `client-state` queries with [`read_cache`].
+pub use rekindle_extension::read_cache;
 use rekindle_extension::theme::ThemeProfile;
 pub use rekindle_extension::tweaks;
 use rekindle_extension::{Driver, ExtArgs, RecoveredProfile};
+pub use rekindle_plugin_host::backend::cache::{CacheStore, StoreReader};
 use rekindle_plugin_host::manager;
 use rekindle_ui_hook::Widget;
 use serde::Serialize;
