@@ -441,15 +441,7 @@ impl<'l> Builder<'l> {
         if !self.icons {
             return None;
         }
-        let icons = &self.look.icons;
-        icons
-            .get(key)
-            .or_else(|| {
-                let (verb, _) = key.split_once(':')?;
-                icons.get(&format!("{verb}:*"))
-            })
-            .or_else(|| self.fallback_icon.then(|| icons.get("*")).flatten())
-            .cloned()
+        self.look.icon(key, self.fallback_icon).map(str::to_string)
     }
 
     /// The groups of `items`, each under its header in a section of its

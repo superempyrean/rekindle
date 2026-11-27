@@ -152,6 +152,30 @@ impl Look {
             _ => None,
         }
     }
+
+    /// The string `cells` give `prop`, such as an image's `uri`.
+    #[must_use]
+    pub fn text<'a>(cells: &'a [Cell], prop: &str) -> Option<&'a str> {
+        match value(cells, prop)? {
+            Value::Str(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// The `uri` of the icon of a row with this key: the key's own, then
+    /// `<verb>:*` for a key `<verb>:<id>`, then `*` if `fallback` is set.
+    #[must_use]
+    pub fn icon(&self, key: &str, fallback: bool) -> Option<&str> {
+        let icons = &self.icons;
+        icons
+            .get(key)
+            .or_else(|| {
+                let (verb, _) = key.split_once(':')?;
+                icons.get(&format!("{verb}:*"))
+            })
+            .or_else(|| fallback.then(|| icons.get("*")).flatten())
+            .map(String::as_str)
+    }
 }
 
 #[cfg(test)]
@@ -172,5 +196,18 @@ mod tests {
         assert_eq!(Look::colour(&cells, "background"), Some(0x1497_979f));
         assert_eq!(Look::edges(&cells, "padding"), Some([56.0, 0.0, 0.0, 0.0]));
         assert_eq!(Look::number(&cells, "minHeight"), None);
+        let uri: Vec<Cell> =
+            serde_json::from_str(r#"[{"prop": "uri", "value": {"str": "res://back"}}]"#).unwrap();
+        assert_eq!(Look::text(&uri, "uri"), Some("res://back"));
+        assert_eq!(Look::text(&cells, "fontSize"), None);
+    }
+
+    #[test]
+    fn a_rows_icon_is_its_keys_then_its_verbs_then_the_fallback() {
+        let look = crate::rows::test_look();
+        assert_eq!(look.icon("developer-mode", false), Some("res://warning"));
+        assert_eq!(look.icon("open:x", false), Some("res://card"));
+        assert_eq!(look.icon("b", false), None);
+        assert_eq!(look.icon("b", true), Some("res://any"));
     }
 }
