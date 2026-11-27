@@ -28,6 +28,9 @@
 //! - A button's variant and size are bytes the client's callers set right
 //!   after `Button::new`. Over all of them, the field set most often is the
 //!   variant and the next the size.
+//!
+//! `mana`'s heading and divider are found apart from these, by their type
+//! names ([`kit`]).
 
 use std::collections::BTreeMap;
 
@@ -429,9 +432,128 @@ pub fn resolve(image: &Image<'_>, div_new: u64) -> Result<Components> {
     })
 }
 
+/// A `mana` component that is built with a constructor and put in a `Div`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Part {
+    /// The constructor, `new(out, ...) -> out`.
+    pub new: u64,
+    /// `Div::child::<Part>(out, parent: *mut Div, part: *mut Part) -> out`.
+    pub child: u64,
+    pub size: usize,
+}
+
+/// `mana`'s heading and divider.
+///
+/// - `Heading::new(out, size: u16, text: *const SharedString) -> out`, a
+///   leaf function.
+/// - `Divider::new(out) -> out`, a horizontal divider in the theme's colour.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Kit {
+    pub heading: Part,
+    pub divider: Part,
+}
+
+const HEADING: &[u8] = b"mana_gpui::components::heading::Heading";
+const DIVIDER: &[u8] = b"mana_gpui::components::divider::Divider";
+
+/// Find the heading and the divider in `image`, whose `Div` is `div_size`
+/// bytes.
+///
+/// Each component's `into_any_element` is the small function that loads
+/// its type name and copies the component (`mov r8d, size; call memcpy`).
+/// `Div::child::<T>` is the small function whose first call is that one
+/// and which returns a `Div`. The constructor is the call the client makes
+/// most often right before `Div::child::<T>`.
+pub fn kit(image: &Image<'_>, div_size: usize) -> Result<Kit> {
+    Ok(Kit {
+        heading: part(image, HEADING, div_size).context("Heading")?,
+        divider: part(image, DIVIDER, div_size).context("Divider")?,
+    })
+}
+
+fn part(image: &Image<'_>, type_name: &[u8], div_size: usize) -> Result<Part> {
+    // `into_any_element` and the component's size.
+    let mut converts = Vec::new();
+    for (lea, _) in image.leas_into(&image.find(type_name)) {
+        let Some((start, end)) = image.function(lea) else {
+            continue;
+        };
+        if end - start > 0x100 {
+            continue;
+        }
+        if let Some(size) = return_size(&code_at(image, start, end - start)?) {
+            converts.push((start, size));
+        }
+    }
+    converts.sort_unstable();
+    converts.dedup();
+    let (into_any, size) = one_of("the component's into_any_element", &converts)?;
+    // `Div::child::<T>`: callers of it that return a `Div`.
+    let mut children: BTreeMap<u64, usize> = BTreeMap::new();
+    for (site, _) in image.calls_into(&[into_any]) {
+        let Some((start, end)) = image.function(site) else {
+            continue;
+        };
+        if end - start > 0x90 {
+            continue;
+        }
+        let body = code_at(image, start, end - start)?;
+        if calls(&body).first().map(|c| c.1) == Some(into_any)
+            && return_size(&body) == Some(div_size)
+        {
+            children.insert(start, 0);
+        }
+    }
+    let targets: Vec<u64> = children.keys().copied().collect();
+    // The call before each call of a `Div::child::<T>`.
+    let mut before: BTreeMap<u64, usize> = BTreeMap::new();
+    for (site, child) in image.calls_into(&targets) {
+        *children.entry(child).or_default() += 1;
+        let Some((start, _)) = image.function(site) else {
+            continue;
+        };
+        let body = code_at(image, start, site - start)?;
+        if let Some(&(_, new)) = calls(&body).last() {
+            *before.entry(new).or_default() += 1;
+        }
+    }
+    let child = children
+        .iter()
+        .max_by_key(|(_, n)| **n)
+        .map(|(c, _)| *c)
+        .context("no Div::child for the component")?;
+    let (new, uses) = before
+        .iter()
+        .max_by_key(|(_, n)| **n)
+        .map(|(c, n)| (*c, *n))
+        .context("no constructor before Div::child")?;
+    if uses < 3 {
+        bail!("the constructor {new:#x} comes before Div::child only {uses} times");
+    }
+    Ok(Part { new, child, size })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The heading and the divider of the client on disk, when it is there.
+    #[test]
+    fn finds_the_kit_on_disk() {
+        let Ok(path) = std::env::var("REKINDLE_DESKTOP_EXE") else {
+            eprintln!("REKINDLE_DESKTOP_EXE not set; skipped");
+            return;
+        };
+        let bytes = std::fs::read(path).unwrap();
+        let image = Image::parse(&bytes).unwrap();
+        let div = crate::div::resolve(&image).unwrap();
+        let k = kit(&image, div.size).unwrap();
+        let rva = |va: u64| va - image.base();
+        assert_eq!((rva(k.heading.new), k.heading.size), (0x8e9a2fe, 0xc0));
+        assert_eq!((rva(k.divider.new), k.divider.size), (0x8c923c0, 0x298));
+        assert!([0x8ec91f9, 0x8f054d8].contains(&rva(k.heading.child)));
+        assert!([0x8ec916b, 0x8f0544a].contains(&rva(k.divider.child)));
+    }
 
     /// Against the client on disk, when it is there.
     #[test]
