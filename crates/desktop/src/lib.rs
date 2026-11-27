@@ -16,6 +16,7 @@ pub mod debug;
 pub mod div;
 pub mod field;
 pub mod image;
+pub mod media;
 pub mod menu;
 pub mod native;
 pub mod net;
